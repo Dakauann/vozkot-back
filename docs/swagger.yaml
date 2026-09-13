@@ -1,0 +1,1149 @@
+basePath: /
+definitions:
+  auth.AuthResponse:
+    properties:
+      accessToken:
+        example: eyJhbGciOi...
+        type: string
+      refreshToken:
+        example: token_de_atualizacao
+        type: string
+      tokenType:
+        example: Bearer
+        type: string
+      user:
+        $ref: '#/definitions/auth.UserResponse'
+    type: object
+  auth.ErrorResponse:
+    properties:
+      error:
+        example: credenciais inválidas
+        type: string
+    type: object
+  auth.LoginRequest:
+    properties:
+      email:
+        example: agente@empresa.com.br
+        type: string
+      password:
+        example: SenhaForte1
+        type: string
+    type: object
+  auth.MessageResponse:
+    properties:
+      message:
+        example: Sessão encerrada com sucesso
+        type: string
+    type: object
+  auth.RefreshTokenRequest:
+    properties:
+      refreshToken:
+        example: token_de_atualizacao
+        type: string
+    type: object
+  auth.RegisterRequest:
+    properties:
+      email:
+        example: maria@empresa.com.br
+        type: string
+      name:
+        example: Maria Silva
+        type: string
+      password:
+        example: SenhaForte1
+        type: string
+    type: object
+  auth.UserResponse:
+    properties:
+      email:
+        example: maria@empresa.com.br
+        type: string
+      id:
+        example: usr_a1b2c3
+        type: string
+      name:
+        example: Maria Silva
+        type: string
+      role:
+        example: user
+        type: string
+    type: object
+  checkout.Buyer:
+    properties:
+      document:
+        description: Document is the CPF or CNPJ. PIX in Brazil cannot be issued without
+          one.
+        example: "12345678909"
+        type: string
+      email:
+        description: Email receives the ingresso and identifies the payer at Mercado
+          Pago.
+        example: maria@exemplo.com.br
+        type: string
+      name:
+        example: Maria Souza
+        type: string
+    type: object
+  checkout.CheckoutRequest:
+    properties:
+      buyer:
+        $ref: '#/definitions/checkout.Buyer'
+      method:
+        description: |-
+          Method is optional and defaults to PIX, the only instrument this
+          integration can issue from a server.
+        enum:
+        - pix
+        example: pix
+        type: string
+      quantity:
+        example: 2
+        type: integer
+      ticketId:
+        example: tkt_a1b2c3d4
+        type: string
+    type: object
+  checkout.ErrorResponse:
+    properties:
+      error:
+        example: not enough tickets available
+        type: string
+    type: object
+  checkout.OrderEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/checkout.OrderResponse'
+    type: object
+  checkout.OrderListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/checkout.OrderResponse'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      offset:
+        example: 0
+        type: integer
+      total:
+        example: 12
+        type: integer
+    type: object
+  checkout.OrderResponse:
+    properties:
+      buyerEmail:
+        example: maria@exemplo.com.br
+        type: string
+      buyerName:
+        example: Maria Souza
+        type: string
+      createdAt:
+        type: string
+      currency:
+        example: BRL
+        type: string
+      holdExpiresAt:
+        description: |-
+          HoldExpiresAt is when the reserved tickets go back on sale. It is the
+          clock a checkout screen counts down.
+        type: string
+      id:
+        example: ord_9f2c1d8a
+        type: string
+      paidAt:
+        type: string
+      payment:
+        $ref: '#/definitions/checkout.PaymentResponse'
+      quantity:
+        example: 2
+        type: integer
+      status:
+        enum:
+        - pending_payment
+        - paid
+        - expired
+        - cancelled
+        - failed
+        - refunded
+        - refund_required
+        example: pending_payment
+        type: string
+      ticketId:
+        example: tkt_a1b2c3d4
+        type: string
+      totalCents:
+        example: 48000
+        type: integer
+      unitPriceCents:
+        example: 24000
+        type: integer
+      updatedAt:
+        type: string
+    type: object
+  checkout.PaymentResponse:
+    properties:
+      id:
+        example: "1234567890"
+        type: string
+      method:
+        example: pix
+        type: string
+      pixCopyPaste:
+        description: PixCopyPaste is the EMV string a bank app reads.
+        type: string
+      pixQrCodeBase64:
+        description: PixQRCodeBase64 is the same payload as a PNG, ready for an <img>
+          tag.
+        type: string
+      provider:
+        example: mercadopago
+        type: string
+      status:
+        enum:
+        - pending
+        - paid
+        - rejected
+        - cancelled
+        - refunded
+        - charged_back
+        - in_analysis
+        example: pending
+        type: string
+    type: object
+  ticket.ChangeStatusRequest:
+    properties:
+      status:
+        enum:
+        - draft
+        - on_sale
+        - sold_out
+        - cancelled
+        example: on_sale
+        type: string
+    type: object
+  ticket.CreateRequest:
+    properties:
+      city:
+        example: Fortaleza, CE
+        type: string
+      description:
+        example: Acesso à área premium com bar exclusivo.
+        type: string
+      eventName:
+        example: Festival Aurora
+        type: string
+      priceCents:
+        example: 24000
+        type: integer
+      quantity:
+        example: 500
+        type: integer
+      startsAt:
+        example: "2026-11-15T19:00:00-03:00"
+        type: string
+      status:
+        enum:
+        - draft
+        - on_sale
+        - sold_out
+        - cancelled
+        example: draft
+        type: string
+      title:
+        example: Pista Premium
+        type: string
+      venue:
+        example: Arena Castelão
+        type: string
+    type: object
+  ticket.ErrorResponse:
+    properties:
+      error:
+        example: ticket not found
+        type: string
+    type: object
+  ticket.MediaEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/ticket.MediaResponse'
+    type: object
+  ticket.MediaResponse:
+    properties:
+      contentType:
+        example: image/jpeg
+        type: string
+      createdAt:
+        type: string
+      id:
+        example: med_9f2c1d8a
+        type: string
+      kind:
+        enum:
+        - image
+        - video
+        example: image
+        type: string
+      position:
+        example: 0
+        type: integer
+      sizeBytes:
+        example: 284133
+        type: integer
+      url:
+        example: https://cdn.exemplo.com/tickets/tkt_a1b2/med_9f2c1d8a.jpg
+        type: string
+    type: object
+  ticket.TicketEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/ticket.TicketResponse'
+    type: object
+  ticket.TicketListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/ticket.TicketResponse'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      offset:
+        example: 0
+        type: integer
+      total:
+        example: 42
+        type: integer
+    type: object
+  ticket.TicketResponse:
+    properties:
+      available:
+        example: 372
+        type: integer
+      city:
+        example: Fortaleza, CE
+        type: string
+      createdAt:
+        type: string
+      currency:
+        example: BRL
+        type: string
+      description:
+        type: string
+      eventName:
+        example: Festival Aurora
+        type: string
+      id:
+        example: tkt_a1b2c3d4
+        type: string
+      media:
+        items:
+          $ref: '#/definitions/ticket.MediaResponse'
+        type: array
+      priceCents:
+        example: 24000
+        type: integer
+      quantity:
+        example: 500
+        type: integer
+      sold:
+        example: 128
+        type: integer
+      startsAt:
+        type: string
+      status:
+        enum:
+        - draft
+        - on_sale
+        - sold_out
+        - cancelled
+        example: on_sale
+        type: string
+      title:
+        example: Pista Premium
+        type: string
+      updatedAt:
+        type: string
+      venue:
+        example: Arena Castelão
+        type: string
+    type: object
+  ticket.UpdateRequest:
+    properties:
+      city:
+        example: Fortaleza, CE
+        type: string
+      description:
+        example: Acesso à área premium com bar exclusivo.
+        type: string
+      eventName:
+        example: Festival Aurora
+        type: string
+      priceCents:
+        example: 24000
+        type: integer
+      quantity:
+        example: 500
+        type: integer
+      startsAt:
+        example: "2026-11-15T19:00:00-03:00"
+        type: string
+      status:
+        enum:
+        - draft
+        - on_sale
+        - sold_out
+        - cancelled
+        example: on_sale
+        type: string
+      title:
+        example: Pista Premium
+        type: string
+      venue:
+        example: Arena Castelão
+        type: string
+    type: object
+info:
+  contact: {}
+  description: API base para autenticação e gestão de tickets, organizada com Clean
+    Architecture.
+  title: Vozkot Tickets API
+  version: "1.0"
+paths:
+  /api/v1/checkout:
+    post:
+      consumes:
+      - application/json
+      description: 'Reserva os ingressos e abre um pedido aguardando pagamento. A
+        reserva é imediata; a cobrança PIX é criada por um job e aparece em `payment`
+        poucos instantes depois, então o cliente deve consultar o pedido até `payment.pixCopyPaste`
+        ser preenchido. O cabeçalho Idempotency-Key é obrigatório: repetir a mesma
+        requisição com a mesma chave devolve o mesmo pedido, sem reservar de novo.'
+      parameters:
+      - description: Chave de idempotência do cliente (UUID)
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      - description: Dados da compra
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/checkout.CheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/checkout.OrderEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "409":
+          description: Chave reutilizada, requisição em andamento ou ingressos esgotados
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Comprar ingressos
+      tags:
+      - Compras
+  /api/v1/orders:
+    get:
+      description: Lista os pedidos do comprador autenticado, do mais recente para
+        o mais antigo. Aceita filtro por status e por ingresso.
+      parameters:
+      - description: Status do pedido
+        enum:
+        - pending_payment
+        - paid
+        - expired
+        - cancelled
+        - failed
+        - refunded
+        - refund_required
+        in: query
+        name: status
+        type: string
+      - description: Filtrar por ingresso
+        in: query
+        name: ticketId
+        type: string
+      - description: Itens por página (padrão 20, máximo 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Deslocamento da paginação
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/checkout.OrderListEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Listar pedidos
+      tags:
+      - Compras
+  /api/v1/orders/{id}:
+    get:
+      description: Retorna um pedido com o estado atual do pagamento. É este endpoint
+        que o cliente consulta enquanto espera o código PIX aparecer.
+      parameters:
+      - description: ID do pedido
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/checkout.OrderEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Consultar um pedido
+      tags:
+      - Compras
+  /api/v1/orders/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: Desiste de um pedido aguardando pagamento e devolve os ingressos
+        ao estoque. Cancelar um pedido já cancelado devolve o mesmo pedido, sem erro.
+      parameters:
+      - description: ID do pedido
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/checkout.OrderEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancelar um pedido
+      tags:
+      - Compras
+  /api/v1/orders/{id}/refund:
+    post:
+      description: Estorna um pedido pago no provedor de pagamento e devolve os ingressos
+        ao estoque. Restrito a administradores.
+      parameters:
+      - description: ID do pedido
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/checkout.OrderEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Estornar um pedido
+      tags:
+      - Compras
+  /api/v1/tickets:
+    get:
+      description: Lista os ingressos do evento em ordem de data de início. Aceita
+        filtros de status, busca textual por evento, título, local ou cidade, ordenação
+        e paginação.
+      parameters:
+      - description: Status do ingresso
+        enum:
+        - draft
+        - on_sale
+        - sold_out
+        - cancelled
+        in: query
+        name: status
+        type: string
+      - description: Busca por evento, título, local ou cidade
+        in: query
+        name: q
+        type: string
+      - description: Ordenação
+        enum:
+        - starts_at
+        - created_at
+        - price
+        in: query
+        name: sort
+        type: string
+      - description: Itens por página (padrão 20, máximo 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Deslocamento da paginação
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ticket.TicketListEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Listar ingressos
+      tags:
+      - Ingressos
+    post:
+      consumes:
+      - application/json
+      description: Cria um lote de ingressos para um evento. O preço é informado em
+        centavos e o ingresso nasce como rascunho, invisível para o comprador, até
+        ser colocado à venda.
+      parameters:
+      - description: Dados do ingresso
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/ticket.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ticket.TicketEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Criar um ingresso
+      tags:
+      - Ingressos
+  /api/v1/tickets/{id}:
+    delete:
+      description: Remove o ingresso e todas as mídias associadas, inclusive os arquivos
+        no armazenamento.
+      parameters:
+      - description: ID do ingresso
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Removido
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Excluir um ingresso
+      tags:
+      - Ingressos
+    get:
+      description: Retorna um ingresso pelo identificador, com a galeria de imagens
+        e vídeos anexada.
+      parameters:
+      - description: ID do ingresso
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ticket.TicketEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Consultar um ingresso
+      tags:
+      - Ingressos
+    put:
+      consumes:
+      - application/json
+      description: Substitui os dados editáveis do ingresso. A quantidade não pode
+        ficar abaixo do total já vendido e a quantidade vendida não é editável.
+      parameters:
+      - description: ID do ingresso
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Dados do ingresso
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/ticket.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ticket.TicketEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Atualizar um ingresso
+      tags:
+      - Ingressos
+  /api/v1/tickets/{id}/media:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Envia uma imagem ou vídeo para a galeria do ingresso via multipart.
+        O arquivo vai para o Cloudflare R2 quando as credenciais estão configuradas.
+        Imagens: até 10 MB (jpeg, png, webp, avif, gif). Vídeos: até 50 MB (mp4, webm,
+        quicktime). Limite de 12 mídias por ingresso.'
+      parameters:
+      - description: ID do ingresso
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Arquivo de imagem ou vídeo
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ticket.MediaEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Enviar uma mídia do ingresso
+      tags:
+      - Ingressos
+  /api/v1/tickets/{id}/media/{mediaId}:
+    delete:
+      description: Remove uma imagem ou vídeo da galeria do ingresso e apaga o arquivo
+        do armazenamento.
+      parameters:
+      - description: ID do ingresso
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: ID da mídia
+        in: path
+        name: mediaId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Removido
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Remover uma mídia do ingresso
+      tags:
+      - Ingressos
+  /api/v1/tickets/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      description: Move o ingresso entre rascunho, à venda, esgotado e cancelado.
+        Colocar à venda exige estoque disponível.
+      parameters:
+      - description: ID do ingresso
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Novo status
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/ticket.ChangeStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ticket.TicketEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/ticket.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Alterar o status de um ingresso
+      tags:
+      - Ingressos
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: 'Autentica as credenciais e abre uma sessão. Envie X-Auth-Mode:
+        cookie para receber cookies httpOnly em vez dos tokens no corpo.'
+      parameters:
+      - description: Credenciais
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.AuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      summary: Entrar com email e senha
+      tags:
+      - Autenticação
+  /auth/logout:
+    post:
+      description: Revoga a sessão atual e remove os cookies de autenticação.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.MessageResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Encerrar a sessão atual
+      tags:
+      - Autenticação
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Rotaciona o token de atualização de uso único e emite um novo token
+        de acesso. O refresh token pode vir no corpo ou no cookie httpOnly refreshToken.
+      parameters:
+      - description: Token de atualização
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/auth.RefreshTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.AuthResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      summary: Renovar a sessão
+      tags:
+      - Autenticação
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Cria um usuário, inicia uma sessão e envia os tokens em cookies
+        httpOnly no modo navegador. A senha deve ter ao menos 8 caracteres, maiúscula,
+        minúscula e número.
+      parameters:
+      - description: Dados do cadastro
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/auth.AuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      summary: Cadastrar uma conta
+      tags:
+      - Autenticação
+  /user/me:
+    get:
+      description: Retorna a identidade ligada à sessão autenticada.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.UserResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Consultar o usuário atual
+      tags:
+      - Autenticação
+  /webhooks/mercadopago:
+    post:
+      consumes:
+      - application/json
+      description: 'Recebe as notificações de pagamento do Mercado Pago. A requisição
+        é autenticada pela assinatura HMAC do cabeçalho x-signature e o processamento
+        acontece de forma assíncrona: o endpoint apenas enfileira a leitura do pagamento
+        e responde. O corpo da notificação nunca é usado como fonte de verdade — o
+        estado é sempre relido do provedor.'
+      parameters:
+      - description: Assinatura HMAC enviada pelo Mercado Pago
+        in: header
+        name: x-signature
+        required: true
+        type: string
+      - description: Identificador da entrega
+        in: header
+        name: x-request-id
+        type: string
+      - description: ID do pagamento (formato moderno)
+        in: query
+        name: data.id
+        type: string
+      - description: Tópico da notificação (formato IPN legado)
+        in: query
+        name: topic
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Notificação ignorada (não é de pagamento)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "202":
+          description: Notificação aceita para processamento
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Webhook do Mercado Pago
+      tags:
+      - Webhooks
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: 'Use o formato: Bearer {token}. Navegadores também podem autenticar
+      por cookies httpOnly.'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

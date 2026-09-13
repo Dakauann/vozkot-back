@@ -1,0 +1,1659 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "API base para autenticação e gestão de tickets, organizada com Clean Architecture.",
+        "title": "Vozkot Tickets API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "basePath": "/",
+    "paths": {
+        "/api/v1/checkout": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Reserva os ingressos e abre um pedido aguardando pagamento. A reserva é imediata; a cobrança PIX é criada por um job e aparece em `payment` poucos instantes depois, então o cliente deve consultar o pedido até `payment.pixCopyPaste` ser preenchido. O cabeçalho Idempotency-Key é obrigatório: repetir a mesma requisição com a mesma chave devolve o mesmo pedido, sem reservar de novo.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Compras"
+                ],
+                "summary": "Comprar ingressos",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Chave de idempotência do cliente (UUID)",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Dados da compra",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/checkout.CheckoutRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.OrderEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Chave reutilizada, requisição em andamento ou ingressos esgotados",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/orders": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lista os pedidos do comprador autenticado, do mais recente para o mais antigo. Aceita filtro por status e por ingresso.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Compras"
+                ],
+                "summary": "Listar pedidos",
+                "parameters": [
+                    {
+                        "enum": [
+                            "pending_payment",
+                            "paid",
+                            "expired",
+                            "cancelled",
+                            "failed",
+                            "refunded",
+                            "refund_required"
+                        ],
+                        "type": "string",
+                        "description": "Status do pedido",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtrar por ingresso",
+                        "name": "ticketId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (padrão 20, máximo 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Deslocamento da paginação",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.OrderListEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/orders/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retorna um pedido com o estado atual do pagamento. É este endpoint que o cliente consulta enquanto espera o código PIX aparecer.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Compras"
+                ],
+                "summary": "Consultar um pedido",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.OrderEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/orders/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Desiste de um pedido aguardando pagamento e devolve os ingressos ao estoque. Cancelar um pedido já cancelado devolve o mesmo pedido, sem erro.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Compras"
+                ],
+                "summary": "Cancelar um pedido",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.OrderEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/orders/{id}/refund": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Estorna um pedido pago no provedor de pagamento e devolve os ingressos ao estoque. Restrito a administradores.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Compras"
+                ],
+                "summary": "Estornar um pedido",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.OrderEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/tickets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lista os ingressos do evento em ordem de data de início. Aceita filtros de status, busca textual por evento, título, local ou cidade, ordenação e paginação.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Ingressos"
+                ],
+                "summary": "Listar ingressos",
+                "parameters": [
+                    {
+                        "enum": [
+                            "draft",
+                            "on_sale",
+                            "sold_out",
+                            "cancelled"
+                        ],
+                        "type": "string",
+                        "description": "Status do ingresso",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Busca por evento, título, local ou cidade",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "starts_at",
+                            "created_at",
+                            "price"
+                        ],
+                        "type": "string",
+                        "description": "Ordenação",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (padrão 20, máximo 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Deslocamento da paginação",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.TicketListEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cria um lote de ingressos para um evento. O preço é informado em centavos e o ingresso nasce como rascunho, invisível para o comprador, até ser colocado à venda.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Ingressos"
+                ],
+                "summary": "Criar um ingresso",
+                "parameters": [
+                    {
+                        "description": "Dados do ingresso",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ticket.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.TicketEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/tickets/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retorna um ingresso pelo identificador, com a galeria de imagens e vídeos anexada.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Ingressos"
+                ],
+                "summary": "Consultar um ingresso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do ingresso",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.TicketEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Substitui os dados editáveis do ingresso. A quantidade não pode ficar abaixo do total já vendido e a quantidade vendida não é editável.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Ingressos"
+                ],
+                "summary": "Atualizar um ingresso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do ingresso",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Dados do ingresso",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ticket.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.TicketEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remove o ingresso e todas as mídias associadas, inclusive os arquivos no armazenamento.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Ingressos"
+                ],
+                "summary": "Excluir um ingresso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do ingresso",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Removido"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/tickets/{id}/media": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Envia uma imagem ou vídeo para a galeria do ingresso via multipart. O arquivo vai para o Cloudflare R2 quando as credenciais estão configuradas. Imagens: até 10 MB (jpeg, png, webp, avif, gif). Vídeos: até 50 MB (mp4, webm, quicktime). Limite de 12 mídias por ingresso.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Ingressos"
+                ],
+                "summary": "Enviar uma mídia do ingresso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do ingresso",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Arquivo de imagem ou vídeo",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.MediaEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/tickets/{id}/media/{mediaId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remove uma imagem ou vídeo da galeria do ingresso e apaga o arquivo do armazenamento.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Ingressos"
+                ],
+                "summary": "Remover uma mídia do ingresso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do ingresso",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "ID da mídia",
+                        "name": "mediaId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Removido"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/tickets/{id}/status": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Move o ingresso entre rascunho, à venda, esgotado e cancelado. Colocar à venda exige estoque disponível.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Ingressos"
+                ],
+                "summary": "Alterar o status de um ingresso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do ingresso",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Novo status",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ChangeStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.TicketEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/login": {
+            "post": {
+                "description": "Autentica as credenciais e abre uma sessão. Envie X-Auth-Mode: cookie para receber cookies httpOnly em vez dos tokens no corpo.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Entrar com email e senha",
+                "parameters": [
+                    {
+                        "description": "Credenciais",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.AuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Revoga a sessão atual e remove os cookies de autenticação.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Encerrar a sessão atual",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.MessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/refresh": {
+            "post": {
+                "description": "Rotaciona o token de atualização de uso único e emite um novo token de acesso. O refresh token pode vir no corpo ou no cookie httpOnly refreshToken.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Renovar a sessão",
+                "parameters": [
+                    {
+                        "description": "Token de atualização",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/auth.RefreshTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.AuthResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/register": {
+            "post": {
+                "description": "Cria um usuário, inicia uma sessão e envia os tokens em cookies httpOnly no modo navegador. A senha deve ter ao menos 8 caracteres, maiúscula, minúscula e número.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Cadastrar uma conta",
+                "parameters": [
+                    {
+                        "description": "Dados do cadastro",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.RegisterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/auth.AuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/user/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retorna a identidade ligada à sessão autenticada.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Consultar o usuário atual",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.UserResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/webhooks/mercadopago": {
+            "post": {
+                "description": "Recebe as notificações de pagamento do Mercado Pago. A requisição é autenticada pela assinatura HMAC do cabeçalho x-signature e o processamento acontece de forma assíncrona: o endpoint apenas enfileira a leitura do pagamento e responde. O corpo da notificação nunca é usado como fonte de verdade — o estado é sempre relido do provedor.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Webhooks"
+                ],
+                "summary": "Webhook do Mercado Pago",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Assinatura HMAC enviada pelo Mercado Pago",
+                        "name": "x-signature",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Identificador da entrega",
+                        "name": "x-request-id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "ID do pagamento (formato moderno)",
+                        "name": "data.id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tópico da notificação (formato IPN legado)",
+                        "name": "topic",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Notificação ignorada (não é de pagamento)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "202": {
+                        "description": "Notificação aceita para processamento",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "auth.AuthResponse": {
+            "type": "object",
+            "properties": {
+                "accessToken": {
+                    "type": "string",
+                    "example": "eyJhbGciOi..."
+                },
+                "refreshToken": {
+                    "type": "string",
+                    "example": "token_de_atualizacao"
+                },
+                "tokenType": {
+                    "type": "string",
+                    "example": "Bearer"
+                },
+                "user": {
+                    "$ref": "#/definitions/auth.UserResponse"
+                }
+            }
+        },
+        "auth.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "credenciais inválidas"
+                }
+            }
+        },
+        "auth.LoginRequest": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "example": "agente@empresa.com.br"
+                },
+                "password": {
+                    "type": "string",
+                    "example": "SenhaForte1"
+                }
+            }
+        },
+        "auth.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "example": "Sessão encerrada com sucesso"
+                }
+            }
+        },
+        "auth.RefreshTokenRequest": {
+            "type": "object",
+            "properties": {
+                "refreshToken": {
+                    "type": "string",
+                    "example": "token_de_atualizacao"
+                }
+            }
+        },
+        "auth.RegisterRequest": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "example": "maria@empresa.com.br"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Maria Silva"
+                },
+                "password": {
+                    "type": "string",
+                    "example": "SenhaForte1"
+                }
+            }
+        },
+        "auth.UserResponse": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "example": "maria@empresa.com.br"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "usr_a1b2c3"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Maria Silva"
+                },
+                "role": {
+                    "type": "string",
+                    "example": "user"
+                }
+            }
+        },
+        "checkout.Buyer": {
+            "type": "object",
+            "properties": {
+                "document": {
+                    "description": "Document is the CPF or CNPJ. PIX in Brazil cannot be issued without one.",
+                    "type": "string",
+                    "example": "12345678909"
+                },
+                "email": {
+                    "description": "Email receives the ingresso and identifies the payer at Mercado Pago.",
+                    "type": "string",
+                    "example": "maria@exemplo.com.br"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Maria Souza"
+                }
+            }
+        },
+        "checkout.CheckoutRequest": {
+            "type": "object",
+            "properties": {
+                "buyer": {
+                    "$ref": "#/definitions/checkout.Buyer"
+                },
+                "method": {
+                    "description": "Method is optional and defaults to PIX, the only instrument this\nintegration can issue from a server.",
+                    "type": "string",
+                    "enum": [
+                        "pix"
+                    ],
+                    "example": "pix"
+                },
+                "quantity": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "ticketId": {
+                    "type": "string",
+                    "example": "tkt_a1b2c3d4"
+                }
+            }
+        },
+        "checkout.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "not enough tickets available"
+                }
+            }
+        },
+        "checkout.OrderEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/checkout.OrderResponse"
+                }
+            }
+        },
+        "checkout.OrderListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/checkout.OrderResponse"
+                    }
+                },
+                "limit": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "offset": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 12
+                }
+            }
+        },
+        "checkout.OrderResponse": {
+            "type": "object",
+            "properties": {
+                "buyerEmail": {
+                    "type": "string",
+                    "example": "maria@exemplo.com.br"
+                },
+                "buyerName": {
+                    "type": "string",
+                    "example": "Maria Souza"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "BRL"
+                },
+                "holdExpiresAt": {
+                    "description": "HoldExpiresAt is when the reserved tickets go back on sale. It is the\nclock a checkout screen counts down.",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "ord_9f2c1d8a"
+                },
+                "paidAt": {
+                    "type": "string"
+                },
+                "payment": {
+                    "$ref": "#/definitions/checkout.PaymentResponse"
+                },
+                "quantity": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "pending_payment",
+                        "paid",
+                        "expired",
+                        "cancelled",
+                        "failed",
+                        "refunded",
+                        "refund_required"
+                    ],
+                    "example": "pending_payment"
+                },
+                "ticketId": {
+                    "type": "string",
+                    "example": "tkt_a1b2c3d4"
+                },
+                "totalCents": {
+                    "type": "integer",
+                    "example": 48000
+                },
+                "unitPriceCents": {
+                    "type": "integer",
+                    "example": 24000
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "checkout.PaymentResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "1234567890"
+                },
+                "method": {
+                    "type": "string",
+                    "example": "pix"
+                },
+                "pixCopyPaste": {
+                    "description": "PixCopyPaste is the EMV string a bank app reads.",
+                    "type": "string"
+                },
+                "pixQrCodeBase64": {
+                    "description": "PixQRCodeBase64 is the same payload as a PNG, ready for an \u003cimg\u003e tag.",
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "mercadopago"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "pending",
+                        "paid",
+                        "rejected",
+                        "cancelled",
+                        "refunded",
+                        "charged_back",
+                        "in_analysis"
+                    ],
+                    "example": "pending"
+                }
+            }
+        },
+        "ticket.ChangeStatusRequest": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "on_sale",
+                        "sold_out",
+                        "cancelled"
+                    ],
+                    "example": "on_sale"
+                }
+            }
+        },
+        "ticket.CreateRequest": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "example": "Fortaleza, CE"
+                },
+                "description": {
+                    "type": "string",
+                    "example": "Acesso à área premium com bar exclusivo."
+                },
+                "eventName": {
+                    "type": "string",
+                    "example": "Festival Aurora"
+                },
+                "priceCents": {
+                    "type": "integer",
+                    "example": 24000
+                },
+                "quantity": {
+                    "type": "integer",
+                    "example": 500
+                },
+                "startsAt": {
+                    "type": "string",
+                    "example": "2026-11-15T19:00:00-03:00"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "on_sale",
+                        "sold_out",
+                        "cancelled"
+                    ],
+                    "example": "draft"
+                },
+                "title": {
+                    "type": "string",
+                    "example": "Pista Premium"
+                },
+                "venue": {
+                    "type": "string",
+                    "example": "Arena Castelão"
+                }
+            }
+        },
+        "ticket.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "ticket not found"
+                }
+            }
+        },
+        "ticket.MediaEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ticket.MediaResponse"
+                }
+            }
+        },
+        "ticket.MediaResponse": {
+            "type": "object",
+            "properties": {
+                "contentType": {
+                    "type": "string",
+                    "example": "image/jpeg"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "med_9f2c1d8a"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "image",
+                        "video"
+                    ],
+                    "example": "image"
+                },
+                "position": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "sizeBytes": {
+                    "type": "integer",
+                    "example": 284133
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://cdn.exemplo.com/tickets/tkt_a1b2/med_9f2c1d8a.jpg"
+                }
+            }
+        },
+        "ticket.TicketEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ticket.TicketResponse"
+                }
+            }
+        },
+        "ticket.TicketListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ticket.TicketResponse"
+                    }
+                },
+                "limit": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "offset": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 42
+                }
+            }
+        },
+        "ticket.TicketResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "integer",
+                    "example": 372
+                },
+                "city": {
+                    "type": "string",
+                    "example": "Fortaleza, CE"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "BRL"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "eventName": {
+                    "type": "string",
+                    "example": "Festival Aurora"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "tkt_a1b2c3d4"
+                },
+                "media": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ticket.MediaResponse"
+                    }
+                },
+                "priceCents": {
+                    "type": "integer",
+                    "example": 24000
+                },
+                "quantity": {
+                    "type": "integer",
+                    "example": 500
+                },
+                "sold": {
+                    "type": "integer",
+                    "example": 128
+                },
+                "startsAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "on_sale",
+                        "sold_out",
+                        "cancelled"
+                    ],
+                    "example": "on_sale"
+                },
+                "title": {
+                    "type": "string",
+                    "example": "Pista Premium"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "venue": {
+                    "type": "string",
+                    "example": "Arena Castelão"
+                }
+            }
+        },
+        "ticket.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "example": "Fortaleza, CE"
+                },
+                "description": {
+                    "type": "string",
+                    "example": "Acesso à área premium com bar exclusivo."
+                },
+                "eventName": {
+                    "type": "string",
+                    "example": "Festival Aurora"
+                },
+                "priceCents": {
+                    "type": "integer",
+                    "example": 24000
+                },
+                "quantity": {
+                    "type": "integer",
+                    "example": 500
+                },
+                "startsAt": {
+                    "type": "string",
+                    "example": "2026-11-15T19:00:00-03:00"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "on_sale",
+                        "sold_out",
+                        "cancelled"
+                    ],
+                    "example": "on_sale"
+                },
+                "title": {
+                    "type": "string",
+                    "example": "Pista Premium"
+                },
+                "venue": {
+                    "type": "string",
+                    "example": "Arena Castelão"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Use o formato: Bearer {token}. Navegadores também podem autenticar por cookies httpOnly.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

@@ -1,0 +1,5 @@
+.cache
+.env*
+!.env.example
+coverage.out
+server
