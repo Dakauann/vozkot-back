@@ -3,6 +3,7 @@ package order
 import (
 	"context"
 	"errors"
+	"hash/fnv"
 	"strings"
 	"time"
 
@@ -185,6 +186,70 @@ func (r *OrderRepository) ClaimExpired(ctx context.Context, now time.Time, limit
 	return items, nil
 }
 
+// buyerHoldLockNamespace keeps this lock family to itself.
+//
+// PostgreSQL's two-key advisory locks live in a separate space from the
+// single-key ones, so the migration lock is already out of reach; the namespace
+// is here so a second two-key lock added later cannot collide with this one by
+// picking the same hash.
+const buyerHoldLockNamespace int32 = 21781
+
+// CountOpenHoldsForUpdate serialises one buyer's concurrent checkouts, then
+// counts what they are already holding.
+//
+// The lock comes first and it is the entire point. Two checkouts by one account
+// arriving together would both read "one open order", both pass a limit of
+// three, and both commit: a limit that only holds when nobody tries. A
+// transaction-scoped advisory lock keyed on the buyer makes the count and the
+// INSERT it guards one indivisible step, and it releases itself at commit or
+// rollback, so no path can leak it.
+//
+// Keyed on a hash of the buyer id, so two different accounts may occasionally
+// share a lock. That costs the unlucky pair one short wait and nothing else:
+// the hash is never used to decide who holds what, only to decide who waits.
+func (r *OrderRepository) CountOpenHoldsForUpdate(ctx context.Context, buyerID, ticketID string) (domain.OpenHolds, error) {
+	buyerID = strings.TrimSpace(buyerID)
+	if buyerID == "" {
+		// A sale with no account behind it — an operator at the door — has no
+		// identity to count against, and nothing to serialise on.
+		return domain.OpenHolds{}, nil
+	}
+
+	if err := r.db.WithContext(ctx).
+		Exec(`SELECT pg_advisory_xact_lock(?::int4, ?::int4)`, buyerHoldLockNamespace, buyerLockKey(buyerID)).
+		Error; err != nil {
+		return domain.OpenHolds{}, err
+	}
+
+	var counted struct {
+		Orders         int
+		TicketsForTier int
+	}
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT COUNT(*)                                                  AS orders,
+		       COALESCE(SUM(quantity) FILTER (WHERE ticket_id = ?), 0)   AS tickets_for_tier
+		FROM orders
+		WHERE buyer_id = ? AND status = ?`,
+		ticketID, buyerID, string(domain.StatusPendingPayment),
+	).Scan(&counted).Error
+	if err != nil {
+		return domain.OpenHolds{}, err
+	}
+	return domain.OpenHolds{Orders: counted.Orders, TicketsForTier: counted.TicketsForTier}, nil
+}
+
+// buyerLockKey folds a buyer id into the int32 an advisory lock takes.
+//
+// Computed here rather than with PostgreSQL's hashtext(), which is an
+// undocumented internal whose value is not promised to be stable across major
+// versions — and a lock key that changes under an upgrade is a lock that stops
+// serialising during exactly the window nobody is watching.
+func buyerLockKey(buyerID string) int32 {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(buyerID))
+	return int32(hash.Sum32())
+}
+
 func applyFilter(query *gorm.DB, filter domain.Filter) *gorm.DB {
 	if filter.TicketID != "" {
 		query = query.Where("ticket_id = ?", filter.TicketID)
@@ -194,6 +259,13 @@ func applyFilter(query *gorm.DB, filter domain.Filter) *gorm.DB {
 	}
 	if filter.Status != "" {
 		query = query.Where("status = ?", string(filter.Status))
+	}
+	if !filter.EventNotBefore.IsZero() {
+		// EXISTS rather than a join: the row is not wanted, only the fact that
+		// its event is still ahead, and a join would have to be de-duplicated.
+		query = query.Where(
+			"EXISTS (SELECT 1 FROM tickets WHERE tickets.id = orders.ticket_id AND tickets.starts_at >= ?)",
+			filter.EventNotBefore.UTC())
 	}
 	return query
 }

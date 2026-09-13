@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -31,14 +33,37 @@ func (m *Auth) Require(next http.Handler) http.Handler {
 			httpx.WriteError(response, http.StatusUnauthorized, auth.ErrUnauthorized)
 			return
 		}
+
 		session, err := m.sessions.FindByAccessJTI(request.Context(), claims.UserID, claims.JTI)
-		if err != nil || !session.Active(time.Now()) {
+		switch {
+		case errors.Is(err, auth.ErrSessionNotFound):
+			// The session is genuinely gone: logged out, revoked, or a token
+			// from before a rotation.
+			httpx.WriteError(response, http.StatusUnauthorized, auth.ErrUnauthorized)
+			return
+		case err != nil:
+			// The lookup itself failed — a pool timeout, a failover, an
+			// unreachable database. Answering 401 here would be a lie with
+			// teeth: the browser client refreshes once, that fails the same
+			// way, and it clears the cookies, so a thirty-second blip logs
+			// every buyer out in the middle of a checkout. 503 says what is
+			// actually true and tells a client to come back.
+			log.Printf("auth: session lookup failed: %v", err)
+			response.Header().Set("Retry-After", "1")
+			httpx.WriteError(response, http.StatusServiceUnavailable, errAuthUnavailable)
+			return
+		case !session.Active(time.Now()):
 			httpx.WriteError(response, http.StatusUnauthorized, auth.ErrUnauthorized)
 			return
 		}
+
 		next.ServeHTTP(response, request.WithContext(auth.WithClaims(request.Context(), claims)))
 	})
 }
+
+// errAuthUnavailable never mentions the token: the caller's credentials were
+// never judged, so saying anything about them would be wrong.
+var errAuthUnavailable = errors.New("sign-in is temporarily unavailable; please try again shortly")
 
 func bearerToken(header string) string {
 	parts := strings.Fields(header)

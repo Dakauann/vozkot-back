@@ -48,28 +48,48 @@ func (s *Scheduler) Run(ctx context.Context) {
 // Tick enqueues one round. Exported so a test can run it without waiting.
 func (s *Scheduler) Tick(ctx context.Context) { s.tick(ctx) }
 
+// sweeps are the recurring jobs and how often each one is due.
+//
+// The cadence is per sweep because the work is not comparable. Releasing a
+// lapsed hold and recovering a lost notification are minutes-matter jobs: a
+// buyer is waiting. Re-reading orders that are already settled is a safety net
+// against a refund notification nobody received, and running that every minute
+// would spend a provider call per paid order per minute to catch something that
+// happens a few times a day.
+var sweeps = []struct {
+	jobType string
+	every   time.Duration
+}{
+	{domain.TypeExpireHolds, time.Minute},
+	{domain.TypeReconcile, time.Minute},
+	{domain.TypeCleanup, time.Minute},
+	{domain.TypeAuditSettled, time.Hour},
+}
+
 func (s *Scheduler) tick(ctx context.Context) {
 	now := s.now()
-	// The dedupe key carries the minute, so any number of application instances
-	// ticking at once produce exactly one sweep job per minute.
-	bucket := now.UTC().Truncate(time.Minute).Format("20060102T1504")
 
-	for _, jobType := range []string{domain.TypeExpireHolds, domain.TypeReconcile, domain.TypeCleanup} {
+	for _, sweep := range sweeps {
+		// The dedupe key carries the bucket, so any number of application
+		// instances ticking at once produce exactly one job per period — and a
+		// job whose period has not turned over is dropped by the same index
+		// that de-duplicates everything else.
+		bucket := now.UTC().Truncate(sweep.every).Format("20060102T150405")
 		job := &domain.Job{
 			ID:          "sch_" + s.newID(),
-			Type:        jobType,
+			Type:        sweep.jobType,
 			Payload:     []byte(`{}`),
 			RunAt:       now,
 			MaxAttempts: 3,
-			DedupeKey:   jobType + ":sweep:" + bucket,
+			DedupeKey:   sweep.jobType + ":sweep:" + bucket,
 		}
 		added, err := s.jobs.Enqueue(ctx, job)
 		if err != nil {
-			log.Printf("queue: schedule %s: %v", jobType, err)
+			log.Printf("queue: schedule %s: %v", sweep.jobType, err)
 			continue
 		}
 		if !added {
-			// Another instance ticked first this minute; its job is the one.
+			// Another instance ticked first this period; its job is the one.
 			continue
 		}
 		s.dispatcher.Dispatch(ctx, job)

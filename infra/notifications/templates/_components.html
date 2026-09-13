@@ -1,0 +1,109 @@
+{{- /*
+  Reusable email components, called with the dict helper:
+      {{template "cta" dict "url" .OrderURL "label" "Ver meu pedido"}}
+
+  Cloned from Vozko's set and re-inked in this box office's palette. Everything
+  here is a table with inline styles, because the moment a component depends on
+  a class or a cascade it stops rendering in Outlook and nobody finds out until
+  a buyer forwards a screenshot.
+*/ -}}
+
+{{- /* heading: centred title plus optional subtitle. */ -}}
+{{define "heading"}}
+<h1 style="margin:22px 0 0; font-family:Inter,Arial,sans-serif; font-size:24px; font-weight:600; color:#14171a; line-height:1.3; letter-spacing:-0.01em; text-align:center;">{{.title}}</h1>
+{{if .subtitle}}<p style="margin:9px 0 0; font-family:Inter,Arial,sans-serif; font-size:15px; color:#58626a; line-height:1.5; text-align:center;">{{.subtitle}}</p>{{end}}
+{{end}}
+
+{{- /* amount: the one number the message is about, on the signal surface.
+       Near-black on green, which is the site's own primary/primary-foreground
+       pairing and the only one of the two that passes contrast. */ -}}
+{{define "amount"}}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+        <td align="center" bgcolor="#00c28f" style="padding:26px 20px; border-radius:18px; background-color:#00c28f; text-align:center;">
+            <p style="margin:0 0 8px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; color:#0e1011; text-transform:uppercase; letter-spacing:0.12em; opacity:0.75;">{{.label}}</p>
+            <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:34px; font-weight:700; color:#0e1011; line-height:1.15; letter-spacing:-0.02em;">{{.value}}</p>
+        </td>
+    </tr>
+</table>
+{{end}}
+
+{{- /* cta: the site's primary button, rebuilt bulletproof. Pill, signal green,
+       near-black label, with a VML twin so Outlook gets the same shape. */ -}}
+{{define "cta"}}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:8px auto 0;">
+    <tr>
+        <td align="center" bgcolor="#00c28f" style="border-radius:9999px;">
+            <!--[if mso]>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{.url}}" style="height:44px;v-text-anchor:middle;width:240px;" arcsize="50%" strokecolor="#00a87b" fillcolor="#00c28f">
+            <w:anchorlock/><center style="color:#0e1011;font-family:Inter,Arial,sans-serif;font-size:14px;font-weight:600;">{{.label}}</center>
+            </v:roundrect>
+            <![endif]-->
+            <!--[if !mso]><!-->
+            <a href="{{.url}}" style="display:inline-block; min-width:176px; background-color:#00c28f; color:#0e1011; font-family:Inter,Arial,sans-serif; font-size:14px; font-weight:600; line-height:44px; text-align:center; text-decoration:none; border-radius:9999px; padding:0 30px; box-shadow:0 1px 2px 0 rgba(19,26,29,0.08), 0 10px 22px -12px rgba(0,194,143,0.55);">{{.label}}</a>
+            <!--<![endif]-->
+        </td>
+    </tr>
+</table>
+{{end}}
+
+{{- /* panel: a notice surface. Hairline border plus tint, never a thick coloured
+       left stripe. tone: info|success|warning|danger. */ -}}
+{{define "panel"}}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+        <td style="padding:17px 20px; border-radius:16px; border:1px solid {{if eq .tone "success"}}#baeedf{{else if eq .tone "warning"}}#f7e3b4{{else if eq .tone "danger"}}#f4ccd2{{else}}#d7e0e6{{end}}; background-color:{{if eq .tone "success"}}#e7f9f4{{else if eq .tone "warning"}}#fef6e6{{else if eq .tone "danger"}}#fdecee{{else}}#f2f6f8{{end}};">
+            {{if .title}}<p style="margin:0 0 6px; font-family:Inter,Arial,sans-serif; font-size:14px; font-weight:600; color:{{if eq .tone "success"}}#00654b{{else if eq .tone "warning"}}#904f04{{else if eq .tone "danger"}}#9a1c2b{{else}}#37464f{{end}};">{{.title}}</p>{{end}}
+            <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:13px; color:#58626a; line-height:1.6;">{{.body}}</p>
+        </td>
+    </tr>
+</table>
+{{end}}
+
+{{- /* datarow: one label/value line inside a details card. */ -}}
+{{define "datarow"}}
+<tr>
+    <td style="padding:11px 0; border-bottom:1px solid #eaeff2; font-family:Inter,Arial,sans-serif; font-size:13px; color:#58626a;">{{.label}}</td>
+    <td align="right" style="padding:11px 0; border-bottom:1px solid #eaeff2; font-family:Inter,Arial,sans-serif; font-size:13px; font-weight:600; color:#14171a;">{{.value}}</td>
+</tr>
+{{end}}
+
+{{- /* details: a framed summary with a section label and up to five rows. Pass
+       k1..k5 / v1..v5; empty pairs are skipped, so one component serves a
+       three-line and a five-line card without a second variant. */ -}}
+{{define "details"}}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+        <td style="padding:4px 22px 14px; border:1px solid #dce1e5; border-radius:16px; background-color:#fafcfc;">
+            {{if .title}}<p style="margin:0; padding:14px 0 2px; font-family:Inter,Arial,sans-serif; font-size:11px; font-weight:600; color:#48555e; text-transform:uppercase; letter-spacing:0.09em;">{{.title}}</p>{{end}}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                {{if .k1}}{{template "datarow" dict "label" .k1 "value" .v1}}{{end}}
+                {{if .k2}}{{template "datarow" dict "label" .k2 "value" .v2}}{{end}}
+                {{if .k3}}{{template "datarow" dict "label" .k3 "value" .v3}}{{end}}
+                {{if .k4}}{{template "datarow" dict "label" .k4 "value" .v4}}{{end}}
+                {{if .k5}}{{template "datarow" dict "label" .k5 "value" .v5}}{{end}}
+            </table>
+        </td>
+    </tr>
+</table>
+{{end}}
+
+{{- /* copybox: a long machine string the buyer has to copy — a PIX payload runs
+       to a couple of hundred characters. Its own component rather than Vozko's
+       codebox, which is built for a six-digit code at 40px and would render a
+       PIX key as an unreadable wall. Wrapping is forced: a client that does not
+       break the string shows the buyer a third of their payment code. */ -}}
+{{define "copybox"}}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+        <td style="padding:16px 18px; border-radius:16px; border:1px solid #baeedf; background-color:#e7f9f4;">
+            <p style="margin:0 0 8px; font-family:Inter,Arial,sans-serif; font-size:11px; font-weight:600; color:#00654b; text-transform:uppercase; letter-spacing:0.09em;">{{.label}}</p>
+            <p style="margin:0; font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace; font-size:12px; color:#14171a; line-height:1.65; word-break:break-all; word-wrap:break-word; -ms-word-break:break-all;">{{.value}}</p>
+        </td>
+    </tr>
+</table>
+{{end}}
+
+{{- /* badge: a status pill carrying meaning through tint and ink.
+       tone: info|success|warning|danger|neutral. */ -}}
+{{define "badge"}}<span style="display:inline-block; padding:4px 12px; border-radius:9999px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; background-color:{{if eq .tone "success"}}#e7f9f4{{else if eq .tone "warning"}}#fef6e6{{else if eq .tone "danger"}}#fdecee{{else if eq .tone "info"}}#f2f6f8{{else}}#f1f4f6{{end}}; color:{{if eq .tone "success"}}#00654b{{else if eq .tone "warning"}}#904f04{{else if eq .tone "danger"}}#9a1c2b{{else if eq .tone "info"}}#37464f{{else}}#48555e{{end}};">{{.text}}</span>{{end}}

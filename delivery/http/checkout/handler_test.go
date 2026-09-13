@@ -14,6 +14,8 @@ import (
 	"gorm.io/gorm"
 
 	authdomain "vozkot/domain/auth"
+	idempotencydomain "vozkot/domain/idempotency"
+	orderdomain "vozkot/domain/order"
 	ticketdomain "vozkot/domain/ticket"
 	idempotencyRepository "vozkot/infra/repositories/idempotency"
 	orderRepository "vozkot/infra/repositories/order"
@@ -33,6 +35,7 @@ import (
 type harness struct {
 	db       *gorm.DB
 	mux      *http.ServeMux
+	keys     idempotencydomain.Store
 	ticketID string
 	userID   string
 }
@@ -71,12 +74,12 @@ func newHarness(t *testing.T, capacity int) *harness {
 		db.Exec("DELETE FROM users WHERE id = ?", userID)
 	})
 
-	checkout := checkoutUsecase.NewService(uow.NewRunner(db), orders, tickets, dispatcher, 30*time.Minute)
-	payments := paymentUsecase.NewService(uow.NewRunner(db), orders, nil, queueRepository.NewJobRepository(db), dispatcher)
+	checkout := checkoutUsecase.NewService(uow.NewRunner(db), orders, tickets, dispatcher, 30*time.Minute, orderdomain.HoldLimits{})
+	payments := paymentUsecase.NewService(uow.NewRunner(db), orders, nil, queueRepository.NewJobRepository(db), dispatcher, nil)
 
 	mux := http.NewServeMux()
-	NewHandler(checkout, payments, keys).Register(mux)
-	return &harness{db: db, mux: mux, ticketID: ticket.ID, userID: userID}
+	NewHandler(checkout, payments, keys, idempotencydomain.DefaultLease).Register(mux)
+	return &harness{db: db, mux: mux, keys: keys, ticketID: ticket.ID, userID: userID}
 }
 
 func (h *harness) post(t *testing.T, key string, body string) *httptest.ResponseRecorder {
@@ -216,8 +219,9 @@ func TestCheckoutAnswersSoldOutWithConflict(t *testing.T) {
 
 func TestCheckoutValidatesTheBuyer(t *testing.T) {
 	h := newHarness(t, 10)
+	key := testsupport.Unique("key")
 
-	response := h.post(t, testsupport.Unique("key"),
+	response := h.post(t, key,
 		`{"ticketId":"`+h.ticketID+`","quantity":1,"buyer":{"name":"","email":"nope","document":""}}`)
 
 	if response.Code != http.StatusUnprocessableEntity {
@@ -226,12 +230,16 @@ func TestCheckoutValidatesTheBuyer(t *testing.T) {
 	if h.reserved(t) != 0 {
 		t.Fatal("an invalid request reserved stock")
 	}
-	// A failed attempt releases its key, so the corrected retry is not told
-	// for a day that the request is still in progress.
+	// A failed attempt releases its key, so the corrected retry is not told for
+	// a day that the request is still in progress.
+	//
+	// Counted for THIS key only. The table is shared with every other test in
+	// the package, and the recovery tests leave orphaned claims in `processing`
+	// on purpose — a count across the whole table would be measuring them.
 	var count int64
-	h.db.Raw("SELECT COUNT(*) FROM idempotency_keys WHERE scope = 'checkout' AND state = 'processing'").Scan(&count)
+	h.db.Raw("SELECT COUNT(*) FROM idempotency_keys WHERE key = ? AND scope = 'checkout' AND state = 'processing'", key).Scan(&count)
 	if count != 0 {
-		t.Fatalf("%d key(s) left in processing after a failure", count)
+		t.Fatalf("the key was left in processing after a failure; the corrected retry would be refused for a day")
 	}
 }
 

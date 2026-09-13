@@ -118,6 +118,18 @@ func createPartialIndexes(tx *gorm.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_jobs_completed_retention
 		 ON jobs (updated_at, id)
 		 WHERE status = 'done'`,
+		// The per-buyer hold cap runs on every checkout, so it has to stay cheap
+		// for a buyer with years of history behind them. Partial on the only
+		// status that holds stock, so the index carries open orders and nothing
+		// else — a few rows per buyer, forever.
+		`CREATE INDEX IF NOT EXISTS idx_orders_buyer_open_holds
+		 ON orders (buyer_id, ticket_id)
+		 WHERE status = 'pending_payment'`,
+		// The settled-order audit pages oldest-checked-first through paid
+		// orders, exactly as reconciliation does for pending ones.
+		`CREATE INDEX IF NOT EXISTS idx_orders_paid_audit
+		 ON orders (updated_at, id)
+		 WHERE status = 'paid'`,
 	}
 	for _, statement := range statements {
 		if err := tx.Exec(statement).Error; err != nil {

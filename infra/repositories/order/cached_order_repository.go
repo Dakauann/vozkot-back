@@ -93,6 +93,12 @@ func (r *CachedOrderRepository) GetByIDForUpdate(ctx context.Context, id string)
 	return r.inner.GetByIDForUpdate(ctx, id)
 }
 
+// CountOpenHoldsForUpdate is never cached, for the same reason: it takes a lock
+// and reads a number the very next statement changes.
+func (r *CachedOrderRepository) CountOpenHoldsForUpdate(ctx context.Context, buyerID, ticketID string) (domain.OpenHolds, error) {
+	return r.inner.CountOpenHoldsForUpdate(ctx, buyerID, ticketID)
+}
+
 func (r *CachedOrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*domain.Order, error) {
 	return r.inner.FindByIdempotencyKey(ctx, key)
 }

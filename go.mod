@@ -1,6 +1,6 @@
 module vozkot
 
-go 1.25.0
+go 1.26.0
 
 require github.com/joho/godotenv v1.5.1
 
@@ -13,9 +13,11 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/rabbitmq/amqp091-go v1.14.0
 	github.com/redis/go-redis/v9 v9.22.0
+	github.com/resend/resend-go/v3 v3.9.2
 	github.com/swaggo/http-swagger v1.3.4
 	github.com/swaggo/swag v1.16.6
 	golang.org/x/crypto v0.50.0
+	golang.org/x/time v0.14.0
 	gorm.io/driver/postgres v1.6.2
 	gorm.io/gorm v1.31.2
 )

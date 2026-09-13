@@ -39,6 +39,9 @@ type Service struct {
 	orders     orderdomain.Repository
 	tickets    ticketdomain.Repository
 	holdFor    time.Duration
+	// holdLimits caps what one account may keep reserved and unpaid at once.
+	// The zero value caps nothing, which is what the load harness wants.
+	holdLimits orderdomain.HoldLimits
 	now        func() time.Time
 	newID      func() string
 }
@@ -49,6 +52,7 @@ func NewService(
 	tickets ticketdomain.Repository,
 	dispatcher *queueUsecase.Dispatcher,
 	holdFor time.Duration,
+	holdLimits orderdomain.HoldLimits,
 ) *Service {
 	if holdFor <= 0 {
 		holdFor = DefaultHoldFor
@@ -59,6 +63,7 @@ func NewService(
 		orders:     orders,
 		tickets:    tickets,
 		holdFor:    holdFor,
+		holdLimits: holdLimits,
 		now:        time.Now,
 		newID:      randomID,
 	}
@@ -101,6 +106,17 @@ func (s *Service) Start(ctx context.Context, input StartInput) (*orderdomain.Ord
 		// update below, which is the only check two concurrent buyers cannot
 		// both pass.
 		if err := ticket.CanReserve(input.Quantity); err != nil {
+			return err
+		}
+
+		// Before any inventory moves: is this account already sitting on more
+		// than it is allowed to? The check is inside the transaction and behind
+		// a per-buyer lock, so two simultaneous checkouts cannot both pass it.
+		//
+		// It runs BEFORE Reserve so the lock order is always buyer-then-ticket.
+		// Taking them the other way round in some other path would be the
+		// classic deadlock; there is only one path, and this is it.
+		if err := s.withinHoldLimits(ctx, repositories, input); err != nil {
 			return err
 		}
 
@@ -157,8 +173,41 @@ func (s *Service) Start(ctx context.Context, input StartInput) (*orderdomain.Ord
 	return created, nil
 }
 
+// withinHoldLimits refuses a buyer already holding more unpaid inventory than
+// the box office allows.
+//
+// This is what closes the arithmetic the per-minute rate limit leaves open. At
+// thirty checkouts a minute, ten tickets each and a thirty-minute hold, an
+// account that merely cycles can keep nine thousand tickets off the shelf with
+// no money at risk — the rate limit bounds how fast someone reserves, never how
+// much they are sitting on, and it is the second number that empties an event.
+func (s *Service) withinHoldLimits(ctx context.Context, repositories uow.Repositories, input StartInput) error {
+	if s.holdLimits.Unlimited() || input.BuyerID == "" {
+		// No limits configured, or a sale with no account behind it: nothing to
+		// count against, and no reason to pay for the lock.
+		return nil
+	}
+	current, err := repositories.Orders().CountOpenHoldsForUpdate(ctx, input.BuyerID, input.TicketID)
+	if err != nil {
+		return err
+	}
+	return s.holdLimits.Allows(current, input.Quantity)
+}
+
 func (s *Service) Get(ctx context.Context, id string) (*orderdomain.Order, error) {
 	return s.orders.GetByID(ctx, id)
+}
+
+// FindByIdempotencyKey returns the order a checkout key produced, if it
+// produced one.
+//
+// It exists for recovery: the idempotency claim is written before the checkout
+// and completed after it, so a process killed between the two leaves a real
+// order behind a key that looks unstarted. The buyer's retry has to be able to
+// find that order and be shown it, rather than reserving a second batch of
+// tickets they never asked for.
+func (s *Service) FindByIdempotencyKey(ctx context.Context, key string) (*orderdomain.Order, error) {
+	return s.orders.FindByIdempotencyKey(ctx, key)
 }
 
 // Page is a listing plus its total.

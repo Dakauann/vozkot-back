@@ -68,6 +68,41 @@ var (
 	ErrNotConfigured     = errors.New("payment provider is not configured")
 )
 
+// retryable is implemented by a provider error that knows whether repeating the
+// request could plausibly succeed.
+type retryable interface{ Retryable() bool }
+
+// Retryable reports whether repeating a provider call is worth doing.
+//
+// The adapter is the only thing that can answer it — a 502 deserves another
+// attempt, a rejected request does not — so the question is asked through a
+// tiny interface rather than by reading status codes up here. The knowledge
+// stays with the provider; the use case stays free of its vocabulary.
+//
+// An unrecognised error is treated as transient on purpose. Giving up on a
+// payment that would have settled costs a buyer the tickets they paid for;
+// one more attempt costs a round trip. The failures that no retry can fix are
+// the ones that have to say so.
+func Retryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var known retryable
+	if errors.As(err, &known) {
+		return known.Retryable()
+	}
+	switch {
+	case errors.Is(err, ErrNotConfigured),
+		errors.Is(err, ErrMethodUnsupported),
+		errors.Is(err, ErrInvalidAmount),
+		errors.Is(err, ErrEmailRequired),
+		errors.Is(err, ErrDocumentRequired),
+		errors.Is(err, ErrChargeNotFound):
+		return false
+	}
+	return true
+}
+
 // Customer is the payer as the provider needs to see them.
 type Customer struct {
 	Name     string

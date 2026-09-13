@@ -14,6 +14,7 @@ import (
 
 	"gorm.io/gorm"
 
+	notificationdomain "vozkot/domain/notification"
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
 	queuedomain "vozkot/domain/queue"
@@ -24,6 +25,7 @@ import (
 	ticketRepository "vozkot/infra/repositories/ticket"
 	"vozkot/infra/testsupport"
 	"vozkot/infra/uow"
+	notificationUsecase "vozkot/usecases/notification"
 	queueUsecase "vozkot/usecases/queue"
 )
 
@@ -171,15 +173,25 @@ func newHarness(t *testing.T, capacity int) *harness {
 		t.Fatalf("create ticket: %v", err)
 	}
 	t.Cleanup(func() {
+		// Notification jobs first: they are found through the orders, which the
+		// next statement removes.
+		db.Exec(`DELETE FROM jobs WHERE type = ? AND EXISTS (
+			SELECT 1 FROM orders o WHERE o.ticket_id = ? AND jobs.dedupe_key LIKE '%:' || o.id)`,
+			queuedomain.TypeSendNotification, ticket.ID)
 		db.Exec("DELETE FROM jobs WHERE payload->>'orderId' IN (SELECT id FROM orders WHERE ticket_id = ?)", ticket.ID)
 		db.Exec("DELETE FROM orders WHERE ticket_id = ?", ticket.ID)
 		db.Exec("DELETE FROM tickets WHERE id = ?", ticket.ID)
 		db.Exec("DELETE FROM users WHERE id = ?", ownerID)
 	})
 
+	// A real notifier over the real job repository. Nothing is stubbed: what
+	// the test asserts is the row settlement actually commits.
+	notifier := notificationUsecase.NewNotifier(jobs, queueUsecase.NewDispatcher(nil), notificationdomain.ChannelEmail)
+	purchases := notificationUsecase.NewPurchases(notifier, "https://tickets.test")
+
 	return &harness{
 		db:       db,
-		service:  NewService(uow.NewRunner(db), orders, gateway, jobs, queueUsecase.NewDispatcher(nil)),
+		service:  NewService(uow.NewRunner(db), orders, gateway, jobs, queueUsecase.NewDispatcher(nil), purchases),
 		orders:   orders,
 		tickets:  tickets,
 		provider: provider,

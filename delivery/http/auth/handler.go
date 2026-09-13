@@ -1,16 +1,19 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 
 	"vozkot/delivery/http/httpx"
 	domain "vozkot/domain/auth"
+	"vozkot/domain/cache"
 	"vozkot/domain/user"
 	usecase "vozkot/usecases/auth"
 )
@@ -22,19 +25,64 @@ type CookieConfig struct {
 	RefreshMaxAge time.Duration
 }
 
+// AccountLimiter caps attempts against ONE account, whatever address they come
+// from.
+//
+// The per-address limit the router applies cannot do this: a guessing run
+// spread across a few thousand hosts trips no address counter, and the account
+// being guessed never knows. The account is in the request body, which only
+// this handler has parsed, so this half of the limit lives here.
+type AccountLimiter interface {
+	Allow(ctx context.Context, key string) (cache.Decision, bool)
+	WriteRefusal(response http.ResponseWriter, decision cache.Decision)
+}
+
 type Handler struct {
 	service *usecase.Service
 	cookies CookieConfig
+	// accounts limits login attempts per email. Nil when Redis is absent, and
+	// then only this half of the limit is gone; the per-address one remains.
+	accounts AccountLimiter
+	// callerIP resolves the address recorded on a session. Supplied rather than
+	// computed here so one policy about which forwarding headers may be
+	// believed covers the whole application; nil falls back to the connecting
+	// address, which trusts nothing.
+	callerIP func(*http.Request) string
 }
 
-func NewHandler(service *usecase.Service, cookies CookieConfig) *Handler {
-	return &Handler{service: service, cookies: cookies}
+func NewHandler(
+	service *usecase.Service,
+	cookies CookieConfig,
+	accounts AccountLimiter,
+	callerIP func(*http.Request) string,
+) *Handler {
+	handler := &Handler{service: service, cookies: cookies, callerIP: callerIP}
+	// A nil interface holding a nil pointer is not nil, and would panic on the
+	// first login. Only a genuinely supplied limiter is kept.
+	if accounts != nil && !reflect.ValueOf(accounts).IsNil() {
+		handler.accounts = accounts
+	}
+	if handler.callerIP == nil {
+		handler.callerIP = peerAddress
+	}
+	return handler
 }
 
-func (h *Handler) RegisterPublic(router *http.ServeMux) {
-	router.HandleFunc("POST /auth/register", h.register)
-	router.HandleFunc("POST /auth/login", h.login)
-	router.HandleFunc("POST /auth/refresh", h.refresh)
+// RegisterPublic mounts the unauthenticated credential routes.
+//
+// throttle is applied to all three. They are the only routes an anonymous
+// caller can reach that cost real work — a login is a bcrypt compare at cost
+// twelve, about a quarter second of CPU — so an unthrottled flood is both a
+// credential-stuffing surface and a way to spend the fleet's CPU without
+// holding an account. A nil throttle mounts them bare, which is what happens
+// when Redis is not configured.
+func (h *Handler) RegisterPublic(router *http.ServeMux, throttle func(http.Handler) http.Handler) {
+	if throttle == nil {
+		throttle = func(next http.Handler) http.Handler { return next }
+	}
+	router.Handle("POST /auth/register", throttle(http.HandlerFunc(h.register)))
+	router.Handle("POST /auth/login", throttle(http.HandlerFunc(h.login)))
+	router.Handle("POST /auth/refresh", throttle(http.HandlerFunc(h.refresh)))
 }
 
 func (h *Handler) RegisterProtected(router *http.ServeMux, require func(http.Handler) http.Handler) {
@@ -61,7 +109,7 @@ func (h *Handler) register(response http.ResponseWriter, request *http.Request) 
 	}
 	pair, err := h.service.Register(request.Context(), domain.CredentialsInput{
 		Name: body.Name, Email: body.Email, Password: body.Password,
-		IPAddress: clientIP(request), DeviceInfo: request.UserAgent(),
+		IPAddress: h.callerIP(request), DeviceInfo: request.UserAgent(),
 	})
 	if err != nil {
 		httpx.WriteError(response, authStatus(err), err)
@@ -86,9 +134,22 @@ func (h *Handler) login(response http.ResponseWriter, request *http.Request) {
 		httpx.WriteError(response, http.StatusBadRequest, err)
 		return
 	}
+
+	// Counted before the password is verified, so a guessing run pays the
+	// limiter rather than a bcrypt compare per attempt. Normalised the same way
+	// the lookup normalises it, or "Maria@..." and "maria@..." would be two
+	// budgets for one account.
+	if h.accounts != nil {
+		email := strings.ToLower(strings.TrimSpace(body.Email))
+		if decision, allowed := h.accounts.Allow(request.Context(), "email:"+email); !allowed {
+			h.accounts.WriteRefusal(response, decision)
+			return
+		}
+	}
+
 	pair, err := h.service.Login(request.Context(), domain.CredentialsInput{
 		Email: body.Email, Password: body.Password,
-		IPAddress: clientIP(request), DeviceInfo: request.UserAgent(),
+		IPAddress: h.callerIP(request), DeviceInfo: request.UserAgent(),
 	})
 	if err != nil {
 		httpx.WriteError(response, authStatus(err), err)
@@ -118,7 +179,7 @@ func (h *Handler) refresh(response http.ResponseWriter, request *http.Request) {
 		httpx.WriteError(response, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
-	pair, err := h.service.Refresh(request.Context(), body.RefreshToken, clientIP(request), request.UserAgent())
+	pair, err := h.service.Refresh(request.Context(), body.RefreshToken, h.callerIP(request), request.UserAgent())
 	if err != nil {
 		h.clearCookies(response)
 		httpx.WriteError(response, http.StatusUnauthorized, err)
@@ -195,10 +256,14 @@ func userResponse(item *user.User) UserResponse {
 	return UserResponse{ID: item.ID, Name: item.Name, Email: item.Email, Role: string(item.Role)}
 }
 
-func clientIP(request *http.Request) string {
-	if forwarded := strings.Split(request.Header.Get("X-Forwarded-For"), ",")[0]; strings.TrimSpace(forwarded) != "" {
-		return strings.TrimSpace(forwarded)
-	}
+// peerAddress is the fallback when no resolver was supplied: the address the
+// connection actually came from.
+//
+// It deliberately does NOT read X-Forwarded-For. That header is client-supplied
+// text, and believing it without knowing the request came through a trusted
+// proxy lets any caller write whatever address they like onto a session record
+// — and, where the same value keys a rate limit, choose their own bucket.
+func peerAddress(request *http.Request) string {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err == nil {
 		return host

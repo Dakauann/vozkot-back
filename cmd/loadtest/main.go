@@ -83,6 +83,16 @@ type options struct {
 	retryShare      float64
 	drainTimeout    time.Duration
 	keep            bool
+	// overHTTP drives the REAL router — TLS, session lookup, idempotency
+	// claim, the admission bulkhead, JSON — instead of calling the use case.
+	//
+	// The two numbers are not comparable and the difference is the point. A
+	// use-case run measures how fast PostgreSQL can arbitrate inventory; a
+	// replica's actual ceiling is CHECKOUT_MAX_IN_FLIGHT divided by the latency
+	// of a whole request, which is several times what Start alone costs. Only
+	// the second number belongs in a capacity plan.
+	overHTTP    bool
+	maxInFlight int
 	// dbConns bounds the connection pool. It is deliberately SMALLER than the
 	// number of buyers: under a real on-sale the pool is the bottleneck that
 	// turns a stampede into a queue, and the property being tested is that
@@ -107,6 +117,8 @@ func main() {
 	flag.DurationVar(&opts.drainTimeout, "drain-timeout", 5*time.Minute, "how long to wait for the queue to empty")
 	flag.BoolVar(&opts.keep, "keep", false, "keep the generated rows for inspection")
 	flag.IntVar(&opts.dbConns, "db-conns", 40, "database connection pool size; keep it under the server's max_connections")
+	flag.BoolVar(&opts.overHTTP, "http", false, "drive the real HTTP router instead of the use case, and report a per-replica ceiling")
+	flag.IntVar(&opts.maxInFlight, "max-in-flight", 20, "checkout admission bulkhead, with -http; matches CHECKOUT_MAX_IN_FLIGHT")
 	flag.Parse()
 
 	if err := godotenv.Load(); err != nil {
@@ -428,8 +440,18 @@ func run(cfg config.Config, opts options) error {
 	gateway := mercadopago.NewGateway(mercadopago.NewClient("TEST-loadtest", providerServer.URL,
 		mercadopago.WithNotificationURL(provider.webhookTo), mercadopago.WithHTTPClient(providerHTTP)))
 
-	checkout := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, 30*time.Minute)
-	payments := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher)
+	// Hold limits are set generously rather than disabled: a run has one account
+	// per buyer making far more purchases than a person ever would, so a
+	// production limit would refuse most of the storm and measure nothing. A
+	// ceiling above what the run can reach still exercises the per-buyer
+	// advisory lock and the count on EVERY checkout, which is what needs
+	// measuring — the limit's own behaviour is tested where it lives.
+	perBuyer := opts.orders/max(opts.buyers, 1) + 1
+	holdLimits := orderdomain.HoldLimits{Orders: perBuyer * 2}
+	checkout := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, 30*time.Minute, holdLimits)
+	// nil notifications: the harness measures the purchase path, and mailing a
+	// hundred thousand synthetic buyers is neither wanted nor free.
+	payments := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, nil)
 
 	// --- workers --------------------------------------------------------------
 	workerCtx, stopWorkers := context.WithCancel(ctx)
@@ -516,8 +538,30 @@ func run(cfg config.Config, opts options) error {
 	log.Printf("seeded %d tier(s) x %d tickets = %d tickets for %d checkout attempts by %d buyers",
 		opts.tiers, opts.capacity, opts.tiers*opts.capacity, opts.orders, opts.buyers)
 
+	// --- how the storm makes a checkout ---------------------------------------
+	//
+	// Either straight into the use case, or through the real router. The second
+	// is the only one whose throughput belongs in a capacity plan.
+	var storm fleet = &useCaseFleet{service: checkout, buyerID: ownerID}
+	if opts.overHTTP {
+		httpFleet, err := newHTTPFleet(ctx, db, cfg, opts, runID, checkout, payments)
+		if err != nil {
+			return fmt.Errorf("http harness: %w", err)
+		}
+		storm = httpFleet
+		if !opts.keep {
+			defer cleanupHTTPAccounts(db, runID)
+		}
+		log.Printf("driving: the real HTTP router over TLS — bulkhead %d in flight per replica, %d account(s) with sessions",
+			opts.maxInFlight, opts.buyers)
+		log.Printf("NOTE: the per-account checkout rate limit is off in this mode; it would refuse a storm this dense before the bulkhead saw it")
+	} else {
+		log.Printf("driving: the checkout use case directly — NOT a per-replica HTTP number; run with -http for that")
+	}
+	defer storm.close()
+
 	// --- the storm ------------------------------------------------------------
-	var created, soldOut, replayed, failed atomic.Int64
+	var created, soldOut, replayed, failed, shed, throttled atomic.Int64
 	var checkoutLatency latencies
 	orderIDs := sync.Map{}
 	attempts := make(chan int, opts.orders)
@@ -543,54 +587,63 @@ func run(cfg config.Config, opts options) error {
 	var buyersDone sync.WaitGroup
 	for buyer := 0; buyer < opts.buyers; buyer++ {
 		buyersDone.Add(1)
-		go func() {
+		go func(buyer int) {
 			defer buyersDone.Done()
 			for index := range attempts {
 				key := fmt.Sprintf("load-%s-%d", runID, index)
-				input := checkoutUsecase.StartInput{
-					TicketID:       tierIDs[pick(len(tierIDs))],
-					Quantity:       1 + pick(opts.maxQuantity),
-					BuyerID:        ownerID,
-					BuyerName:      "Buyer " + strconv.Itoa(index),
-					BuyerEmail:     fmt.Sprintf("buyer%d@vozkot.test", index),
-					BuyerDocument:  "12345678909",
-					IdempotencyKey: key,
-				}
+				ticketID := tierIDs[pick(len(tierIDs))]
+				quantity := 1 + pick(opts.maxQuantity)
 
 				started := time.Now()
-				item, err := checkout.Start(ctx, input)
+				orderID, result, err := storm.checkout(ctx, buyer, key, ticketID, quantity)
 				checkoutLatency.add(time.Since(started))
 
-				switch {
-				case err == nil:
+				switch result {
+				case outcomeCreated:
 					created.Add(1)
-					orderIDs.Store(item.ID, true)
+					orderIDs.Store(orderID, true)
 					// A share of buyers retry with the same key: the network
-					// dropped the response. The unique index must refuse the
-					// duplicate and the transaction must hold nothing extra.
+					// dropped the response. The retry must come back with the
+					// SAME order and must hold nothing extra — over HTTP that
+					// is a replayed 201, in the use case a refused duplicate.
 					if roll() < opts.retryShare {
-						if _, retryErr := checkout.Start(ctx, input); retryErr == nil {
+						retryID, retryResult, _ := storm.checkout(ctx, buyer, key, ticketID, quantity)
+						switch {
+						case retryResult == outcomeCreated && retryID == orderID:
+							replayed.Add(1)
+						case retryResult == outcomeCreated:
 							failed.Add(1)
-							log.Printf("INVARIANT: a retried idempotency key created a second order")
-						} else {
+							log.Printf("INVARIANT: a retried idempotency key created a second order (%s then %s)", orderID, retryID)
+						default:
 							replayed.Add(1)
 						}
 					}
-				case errors.Is(err, ticketdomain.ErrInsufficientStock):
+				case outcomeSoldOut:
 					soldOut.Add(1)
+				case outcomeShed:
+					shed.Add(1)
+				case outcomeThrottled:
+					throttled.Add(1)
 				default:
 					failed.Add(1)
 					log.Printf("checkout failed: %v", err)
 				}
 			}
-		}()
+		}(buyer)
 	}
 	buyersDone.Wait()
 	stormTook := time.Since(stormStarted)
 
-	log.Printf("storm: %d order(s) opened, %d sold-out refusal(s), %d retried key(s) refused, %d error(s) in %s (%.0f checkouts/s)",
-		created.Load(), soldOut.Load(), replayed.Load(), failed.Load(), stormTook.Round(time.Millisecond),
-		float64(opts.orders)/stormTook.Seconds())
+	log.Printf("storm: %d order(s) opened, %d refused (sold out or limited), %d retried key(s) replayed, %d error(s) in %s",
+		created.Load(), soldOut.Load(), replayed.Load(), failed.Load(), stormTook.Round(time.Millisecond))
+	if opts.overHTTP {
+		// The number a capacity plan may quote, and the two that explain it.
+		log.Printf("per-replica HTTP throughput: %.0f request(s)/s at a bulkhead of %d, %d shed with 503, %d throttled with 429",
+			float64(opts.orders)/stormTook.Seconds(), opts.maxInFlight, shed.Load(), throttled.Load())
+	} else {
+		log.Printf("use-case throughput: %.0f attempt(s)/s — inventory arbitration only, NOT a per-replica HTTP ceiling",
+			float64(opts.orders)/stormTook.Seconds())
+	}
 	log.Printf("checkout latency: p50 %s  p95 %s  p99 %s",
 		checkoutLatency.percentile(50).Round(time.Microsecond),
 		checkoutLatency.percentile(95).Round(time.Microsecond),

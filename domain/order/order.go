@@ -72,7 +72,64 @@ var (
 	ErrAlreadyFinal        = errors.New("order has already reached a final status")
 	ErrHoldExpired         = errors.New("order hold has expired")
 	ErrIdempotencyMismatch = errors.New("idempotency key was reused with a different request")
+	// ErrTooManyOpenOrders is one account sitting on more unpaid orders than the
+	// box office allows. The buyer pays or cancels one before opening another.
+	ErrTooManyOpenOrders = errors.New("this account already has the maximum number of orders awaiting payment")
+	// ErrTooManyHeldTickets is one account holding more of a single tier than
+	// the box office allows.
+	ErrTooManyHeldTickets = errors.New("this account already holds the maximum number of tickets for this tier")
 )
+
+// OpenHolds is what one buyer currently has reserved and unpaid.
+//
+// Two numbers because the abuse has two shapes: a hundred small orders spread
+// across an event, and one account sitting on an entire tier.
+type OpenHolds struct {
+	// Orders is how many pending_payment orders the buyer has open, across
+	// every tier of every event.
+	Orders int
+	// TicketsForTier is how many tickets those open orders cover on the ONE
+	// tier being bought now.
+	TicketsForTier int
+}
+
+// HoldLimits caps what one account may keep off the shelf without paying.
+//
+// Without this, the per-minute rate limit does not close: at thirty checkouts a
+// minute, ten tickets each and a thirty-minute hold, one account can keep nine
+// thousand tickets unavailable indefinitely by cycling — the "hold an event
+// hostage" move, executed with no money at risk. The rate limit bounds how FAST
+// someone reserves; this bounds how MUCH they may be sitting on at once, which
+// is the quantity that actually hurts.
+//
+// A zero or negative value means that dimension is not capped, so an operator
+// can disable either one without a code change.
+type HoldLimits struct {
+	// Orders is the most pending_payment orders one account may have open.
+	Orders int
+	// TicketsPerTier is the most tickets of one tier one account may hold
+	// across all of those orders.
+	TicketsPerTier int
+}
+
+// Unlimited reports whether these limits cap nothing, so a caller can skip the
+// lock and the count entirely.
+func (l HoldLimits) Unlimited() bool { return l.Orders <= 0 && l.TicketsPerTier <= 0 }
+
+// Allows reports whether one more order for `quantity` tickets fits inside what
+// the buyer is already holding.
+//
+// The tier check counts the new order too: the question is what the buyer would
+// hold AFTER this checkout, not before it.
+func (l HoldLimits) Allows(current OpenHolds, quantity int) error {
+	if l.Orders > 0 && current.Orders >= l.Orders {
+		return ErrTooManyOpenOrders
+	}
+	if l.TicketsPerTier > 0 && current.TicketsForTier+quantity > l.TicketsPerTier {
+		return ErrTooManyHeldTickets
+	}
+	return nil
+}
 
 // MaxQuantityPerOrder caps a single purchase.
 //

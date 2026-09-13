@@ -393,25 +393,63 @@ func TestBackoffGrowsAndIsCapped(t *testing.T) {
 	}
 }
 
-func TestSchedulerEnqueuesOneSweepPerMinute(t *testing.T) {
+func TestSchedulerEnqueuesOneSweepPerPeriod(t *testing.T) {
 	jobs, _ := newQueue(t)
 	scheduler := NewScheduler(jobs, NewDispatcher(nil), time.Minute)
-	// A minute far in the past so no other test shares the bucket.
-	fixed := time.Date(2001, 9, 13, 12, 0, 30, 0, time.UTC)
-	scheduler.now = func() time.Time { return fixed }
 	db := testsupport.Database(t)
-	t.Cleanup(func() { db.Exec("DELETE FROM jobs WHERE dedupe_key LIKE ?", "%:sweep:20010913T1200") })
+	// A day far in the past, so no other test and no real tick shares a bucket.
+	t.Cleanup(func() { db.Exec("DELETE FROM jobs WHERE dedupe_key LIKE ?", "%:sweep:20010913T%") })
 
-	// Many instances ticking in the same minute produce one sweep each, not one
+	at := func(hour, minute int) time.Time {
+		return time.Date(2001, 9, 13, hour, minute, 30, 0, time.UTC)
+	}
+	scheduled := func(jobType string) int64 {
+		var total int64
+		db.Raw("SELECT COUNT(*) FROM jobs WHERE dedupe_key LIKE ? AND status = 'pending'",
+			jobType+":sweep:20010913T%").Scan(&total)
+		return total
+	}
+
+	// Many instances ticking in the same period produce one sweep each, not one
 	// per instance.
+	scheduler.now = func() time.Time { return at(12, 0) }
 	for i := 0; i < 4; i++ {
 		scheduler.Tick(context.Background())
 	}
 
-	var pending int64
-	db.Raw("SELECT COUNT(*) FROM jobs WHERE dedupe_key LIKE ? AND status = 'pending'", "%:sweep:20010913T1200").Scan(&pending)
-	if pending != 3 {
-		t.Fatalf("pending = %d, want exactly one expiry, reconcile and cleanup sweep", pending)
+	for _, jobType := range []string{domain.TypeExpireHolds, domain.TypeReconcile, domain.TypeCleanup, domain.TypeAuditSettled} {
+		if got := scheduled(jobType); got != 1 {
+			t.Fatalf("%s sweeps = %d after four ticks in one minute, want 1", jobType, got)
+		}
+	}
+
+	// Forty-five minutes later, still inside the same hour. The minute sweeps
+	// are due again; the settled-order audit is not.
+	//
+	// The cadences differ because the work does. Releasing a lapsed hold and
+	// recovering a lost notification are minutes-matter jobs with a buyer
+	// waiting. Re-reading orders that already settled catches a refund
+	// notification nobody received — running that every minute would spend a
+	// provider call per paid order per minute to catch something that happens a
+	// few times a day.
+	scheduler.now = func() time.Time { return at(12, 45) }
+	scheduler.Tick(context.Background())
+
+	for _, jobType := range []string{domain.TypeExpireHolds, domain.TypeReconcile, domain.TypeCleanup} {
+		if got := scheduled(jobType); got != 2 {
+			t.Fatalf("%s sweeps = %d in a new minute, want 2", jobType, got)
+		}
+	}
+	if got := scheduled(domain.TypeAuditSettled); got != 1 {
+		t.Fatalf("settled-order audits = %d within one hour, want 1: the hourly sweep ran on a minute cadence", got)
+	}
+
+	// The next hour turns it over.
+	scheduler.now = func() time.Time { return at(13, 5) }
+	scheduler.Tick(context.Background())
+
+	if got := scheduled(domain.TypeAuditSettled); got != 2 {
+		t.Fatalf("settled-order audits = %d in a new hour, want 2", got)
 	}
 }
 

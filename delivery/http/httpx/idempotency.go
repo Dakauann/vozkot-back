@@ -33,23 +33,67 @@ const maxIdempotentBody = 1 << 20
 //     response would hide a client bug behind a success.
 //  4. A key whose first request is still running is refused with 409, because
 //     the honest answer is "ask again in a moment", not a second checkout.
+//  5. A key whose first request DIED — the process was killed, a deploy cut it
+//     — is taken over once its lease lapses, rather than answering "still in
+//     progress" for the next day. The work may already have committed, so the
+//     endpoint gets one chance to find its own result and replay that instead
+//     of doing it twice.
 type Idempotency struct {
 	store domain.Store
 	// status translates a use-case error into a status code. It is injected
 	// rather than global so the delivery package that owns those errors owns
 	// their mapping too.
 	status StatusMapper
-	now    func() time.Time
+	// recovery finds work a previous attempt committed but never recorded.
+	// Optional: an endpoint whose work leaves no findable trace has none.
+	recovery Recovery
+	lease    time.Duration
+	now      func() time.Time
 }
 
 // StatusMapper translates an error from the handler into an HTTP status.
 type StatusMapper func(err error) int
 
-func NewIdempotency(store domain.Store, status StatusMapper) *Idempotency {
+// Recovery answers "did an earlier attempt at this key already commit?".
+//
+// It exists because the claim and the work are two writes: the key is claimed
+// first, the work runs, the response is recorded last. A process that dies in
+// the middle leaves a committed order behind a key that looks unstarted. Only
+// the endpoint knows how to look — for checkout it is the unique idempotency
+// key on the orders table — so the contract lives here and the lookup lives
+// there.
+//
+// Reporting false means "no trace of it", and the handler runs normally.
+type Recovery func(ctx context.Context, key string) (result Result, found bool, err error)
+
+// Option configures the replay contract.
+type Option func(*Idempotency)
+
+// WithRecovery supplies the lookup that turns an orphaned claim into a replay
+// instead of a second checkout.
+func WithRecovery(recovery Recovery) Option {
+	return func(i *Idempotency) { i.recovery = recovery }
+}
+
+// WithLease sets how long a claimed request may stay unfinished before a retry
+// may take it over. It must exceed the slowest honest request.
+func WithLease(lease time.Duration) Option {
+	return func(i *Idempotency) {
+		if lease > 0 {
+			i.lease = lease
+		}
+	}
+}
+
+func NewIdempotency(store domain.Store, status StatusMapper, opts ...Option) *Idempotency {
 	if status == nil {
 		status = func(error) int { return http.StatusInternalServerError }
 	}
-	return &Idempotency{store: store, status: status, now: time.Now}
+	replay := &Idempotency{store: store, status: status, lease: domain.DefaultLease, now: time.Now}
+	for _, opt := range opts {
+		opt(replay)
+	}
+	return replay
 }
 
 // Result is what a handler produces: the status and the value to encode.
@@ -89,35 +133,58 @@ func (i *Idempotency) Execute(response http.ResponseWriter, request *http.Reques
 	}
 	hash := domain.HashRequest(body)
 
-	existing, err := i.store.Begin(request.Context(), key, scope, hash, i.now())
+	claim, err := i.store.Begin(request.Context(), key, scope, hash, i.lease, i.now())
 	if err != nil {
 		WriteError(response, http.StatusInternalServerError, err)
 		return
 	}
 
-	if existing != nil {
-		switch {
+	if !claim.Mine {
+		existing := claim.Existing
+		switch { //nolint:staticcheck // the nil branch is the unreachable-by-contract guard
+		case existing == nil:
+			WriteError(response, http.StatusInternalServerError, errors.New("idempotency claim is in an unknown state"))
 		case existing.RequestHash != hash:
 			WriteError(response, http.StatusConflict, ErrKeyReused)
 		case existing.State == domain.StateCompleted:
 			// The replay. Byte for byte what the first request answered.
-			response.Header().Set("Content-Type", "application/json; charset=utf-8")
-			response.Header().Set("Idempotent-Replay", "true")
-			status := existing.StatusCode
-			if status == 0 {
-				status = http.StatusOK
-			}
-			response.WriteHeader(status)
-			if len(existing.Response) > 0 {
-				_, _ = response.Write(existing.Response)
-			}
+			i.writeReplay(response, existing.StatusCode, existing.Response)
 		default:
-			// Still running. Retry-After tells a well-behaved client how long
-			// to wait instead of hammering.
+			// Still running, and its lease has not lapsed. Retry-After tells a
+			// well-behaved client how long to wait instead of hammering.
 			response.Header().Set("Retry-After", "2")
 			WriteError(response, http.StatusConflict, ErrInFlight)
 		}
 		return
+	}
+
+	// The claim was taken over from a request that never came back. Before
+	// doing the work a second time, look for the work the first one may already
+	// have committed: the order exists, only the record of the response was
+	// lost. Doing the checkout again instead would reserve a second batch of
+	// tickets for a buyer who is looking at the first.
+	if claim.Recovered && i.recovery != nil {
+		recovered, found, err := i.recovery(request.Context(), key)
+		if err != nil {
+			i.release(request.Context(), key, scope)
+			WriteError(response, i.status(err), err)
+			return
+		}
+		if found {
+			encoded, err := json.Marshal(recovered.Body)
+			if err != nil {
+				i.release(request.Context(), key, scope)
+				WriteError(response, http.StatusInternalServerError, err)
+				return
+			}
+			// Recorded as well as returned, so every later retry is an ordinary
+			// replay rather than another recovery.
+			if err := i.store.Complete(request.Context(), key, scope, recovered.Status, encoded, i.now()); err != nil {
+				_ = err
+			}
+			i.writeReplay(response, recovered.Status, encoded)
+			return
+		}
 	}
 
 	result, err := handler(request.Context(), body)
@@ -125,10 +192,7 @@ func (i *Idempotency) Execute(response http.ResponseWriter, request *http.Reques
 		// The claim is dropped so the client may genuinely retry. Keeping it
 		// would answer every retry for the next day with "still in progress"
 		// for work that already failed.
-		if releaseErr := i.store.Release(request.Context(), key, scope); releaseErr != nil {
-			// Nothing better to do than surface it: the request already failed.
-			_ = releaseErr
-		}
+		i.release(request.Context(), key, scope)
 		WriteError(response, i.status(err), err)
 		return
 	}
@@ -147,4 +211,27 @@ func (i *Idempotency) Execute(response http.ResponseWriter, request *http.Reques
 	response.Header().Set("Content-Type", "application/json; charset=utf-8")
 	response.WriteHeader(result.Status)
 	_, _ = response.Write(encoded)
+}
+
+// writeReplay answers with what an earlier attempt produced, marked so a client
+// can tell a replay from a fresh execution.
+func (i *Idempotency) writeReplay(response http.ResponseWriter, status int, body []byte) {
+	response.Header().Set("Content-Type", "application/json; charset=utf-8")
+	response.Header().Set("Idempotent-Replay", "true")
+	if status == 0 {
+		status = http.StatusOK
+	}
+	response.WriteHeader(status)
+	if len(body) > 0 {
+		_, _ = response.Write(body)
+	}
+}
+
+// release drops a claim whose work failed. Nothing better can be done when the
+// release itself fails: the request has already failed, and the lease means the
+// claim is takeable again shortly regardless.
+func (i *Idempotency) release(ctx context.Context, key, scope string) {
+	if err := i.store.Release(ctx, key, scope); err != nil {
+		_ = err
+	}
 }

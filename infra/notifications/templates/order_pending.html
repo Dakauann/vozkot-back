@@ -1,0 +1,82 @@
+{{define "title"}}Conclua o pagamento — pedido {{.OrderReference}}{{end}}
+
+{{define "preheader"}}Suas entradas para {{.EventName}} estão reservadas até {{.PaymentDeadline}}. Total {{.Total}}.{{end}}
+
+{{define "content"}}
+<tr>
+    <td class="vk-pad" style="padding:30px 40px 0;" align="center">
+        {{template "badge" dict "tone" "warning" "text" "Aguardando pagamento"}}
+        {{template "heading" dict "title" "Falta pouco para garantir suas entradas" "subtitle" "Reservamos os ingressos no seu nome. Eles voltam à venda se o pagamento não for concluído."}}
+    </td>
+</tr>
+
+<tr>
+    <td class="vk-pad" style="padding:26px 40px 0;">
+        <p style="margin:0 0 22px; font-family:Inter,Arial,sans-serif; font-size:15px; color:#58626a; line-height:1.6;">
+            Olá{{if .BuyerName}}, <strong style="color:#14171a; font-weight:600;">{{.BuyerName}}</strong>{{end}} — recebemos seu pedido e ele está separado esperando o pagamento.
+        </p>
+        {{template "amount" dict "label" "Valor a pagar" "value" .Total}}
+    </td>
+</tr>
+
+{{if .PaymentDeadline}}
+<tr>
+    <td class="vk-pad" style="padding:18px 40px 0;">
+        {{template "panel" dict
+            "tone" "warning"
+            "title" "Sua reserva vale até"
+            "body" .PaymentDeadline}}
+    </td>
+</tr>
+{{end}}
+
+{{if .HasPix}}
+<tr>
+    <td class="vk-pad" style="padding:18px 40px 0;">
+        {{template "copybox" dict "label" "PIX copia e cola" "value" .PixCopyPaste}}
+        <p style="margin:10px 2px 0; font-family:Inter,Arial,sans-serif; font-size:12px; color:#8492a0; line-height:1.6;">
+            Copie o código acima e cole na opção “PIX copia e cola” do seu banco. A confirmação costuma chegar em segundos e você recebe outro e-mail assim que ela cair.
+        </p>
+    </td>
+</tr>
+{{end}}
+
+<tr>
+    <td class="vk-pad" style="padding:18px 40px 0;">
+        {{template "details" dict
+            "title" "Evento"
+            "k1" "Evento"     "v1" .EventName
+            "k2" "Ingresso"   "v2" .TicketTitle
+            "k3" "Quando"     "v3" .StartsAt
+            "k4" "Onde"       "v4" .Place
+            "k5" "Quantidade" "v5" .Quantity}}
+    </td>
+</tr>
+
+<tr>
+    <td class="vk-pad" style="padding:14px 40px 0;">
+        {{template "details" dict
+            "title" "Pedido"
+            "k1" "Número"             "v1" .OrderReference
+            "k2" "Forma de pagamento" "v2" .PaymentMethod
+            "k3" "Valor unitário"     "v3" .UnitPrice
+            "k4" "Total"              "v4" .Total}}
+    </td>
+</tr>
+
+{{if .OrderURL}}
+<tr>
+    <td class="vk-pad" style="padding:26px 40px 0;">
+        {{template "cta" dict "url" .OrderURL "label" "Acompanhar meu pedido"}}
+    </td>
+</tr>
+{{end}}
+
+<tr>
+    <td class="vk-pad" style="padding:22px 40px 0;">
+        <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:13px; color:#8492a0; line-height:1.7; text-align:center;">
+            Se o prazo passar, a reserva é liberada e os ingressos voltam à venda — mas você pode iniciar um novo pedido a qualquer momento.
+        </p>
+    </td>
+</tr>
+{{end}}

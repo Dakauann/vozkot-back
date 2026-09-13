@@ -37,7 +37,15 @@ type harness struct {
 	ownerID  string
 }
 
+// newHarness builds a box office with no per-buyer hold cap, which is what most
+// of these tests want: they are about inventory, and several of them make
+// twenty orders for one account on purpose.
 func newHarness(t *testing.T, capacity int) *harness {
+	t.Helper()
+	return newHarnessWithLimits(t, capacity, orderdomain.HoldLimits{})
+}
+
+func newHarnessWithLimits(t *testing.T, capacity int, limits orderdomain.HoldLimits) *harness {
 	t.Helper()
 	db := testsupport.Database(t)
 	ctx := context.Background()
@@ -71,7 +79,7 @@ func newHarness(t *testing.T, capacity int) *harness {
 
 	return &harness{
 		db:       db,
-		service:  NewService(uow.NewRunner(db), orders, tickets, queueUsecase.NewDispatcher(nil), 30*time.Minute),
+		service:  NewService(uow.NewRunner(db), orders, tickets, queueUsecase.NewDispatcher(nil), 30*time.Minute, limits),
 		orders:   orders,
 		tickets:  tickets,
 		jobs:     jobs,

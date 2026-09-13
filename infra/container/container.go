@@ -14,8 +14,10 @@ import (
 	checkoutHTTP "vozkot/delivery/http/checkout"
 	ticketHTTP "vozkot/delivery/http/ticket"
 	webhooksHTTP "vozkot/delivery/http/webhooks"
+	authdomain "vozkot/domain/auth"
 	cachedomain "vozkot/domain/cache"
 	idempotencydomain "vozkot/domain/idempotency"
+	notificationdomain "vozkot/domain/notification"
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
 	queuedomain "vozkot/domain/queue"
@@ -24,6 +26,7 @@ import (
 	"vozkot/infra/database"
 	authMiddleware "vozkot/infra/http/middleware"
 	"vozkot/infra/mercadopago"
+	"vozkot/infra/notifications"
 	"vozkot/infra/rabbitmq"
 	redisCache "vozkot/infra/redis"
 	authRepository "vozkot/infra/repositories/auth"
@@ -39,6 +42,7 @@ import (
 	authUsecase "vozkot/usecases/auth"
 	checkoutUsecase "vozkot/usecases/checkout"
 	mediaUsecase "vozkot/usecases/media"
+	notificationUsecase "vozkot/usecases/notification"
 	paymentUsecase "vozkot/usecases/payment"
 	queueUsecase "vozkot/usecases/queue"
 	ticketUsecase "vozkot/usecases/ticket"
@@ -132,12 +136,32 @@ func New(cfg config.Config) (*Container, error) {
 	ticketHandler := ticketHTTP.NewHandler(ticketService)
 
 	users := userRepository.NewUserRepository(db)
-	sessions := authRepository.NewSessionRepository(db)
+	// One decorator instance serves both the use case and the guard, which is
+	// what makes a logout take effect immediately: Logout revokes through the
+	// same object that caches the liveness the guard reads.
+	var sessions authdomain.SessionRepository = authRepository.NewSessionRepository(db)
+	if readCache != nil && cfg.Cache.SessionCacheTTL > 0 {
+		sessions = authRepository.NewCachedSessionRepository(sessions, readCache, cfg.Cache.SessionCacheTTL)
+		log.Printf("auth: session liveness cached for %s (the busiest query in the system)", cfg.Cache.SessionCacheTTL)
+	}
+
+	// One policy about which forwarding headers may be believed, applied
+	// everywhere a client address is used.
+	clients, err := authMiddleware.NewClientIP(cfg.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, err
+	}
+
+	var loginLimit *authMiddleware.RateLimit
+	if limiter != nil {
+		loginLimit = authMiddleware.NewRateLimit(limiter, "login", cfg.Cache.LoginEmailRateLimit, cfg.Cache.AuthRateWindow, clients)
+	}
+
 	authService := authUsecase.NewService(users, sessions, passwords, tokens, cfg.RefreshTokenTTL)
 	authHandler := authHTTP.NewHandler(authService, authHTTP.CookieConfig{
 		Domain: cfg.CookieDomain, Secure: cfg.CookieSecure,
 		AccessMaxAge: cfg.AccessTokenTTL, RefreshMaxAge: cfg.RefreshTokenTTL,
-	})
+	}, loginLimit, clients.From)
 	authGuard := authMiddleware.NewAuth(tokens, sessions)
 
 	// Purchases: the unit of work binds inventory, orders and the job queue to
@@ -170,9 +194,26 @@ func New(cfg config.Config) (*Container, error) {
 	dispatcher := queueUsecase.NewDispatcher(publisher)
 
 	gateway := buildGateway(cfg.Payments)
-	checkoutService := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, cfg.Payments.HoldFor)
-	paymentService := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher)
-	checkoutHandler := checkoutHTTP.NewHandler(checkoutService, paymentService, keys)
+	holdLimits := orderdomain.HoldLimits{
+		Orders:         cfg.CheckoutMaxOpenOrders,
+		TicketsPerTier: cfg.CheckoutMaxHeldPerTier,
+	}
+	if !holdLimits.Unlimited() {
+		log.Printf("checkout: one account may hold %d open order(s) and %d ticket(s) per tier",
+			holdLimits.Orders, holdLimits.TicketsPerTier)
+	}
+	// Buyer messaging. Built before the payment service because settlement is
+	// what raises a receipt, and built as ONE stack — renderer, channel
+	// senders, notifier — so the channels the notifier will accept are exactly
+	// the channels something can deliver.
+	messenger, purchases, err := buildNotifications(cfg.Notifications, jobs, dispatcher)
+	if err != nil {
+		return nil, err
+	}
+
+	checkoutService := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, cfg.Payments.HoldFor, holdLimits)
+	paymentService := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, purchases)
+	checkoutHandler := checkoutHTTP.NewHandler(checkoutService, paymentService, keys, cfg.Queue.IdempotencyLease)
 
 	var webhookHandler *webhooksHTTP.MercadoPagoHandler
 	if cfg.Payments.Enabled() {
@@ -182,9 +223,10 @@ func New(cfg config.Config) (*Container, error) {
 		log.Printf("payments: Mercado Pago is not configured; checkout will answer 503 until MERCADOPAGO_ACCESS_TOKEN is set")
 	}
 
-	var checkoutLimit *authMiddleware.RateLimit
+	var checkoutLimit, authLimit *authMiddleware.RateLimit
 	if limiter != nil {
-		checkoutLimit = authMiddleware.NewRateLimit(limiter, "checkout", cfg.Cache.CheckoutRateLimit, cfg.Cache.CheckoutRateWindow)
+		checkoutLimit = authMiddleware.NewRateLimit(limiter, "checkout", cfg.Cache.CheckoutRateLimit, cfg.Cache.CheckoutRateWindow, clients)
+		authLimit = authMiddleware.NewRateLimit(limiter, "auth", cfg.Cache.AuthRateLimit, cfg.Cache.AuthRateWindow, clients)
 	}
 	checkoutAdmission := authMiddleware.NewConcurrencyLimit(cfg.CheckoutMaxInFlight)
 
@@ -196,6 +238,7 @@ func New(cfg config.Config) (*Container, error) {
 		AuthMiddleware:    authGuard,
 		CheckoutLimit:     checkoutLimit,
 		CheckoutAdmission: checkoutAdmission,
+		AuthLimit:         authLimit,
 		MediaFiles:        mediaFiles,
 		AllowedOrigin:     cfg.CORSAllowedOrigin,
 		Health:            queueHealth(jobs, container),
@@ -209,8 +252,44 @@ func New(cfg config.Config) (*Container, error) {
 		IdleTimeout:  cfg.IdleTimeout,
 	}
 
-	container.startWorkers(cfg, jobs, keys, consumer, dispatcher, checkoutService, paymentService)
+	container.startWorkers(cfg, jobs, keys, consumer, dispatcher, checkoutService, paymentService, messenger)
 	return container, nil
+}
+
+// buildNotifications assembles the messaging stack, or reports that there is
+// none.
+//
+// Everything is decided here and nowhere else: which provider carries email,
+// which channels therefore exist, and what the notifier is allowed to queue.
+// With no RESEND_API_KEY it returns nils all the way down — a supported state
+// in development, and one config.loadNotifications refuses in production,
+// because a box office that takes money and tells nobody is worse than one
+// that will not start.
+func buildNotifications(
+	cfg config.NotificationsConfig,
+	jobs queuedomain.Queue,
+	dispatcher *queueUsecase.Dispatcher,
+) (*notificationUsecase.Service, *notificationUsecase.Purchases, error) {
+	email := notifications.NewEmailSender(cfg)
+	if email == nil {
+		log.Printf("notifications: RESEND_API_KEY is not set; buyers receive no order emails")
+		return nil, nil, nil
+	}
+
+	// Parsed once, at boot. A template with a syntax error or a missing
+	// component fails the deploy here rather than one buyer's receipt later.
+	renderer, err := notifications.NewRenderer(cfg.Brand)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	messenger := notificationUsecase.NewService(renderer, email)
+	notifier := notificationUsecase.NewNotifier(jobs, dispatcher, messenger.Channels()...)
+	purchases := notificationUsecase.NewPurchases(notifier, cfg.Brand.SiteURL)
+
+	log.Printf("notifications: Resend enabled, %d template(s), from %q, up to %d/s per replica",
+		renderer.Templates(), cfg.FromEmail, cfg.MaxRPS)
+	return messenger, purchases, nil
 }
 
 // buildGateway returns the payment adapter, or nil when the provider is not
@@ -247,6 +326,7 @@ func (c *Container) startWorkers(
 	dispatcher *queueUsecase.Dispatcher,
 	checkout *checkoutUsecase.Service,
 	payments *paymentUsecase.Service,
+	messenger *notificationUsecase.Service,
 ) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.stopWorkers = cancel
@@ -298,12 +378,46 @@ func (c *Container) startWorkers(
 			return err
 		})
 
+		// Registered only when a provider exists. A worker with no handler for
+		// a type PARKS those jobs, and the notifier writes none in that state,
+		// so the two agree: with messaging off, nothing is queued and nothing
+		// is parked.
+		if messenger != nil {
+			worker.Handle(queuedomain.TypeSendNotification, func(ctx context.Context, job queuedomain.Job) error {
+				payload, err := queueUsecase.Decode[notificationdomain.Payload](job)
+				if err != nil {
+					return err
+				}
+				return messenger.Deliver(ctx, payload)
+			})
+		}
+
 		worker.Handle(queuedomain.TypeReconcile, func(ctx context.Context, _ queuedomain.Job) error {
 			scheduled, err := payments.Reconcile(ctx, cfg.Queue.ReconcileBatchSize)
 			if err == nil && scheduled > 0 {
 				log.Printf("queue: re-checking %d pending payment(s)", scheduled)
 			}
 			return err
+		})
+
+		// The hourly counterpart: orders that already settled. It is the only
+		// thing that notices a refund or chargeback whose notification never
+		// arrived, which would otherwise leave money returned and the seat
+		// still counted as sold.
+		worker.Handle(queuedomain.TypeAuditSettled, func(ctx context.Context, _ queuedomain.Job) error {
+			scheduled, err := payments.AuditSettled(ctx, cfg.Queue.AuditBatchSize)
+			if err == nil && scheduled > 0 {
+				log.Printf("queue: auditing %d settled payment(s)", scheduled)
+			}
+			return err
+		})
+
+		worker.Handle(queuedomain.TypeRefundCharge, func(ctx context.Context, job queuedomain.Job) error {
+			payload, err := queueUsecase.Decode[queuedomain.SyncPaymentPayload](job)
+			if err != nil {
+				return err
+			}
+			return payments.Refund(ctx, payload.OrderID)
 		})
 
 		worker.Handle(queuedomain.TypeCleanup, func(ctx context.Context, _ queuedomain.Job) error {

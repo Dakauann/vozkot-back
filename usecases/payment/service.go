@@ -24,17 +24,22 @@ import (
 	"vozkot/domain/queue"
 	ticketdomain "vozkot/domain/ticket"
 	"vozkot/domain/uow"
+	notificationUsecase "vozkot/usecases/notification"
 	queueUsecase "vozkot/usecases/queue"
 )
 
 type Service struct {
-	unit       uow.Runner
-	orders     orderdomain.Repository
-	gateway    paymentdomain.Gateway
-	jobs       queue.Queue
-	dispatcher *queueUsecase.Dispatcher
-	now        func() time.Time
-	newID      func() string
+	unit    uow.Runner
+	orders  orderdomain.Repository
+	gateway paymentdomain.Gateway
+	jobs    queue.Queue
+	// notifications is what the buyer hears about all this. Nil is supported
+	// and means no provider is configured: settlement is unchanged and no
+	// message is queued that could never be sent.
+	notifications *notificationUsecase.Purchases
+	dispatcher    *queueUsecase.Dispatcher
+	now           func() time.Time
+	newID         func() string
 }
 
 func NewService(
@@ -43,15 +48,17 @@ func NewService(
 	gateway paymentdomain.Gateway,
 	jobs queue.Queue,
 	dispatcher *queueUsecase.Dispatcher,
+	notifications *notificationUsecase.Purchases,
 ) *Service {
 	return &Service{
-		unit:       unit,
-		orders:     orders,
-		gateway:    gateway,
-		jobs:       jobs,
-		dispatcher: dispatcher,
-		now:        time.Now,
-		newID:      randomID,
+		unit:          unit,
+		orders:        orders,
+		gateway:       gateway,
+		jobs:          jobs,
+		notifications: notifications,
+		dispatcher:    dispatcher,
+		now:           time.Now,
+		newID:         randomID,
 	}
 }
 
@@ -168,24 +175,152 @@ func (s *Service) SyncPayment(ctx context.Context, paymentID string) error {
 	return s.settle(ctx, item.ID, charge)
 }
 
-// Refund gives the money back and returns the tickets to sale.
+// ErrNotRefundable is an order that never took money, or already gave it back.
+var ErrNotRefundable = errors.New("order has no settled charge to refund")
+
+// RequestRefund schedules a refund and returns the order as it stands.
+//
+// The provider call is NOT made here, and that is the point. A refund is a
+// round trip to a third party that is occasionally slow and occasionally down,
+// and running it on the request meant a provider slower than the HTTP write
+// timeout left the money refunded at Mercado Pago and the order untouched here
+// — the two facts that must never disagree, disagreeing, with nothing left to
+// reconcile them. The job row is durable, retried with backoff, and keyed on
+// the order, so an operator double-clicking refunds once.
+//
+// What IS checked here is everything a person should learn immediately: an
+// order that does not exist, or one there is nothing to refund on. Those would
+// only ever park a job and wait for someone to read the log.
+func (s *Service) RequestRefund(ctx context.Context, orderID string) (*orderdomain.Order, error) {
+	item, err := s.orders.GetByID(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	if s.gateway == nil {
+		return nil, paymentdomain.ErrNotConfigured
+	}
+	if item.PaymentID == "" {
+		return nil, fmt.Errorf("%w: order %s was never charged", ErrNotRefundable, orderID)
+	}
+	if item.Status != orderdomain.StatusPaid && item.Status != orderdomain.StatusRefundRequired {
+		return nil, fmt.Errorf("%w: order %s is %s", ErrNotRefundable, orderID, item.Status)
+	}
+
+	payload, err := queue.NewPayload(queue.SyncPaymentPayload{OrderID: item.ID, PaymentID: item.PaymentID})
+	if err != nil {
+		return nil, err
+	}
+	job := &queue.Job{
+		ID:          s.newID(),
+		Type:        queue.TypeRefundCharge,
+		Payload:     payload,
+		RunAt:       s.now(),
+		MaxAttempts: queue.DefaultMaxAttempts,
+		// One refund per order, however many times the button is pressed.
+		DedupeKey: queue.TypeRefundCharge + ":" + item.ID,
+	}
+	added, err := s.jobs.Enqueue(ctx, job)
+	if err != nil {
+		return nil, err
+	}
+	if added {
+		s.dispatcher.Dispatch(ctx, job)
+	}
+	return item, nil
+}
+
+// Refund gives the money back and returns the tickets to sale. It is the
+// handler behind TypeRefundCharge.
+//
+// Safe to run twice at every level: an order that has already been refunded is
+// skipped, the provider is given a key derived from the charge, and the outcome
+// is read back rather than assumed.
 func (s *Service) Refund(ctx context.Context, orderID string) error {
 	item, err := s.orders.GetByID(ctx, orderID)
+	if errors.Is(err, orderdomain.ErrNotFound) {
+		return queue.Permanent(fmt.Errorf("refund order %s: %w", orderID, err))
+	}
 	if err != nil {
 		return err
 	}
+	if item.Status == orderdomain.StatusRefunded {
+		// Already given back — a redelivered job, or an operator who pressed
+		// the button while the first refund was settling.
+		return nil
+	}
 	if item.PaymentID == "" {
-		return fmt.Errorf("order %s has no charge to refund", orderID)
+		return queue.Permanent(fmt.Errorf("%w: order %s was never charged", ErrNotRefundable, orderID))
 	}
 	if s.gateway == nil {
 		return paymentdomain.ErrNotConfigured
 	}
 	if err := s.gateway.RefundCharge(ctx, item.PaymentID, item.TotalCents); err != nil {
+		if !paymentdomain.Retryable(err) {
+			// A rejected refund is not going to start working on attempt eight;
+			// park it where a person will see it.
+			return queue.Permanent(fmt.Errorf("refund order %s: %w", orderID, err))
+		}
 		return err
 	}
 	// The refund is confirmed by reading the charge back, not by assuming the
 	// call worked.
 	return s.SyncOrder(ctx, item.ID)
+}
+
+// AuditSettled re-reads orders that are already PAID against the provider.
+//
+// Reconcile only ever looks at orders still waiting for money, which leaves one
+// hole: a refund or a chargeback raised in the provider's own dashboard reaches
+// the box office through exactly one notification. Lose that delivery and the
+// order stays paid and the seat stays sold for good — the money went back and
+// the inventory never did, and nothing in the system would ever notice.
+//
+// It runs hourly rather than every minute, and only for events that have not
+// happened yet. Re-reading every order ever paid, forever, would be unbounded
+// work for no benefit: once the doors have closed a late refund is bookkeeping,
+// not a ticket someone else could have bought.
+func (s *Service) AuditSettled(ctx context.Context, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	pageSize := limit
+	if pageSize > 500 {
+		pageSize = 500
+	}
+	maxScanned := limit * 10
+	if maxScanned < 1000 {
+		maxScanned = 1000
+	}
+
+	scheduled := 0
+	for offset := 0; scheduled < limit && offset < maxScanned; offset += pageSize {
+		paid, err := s.orders.List(ctx, orderdomain.Filter{
+			Status:             orderdomain.StatusPaid,
+			Limit:              pageSize,
+			Offset:             offset,
+			OldestUpdatedFirst: true,
+			EventNotBefore:     s.now(),
+		})
+		if err != nil {
+			return scheduled, err
+		}
+		for index := range paid {
+			added, err := s.scheduleReconciliation(ctx, &paid[index])
+			if err != nil {
+				return scheduled, err
+			}
+			if added {
+				scheduled++
+				if scheduled == limit {
+					break
+				}
+			}
+		}
+		if len(paid) < pageSize {
+			break
+		}
+	}
+	return scheduled, nil
 }
 
 // Reconcile re-checks orders that are still waiting, and is what makes the
@@ -299,7 +434,13 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 		return nil
 	}
 
-	return s.unit.Run(ctx, func(ctx context.Context, repositories uow.Repositories) error {
+	// Messages raised inside the transaction and announced to the broker only
+	// after it commits, which is the same ordering checkout uses and for the
+	// same reason: a receipt published for a settlement that then rolled back
+	// tells a buyer they own tickets they do not.
+	var messages []*queue.Job
+
+	err := s.unit.Run(ctx, func(ctx context.Context, repositories uow.Repositories) error {
 		// Locked for the rest of the transaction. Two deliveries of the same
 		// approval processed at once now take turns, and the second reads the
 		// paid order the first committed — the redelivery case handled by the
@@ -327,7 +468,21 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 			if previous.Final() && storedPaymentID != "" {
 				return nil
 			}
-			return repositories.Orders().Update(ctx, item)
+			if err := repositories.Orders().Update(ctx, item); err != nil {
+				return err
+			}
+			// The provider has answered with something the buyer can act on,
+			// and this is the first time the order has carried it. Sending
+			// this at checkout instead would have promised a PIX code that did
+			// not exist yet.
+			if previous.HoldsStock() && storedPaymentID == "" && item.PixCopyPaste != "" {
+				message, err := s.raise(ctx, repositories, item, s.notifications.ChargeIssued)
+				if err != nil {
+					return err
+				}
+				messages = append(messages, message)
+			}
+			return nil
 		}
 
 		// Whether an approval can actually be honoured is decided BEFORE the
@@ -406,8 +561,51 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 			}
 		}
 
-		return repositories.Orders().Update(ctx, item)
+		if err := repositories.Orders().Update(ctx, item); err != nil {
+			return err
+		}
+		// Raised here and nowhere else. This is the one line in the system
+		// that knows a sale just became real, and it is inside the transaction
+		// that made it real: the receipt commits with the money or neither
+		// does. `changed` guarantees exactly one crossing, so a webhook
+		// delivered five times still buys one email.
+		if next == orderdomain.StatusPaid {
+			message, err := s.raise(ctx, repositories, item, s.notifications.OrderPaid)
+			if err != nil {
+				return err
+			}
+			messages = append(messages, message)
+		}
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+	s.dispatcher.Dispatch(ctx, messages...)
+	return nil
+}
+
+// raise queues one buyer message from inside the settlement transaction.
+//
+// The tier is read for the event details the message carries — the show, the
+// door time, the venue — because a receipt that says only "R$ 240,00" is not a
+// receipt. A tier that has been deleted costs those details and not the
+// settlement: the message still goes out, naming the order.
+func (s *Service) raise(
+	ctx context.Context,
+	repositories uow.Repositories,
+	item *orderdomain.Order,
+	compose func(context.Context, queue.Queue, *orderdomain.Order, *ticketdomain.Ticket) (*queue.Job, error),
+) (*queue.Job, error) {
+	if s.notifications == nil {
+		// No provider configured: skip the read as well as the message.
+		return nil, nil
+	}
+	tier, err := repositories.Tickets().GetByID(ctx, item.TicketID)
+	if err != nil && !errors.Is(err, ticketdomain.ErrNotFound) {
+		return nil, err
+	}
+	return compose(ctx, repositories.Jobs(), item, tier)
 }
 
 func (s *Service) fetch(ctx context.Context, chargeID string) (*paymentdomain.Charge, error) {

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net/mail"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,24 +12,40 @@ import (
 )
 
 type Config struct {
-	AppName             string
-	Port                string
-	CORSAllowedOrigin   string
-	ReadTimeout         time.Duration
-	WriteTimeout        time.Duration
-	IdleTimeout         time.Duration
+	AppName           string
+	Port              string
+	CORSAllowedOrigin string
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	// ShutdownTimeout bounds the orderly stop: draining HTTP connections, then
+	// letting workers finish the jobs already in their hands.
+	//
+	// It must exceed QUEUE_JOB_TIMEOUT for a worker mid-charge to finish, and
+	// the orchestrator's own grace period (Kubernetes defaults to 30s) must
+	// exceed THIS, or the process is killed halfway through its own drain.
+	ShutdownTimeout     time.Duration
 	JWTSecret           string
 	AccessTokenTTL      time.Duration
 	RefreshTokenTTL     time.Duration
 	CookieDomain        string
 	CookieSecure        bool
 	CheckoutMaxInFlight int
-	Database            DatabaseConfig
-	Media               MediaConfig
-	Payments            PaymentsConfig
-	Queue               QueueConfig
-	Broker              BrokerConfig
-	Cache               CacheConfig
+	// CheckoutMaxOpenOrders and CheckoutMaxHeldPerTier cap what ONE account may
+	// keep reserved and unpaid. Zero disables that dimension.
+	CheckoutMaxOpenOrders  int
+	CheckoutMaxHeldPerTier int
+	// TrustedProxyCIDRs are the networks whose X-Forwarded-For header may be
+	// believed. Everything else is rate limited by the address it connected
+	// from, because the header is otherwise client-controlled text.
+	TrustedProxyCIDRs []string
+	Database          DatabaseConfig
+	Media             MediaConfig
+	Payments          PaymentsConfig
+	Queue             QueueConfig
+	Broker            BrokerConfig
+	Cache             CacheConfig
+	Notifications     NotificationsConfig
 }
 
 // BrokerConfig points the job transport at RabbitMQ.
@@ -55,9 +72,71 @@ type CacheConfig struct {
 	// CheckoutRateLimit is how many checkouts one caller may start per window.
 	CheckoutRateLimit  int
 	CheckoutRateWindow time.Duration
+	// AuthRateLimit caps the unauthenticated credential routes per client
+	// address. Each login is a bcrypt compare, so an unthrottled flood is both
+	// a credential-stuffing surface and a CPU denial of service.
+	AuthRateLimit  int
+	AuthRateWindow time.Duration
+	// LoginEmailRateLimit caps attempts against ONE account, whatever address
+	// they come from. The address limit alone lets a botnet spread a guessing
+	// run over thousands of hosts and never trip it.
+	LoginEmailRateLimit int
+	// SessionCacheTTL is how long "this access token's session is live" is
+	// believed without asking PostgreSQL.
+	//
+	// It is the single busiest query in the system: every authenticated request
+	// makes it, and a checkout screen polls for its PIX code for the length of a
+	// thirty-minute hold. Thirty seconds collapses fifteen polls into one read
+	// while keeping a logout's effect bounded by half a minute in the worst
+	// case — and a logout invalidates the entry outright, so the bound only
+	// applies if the cache dropped the key some other way. Zero disables it.
+	SessionCacheTTL time.Duration
 }
 
 func (c CacheConfig) Enabled() bool { return strings.TrimSpace(c.URL) != "" }
+
+// NotificationsConfig is the transactional messaging integration: Resend for
+// email today, and whatever channel is added next without this struct changing
+// shape beyond one more block.
+//
+// Unlike the cache and the broker, this one is NOT optional in production. A
+// missing RESEND_API_KEY does not degrade the product — it silently stops
+// telling buyers that their money arrived, and the first person to notice is a
+// customer who believes the box office took their money and vanished. Refusing
+// to start is the honest failure; see loadNotifications.
+type NotificationsConfig struct {
+	ResendAPIKey string
+	FromEmail    string
+	FromName     string
+	// ReplyTo points a buyer who hits reply at a human instead of at a
+	// no-reply black hole.
+	ReplyTo string
+	// MaxRPS caps the client-side send rate. Resend documents five requests a
+	// second per team; staying under it turns a burst of confirmations into a
+	// short queue rather than a wall of 429s.
+	MaxRPS int
+	Brand  BrandConfig
+}
+
+// Enabled reports whether messages can be delivered at all. Off, the box office
+// still sells: orders settle, stock moves, and nothing is queued that could
+// never be sent.
+func (n NotificationsConfig) Enabled() bool { return strings.TrimSpace(n.ResendAPIKey) != "" }
+
+// BrandConfig is the identity every message carries, read from the same BRAND_*
+// variables Vozko's backend uses so one set of values configures both.
+//
+// Configuration and not constants because no template may hardcode a name: the
+// same binary runs as another box office by changing the environment, exactly
+// as the media and payment adapters already do here.
+type BrandConfig struct {
+	Name         string
+	LegalName    string
+	CNPJ         string
+	SiteURL      string
+	SupportEmail string
+	LogoURL      string
+}
 
 // PaymentsConfig is the Mercado Pago integration, using the same variable names
 // as Vozko's backend so one account's credentials serve both.
@@ -91,7 +170,15 @@ type QueueConfig struct {
 	PollInterval       time.Duration
 	BatchSize          int
 	ReconcileBatchSize int
-	CleanupBatchSize   int
+	// AuditBatchSize is how many settled orders one hourly audit re-reads at the
+	// provider. It catches a refund or chargeback whose notification was lost,
+	// which the pending-payment sweep can never see.
+	AuditBatchSize   int
+	CleanupBatchSize int
+	// IdempotencyLease is how long a claimed but unfinished request keeps its
+	// key. A process that dies mid-checkout otherwise answers every retry with
+	// "still in progress" for the full 24-hour key lifetime.
+	IdempotencyLease   time.Duration
 	CompletedRetention time.Duration
 	// JobTimeout bounds one attempt at a job. It must stay under the worker's
 	// stale window, so a slow job is never still running when the sweep
@@ -155,6 +242,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	shutdownTimeout, err := duration("SHUTDOWN_TIMEOUT", 30*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
 	accessTTL, err := duration("ACCESS_TOKEN_TTL", 15*time.Minute)
 	if err != nil {
 		return Config{}, err
@@ -175,6 +266,17 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	checkoutMaxInFlight, err := integer("CHECKOUT_MAX_IN_FLIGHT", 20)
+	if err != nil {
+		return Config{}, err
+	}
+	// Three open orders and ten tickets of one tier: enough for a buyer holding
+	// Pista and Camarote while they decide, far short of an account that can
+	// keep an event off the shelf for free.
+	maxOpenOrders, err := integer("CHECKOUT_MAX_OPEN_ORDERS", 3)
+	if err != nil {
+		return Config{}, err
+	}
+	maxHeldPerTier, err := integer("CHECKOUT_MAX_HELD_PER_TIER", 10)
 	if err != nil {
 		return Config{}, err
 	}
@@ -203,27 +305,68 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	notifications, err := loadNotifications(value("CORS_ALLOW_ORIGIN", "http://localhost:3000"))
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
-		AppName:             value("APP_NAME", "Vozkot API"),
-		Port:                port,
-		CORSAllowedOrigin:   value("CORS_ALLOW_ORIGIN", "http://localhost:3000"),
-		ReadTimeout:         readTimeout,
-		WriteTimeout:        writeTimeout,
-		IdleTimeout:         idleTimeout,
-		JWTSecret:           jwtSecret,
-		AccessTokenTTL:      accessTTL,
-		RefreshTokenTTL:     refreshTTL,
-		CookieDomain:        os.Getenv("COOKIE_DOMAIN"),
-		CookieSecure:        cookieSecure,
-		CheckoutMaxInFlight: checkoutMaxInFlight,
-		Database:            database,
-		Media:               mediaConfig,
-		Payments:            payments,
-		Queue:               queueConfig,
-		Broker:              broker,
-		Cache:               cacheConfig,
+		AppName:                value("APP_NAME", "Vozkot API"),
+		Port:                   port,
+		CORSAllowedOrigin:      value("CORS_ALLOW_ORIGIN", "http://localhost:3000"),
+		ReadTimeout:            readTimeout,
+		WriteTimeout:           writeTimeout,
+		IdleTimeout:            idleTimeout,
+		ShutdownTimeout:        shutdownTimeout,
+		JWTSecret:              jwtSecret,
+		AccessTokenTTL:         accessTTL,
+		RefreshTokenTTL:        refreshTTL,
+		CookieDomain:           os.Getenv("COOKIE_DOMAIN"),
+		CookieSecure:           cookieSecure,
+		CheckoutMaxInFlight:    checkoutMaxInFlight,
+		CheckoutMaxOpenOrders:  maxOpenOrders,
+		CheckoutMaxHeldPerTier: maxHeldPerTier,
+		TrustedProxyCIDRs:      trustedProxies(),
+		Database:               database,
+		Media:                  mediaConfig,
+		Payments:               payments,
+		Queue:                  queueConfig,
+		Broker:                 broker,
+		Cache:                  cacheConfig,
+		Notifications:          notifications,
 	}, nil
+}
+
+// DefaultTrustedProxyCIDRs are the private ranges a load balancer or ingress
+// sits in.
+//
+// The default is not "trust nothing": behind a load balancer that would make
+// every request share one client address and turn the per-address limit into a
+// single global counter. It is not "trust everything" either, which would let
+// any caller pick their own rate-limit bucket with a header. Trusting private
+// ranges means a spoofed X-Forwarded-For counts only if the connection itself
+// came from inside the network, which an attacker on the internet cannot
+// arrange.
+var DefaultTrustedProxyCIDRs = []string{
+	"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+	"::1/128", "fc00::/7",
+}
+
+// trustedProxies reads the override, where an explicitly empty value means
+// "trust no proxy" and is honoured as such.
+func trustedProxies() []string {
+	raw, present := os.LookupEnv("TRUSTED_PROXY_CIDRS")
+	if !present {
+		return DefaultTrustedProxyCIDRs
+	}
+	parts := strings.Split(raw, ",")
+	cidrs := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			cidrs = append(cidrs, trimmed)
+		}
+	}
+	return cidrs
 }
 
 func loadBroker() (BrokerConfig, error) {
@@ -254,12 +397,96 @@ func loadCache() (CacheConfig, error) {
 	if err != nil {
 		return CacheConfig{}, err
 	}
+	authLimit, err := integer("AUTH_RATE_LIMIT", 20)
+	if err != nil {
+		return CacheConfig{}, err
+	}
+	authWindow, err := duration("AUTH_RATE_WINDOW", time.Minute)
+	if err != nil {
+		return CacheConfig{}, err
+	}
+	loginEmailLimit, err := integer("LOGIN_EMAIL_RATE_LIMIT", 10)
+	if err != nil {
+		return CacheConfig{}, err
+	}
+	sessionTTL, err := duration("SESSION_CACHE_TTL", 30*time.Second)
+	if err != nil {
+		return CacheConfig{}, err
+	}
 	return CacheConfig{
-		URL:                strings.TrimSpace(os.Getenv("REDIS_URL")),
-		KeyPrefix:          value("REDIS_KEY_PREFIX", "vozkot"),
-		CheckoutRateLimit:  limit,
-		CheckoutRateWindow: window,
+		URL:                 strings.TrimSpace(os.Getenv("REDIS_URL")),
+		KeyPrefix:           value("REDIS_KEY_PREFIX", "vozkot"),
+		CheckoutRateLimit:   limit,
+		CheckoutRateWindow:  window,
+		AuthRateLimit:       authLimit,
+		AuthRateWindow:      authWindow,
+		LoginEmailRateLimit: loginEmailLimit,
+		SessionCacheTTL:     sessionTTL,
 	}, nil
+}
+
+// loadNotifications resolves the messaging integration and the brand every
+// message wears.
+//
+// siteURL defaults to the frontend origin the API already knows about, which
+// is what makes a fresh clone produce working links and a working logo before
+// anybody has set a BRAND_ variable.
+func loadNotifications(frontendOrigin string) (NotificationsConfig, error) {
+	maxRPS, err := integer("RESEND_MAX_REQUESTS_PER_SECOND", 4)
+	if err != nil {
+		return NotificationsConfig{}, err
+	}
+
+	brand := BrandConfig{
+		Name:         value("BRAND_NAME", "Vozko Tickets"),
+		LegalName:    strings.TrimSpace(os.Getenv("BRAND_LEGAL_NAME")),
+		CNPJ:         strings.TrimSpace(os.Getenv("BRAND_CNPJ")),
+		SiteURL:      strings.TrimRight(value("BRAND_SITE_URL", frontendOrigin), "/"),
+		SupportEmail: strings.TrimSpace(os.Getenv("BRAND_SUPPORT_EMAIL")),
+	}
+	// The frontend serves the mark at a fixed path, so the default is right
+	// without configuration and still overridable when the logo moves to a CDN.
+	brand.LogoURL = value("BRAND_LOGO_URL", brand.SiteURL+"/brand/vozko-tickets-logo.png")
+
+	notifications := NotificationsConfig{
+		ResendAPIKey: strings.TrimSpace(os.Getenv("RESEND_API_KEY")),
+		FromEmail:    strings.TrimSpace(value("RESEND_FROM_EMAIL", os.Getenv("BRAND_FROM_EMAIL"))),
+		FromName:     strings.TrimSpace(value("RESEND_FROM_NAME", brand.Name)),
+		ReplyTo:      strings.TrimSpace(value("RESEND_REPLY_TO", brand.SupportEmail)),
+		MaxRPS:       maxRPS,
+		Brand:        brand,
+	}
+
+	// A From address that the provider rejects fails EVERY send, and it fails
+	// them in a worker rather than at boot, where nobody is looking. One parse
+	// at startup turns a silent outage into a refused deploy.
+	for label, address := range map[string]string{
+		"RESEND_FROM_EMAIL": notifications.FromEmail,
+		"RESEND_REPLY_TO":   notifications.ReplyTo,
+	} {
+		if address == "" {
+			continue
+		}
+		if _, err := mail.ParseAddress(address); err != nil {
+			return NotificationsConfig{}, fmt.Errorf("%s is not a valid email address: %w", label, err)
+		}
+	}
+
+	if notifications.Enabled() && notifications.FromEmail == "" {
+		return NotificationsConfig{}, fmt.Errorf("RESEND_FROM_EMAIL (or BRAND_FROM_EMAIL) is required when RESEND_API_KEY is set")
+	}
+	if os.Getenv("APP_ENV") == "production" {
+		// Not a preference. An unconfigured sender in production means every
+		// buyer pays and hears nothing back, which the system cannot detect on
+		// its own because no job fails: none are ever written.
+		if !notifications.Enabled() {
+			return NotificationsConfig{}, fmt.Errorf("RESEND_API_KEY is required in production; buyers must receive their order confirmations")
+		}
+		if brand.SiteURL == "" {
+			return NotificationsConfig{}, fmt.Errorf("BRAND_SITE_URL is required in production")
+		}
+	}
+	return notifications, nil
 }
 
 func loadPayments() (PaymentsConfig, error) {
@@ -344,12 +571,23 @@ func loadQueue() (QueueConfig, error) {
 	if reconcileBatch == 0 {
 		reconcileBatch = 1000
 	}
+	auditBatch, err := integer("QUEUE_AUDIT_BATCH_SIZE", 500)
+	if err != nil {
+		return QueueConfig{}, err
+	}
+	if auditBatch == 0 {
+		auditBatch = 500
+	}
 	cleanupBatch, err := integer("QUEUE_CLEANUP_BATCH_SIZE", 10000)
 	if err != nil {
 		return QueueConfig{}, err
 	}
 	if cleanupBatch == 0 {
 		cleanupBatch = 10000
+	}
+	idempotencyLease, err := duration("IDEMPOTENCY_LEASE", time.Minute)
+	if err != nil {
+		return QueueConfig{}, err
 	}
 	completedRetention, err := duration("QUEUE_COMPLETED_RETENTION", 7*24*time.Hour)
 	if err != nil {
@@ -360,7 +598,9 @@ func loadQueue() (QueueConfig, error) {
 		PollInterval:       poll,
 		BatchSize:          batch,
 		ReconcileBatchSize: reconcileBatch,
+		AuditBatchSize:     auditBatch,
 		CleanupBatchSize:   cleanupBatch,
+		IdempotencyLease:   idempotencyLease,
 		CompletedRetention: completedRetention,
 		SweepInterval:      sweep,
 		JobTimeout:         jobTimeout,

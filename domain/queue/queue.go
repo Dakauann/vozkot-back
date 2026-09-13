@@ -28,9 +28,27 @@ const (
 	// TypeReconcile re-reads payments for orders that are still pending, which
 	// is what makes the system correct even if every webhook is lost.
 	TypeReconcile = "payment.reconcile"
+	// TypeAuditSettled re-reads payments for orders that are already PAID, on a
+	// much slower cadence.
+	//
+	// Reconciliation only ever looks at orders still waiting for money, so a
+	// refund or a chargeback issued in the provider's own dashboard reaches the
+	// box office through exactly one notification. Lose it and the order stays
+	// paid and the seat stays sold forever — money returned, inventory not.
+	TypeAuditSettled = "payment.audit"
+	// TypeRefundCharge gives money back through the same durable ledger as
+	// every other provider call, so a refund survives a slow provider and a
+	// restart instead of dying with the request that asked for it.
+	TypeRefundCharge = "charge.refund"
 	// TypeCleanup removes old completed work and expired idempotency keys in
 	// bounded batches. Dead jobs and business records are never removed here.
 	TypeCleanup = "maintenance.cleanup"
+	// TypeSendNotification delivers one message to one buyer over one channel.
+	// It is here, in the same ledger as the money, because telling somebody
+	// their ingressos are theirs is not best-effort work: the job row is
+	// written in the transaction that settled the payment, so the receipt
+	// cannot exist without the payment and cannot be lost with a process.
+	TypeSendNotification = "notification.send"
 )
 
 type Status string

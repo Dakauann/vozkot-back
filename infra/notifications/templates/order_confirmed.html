@@ -1,0 +1,70 @@
+{{define "title"}}Pagamento confirmado — pedido {{.OrderReference}}{{end}}
+
+{{define "preheader"}}Seus ingressos para {{.EventName}} estão garantidos. Pedido {{.OrderReference}}, {{.Total}}.{{end}}
+
+{{define "content"}}
+<tr>
+    <td class="vk-pad" style="padding:30px 40px 0;" align="center">
+        {{template "badge" dict "tone" "success" "text" "Pagamento confirmado"}}
+        {{template "heading" dict "title" "Seus ingressos estão garantidos" "subtitle" "Recebemos seu pagamento e reservamos as suas entradas."}}
+    </td>
+</tr>
+
+<tr>
+    <td class="vk-pad" style="padding:26px 40px 0;">
+        <p style="margin:0 0 22px; font-family:Inter,Arial,sans-serif; font-size:15px; color:#58626a; line-height:1.6;">
+            Olá{{if .BuyerName}}, <strong style="color:#14171a; font-weight:600;">{{.BuyerName}}</strong>{{end}} — está tudo certo com o seu pedido. Guarde este e-mail: ele é o comprovante da sua compra.
+        </p>
+        {{template "amount" dict "label" "Valor pago" "value" .Total}}
+    </td>
+</tr>
+
+<tr>
+    <td class="vk-pad" style="padding:18px 40px 0;">
+        {{template "details" dict
+            "title" "Evento"
+            "k1" "Evento"     "v1" .EventName
+            "k2" "Ingresso"   "v2" .TicketTitle
+            "k3" "Quando"     "v3" .StartsAt
+            "k4" "Onde"       "v4" .Place
+            "k5" "Quantidade" "v5" .Quantity}}
+    </td>
+</tr>
+
+<tr>
+    <td class="vk-pad" style="padding:14px 40px 0;">
+        {{template "details" dict
+            "title" "Pagamento"
+            "k1" "Pedido"             "v1" .OrderReference
+            "k2" "Forma de pagamento" "v2" .PaymentMethod
+            "k3" "Valor unitário"     "v3" .UnitPrice
+            "k4" "Total"              "v4" .Total
+            "k5" "Pago em"            "v5" .PaidAt}}
+    </td>
+</tr>
+
+{{if .OrderURL}}
+<tr>
+    <td class="vk-pad" style="padding:26px 40px 0;">
+        {{template "cta" dict "url" .OrderURL "label" "Ver meu pedido"}}
+    </td>
+</tr>
+{{end}}
+
+<tr>
+    <td class="vk-pad" style="padding:26px 40px 0;">
+        {{template "panel" dict
+            "tone" "info"
+            "title" "Na entrada do evento"
+            "body" "Apresente este e-mail, ou o número do pedido acima, junto de um documento oficial com foto. A entrada é nominal e vale para a quantidade indicada."}}
+    </td>
+</tr>
+
+<tr>
+    <td class="vk-pad" style="padding:22px 40px 0;">
+        <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:13px; color:#8492a0; line-height:1.7; text-align:center;">
+            Não reconhece esta compra? Responda a este e-mail{{if .Brand.SupportEmail}} ou escreva para <a href="mailto:{{.Brand.SupportEmail}}" style="color:#007a5c; text-decoration:none;">{{.Brand.SupportEmail}}</a>{{end}} imediatamente.
+        </p>
+    </td>
+</tr>
+{{end}}

@@ -1,11 +1,10 @@
 package middleware
 
 import (
+	"context"
 	"log"
-	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"vozkot/delivery/http/httpx"
@@ -28,13 +27,43 @@ type RateLimit struct {
 	window  time.Duration
 	// scope namespaces the counter so two endpoints do not share a budget.
 	scope string
+	// clients resolves who is being limited. Nil falls back to the connecting
+	// address, trusting no forwarding header.
+	clients *ClientIP
 }
 
-func NewRateLimit(limiter cache.RateLimiter, scope string, limit int, window time.Duration) *RateLimit {
+func NewRateLimit(limiter cache.RateLimiter, scope string, limit int, window time.Duration, clients *ClientIP) *RateLimit {
 	if window <= 0 {
 		window = time.Minute
 	}
-	return &RateLimit{limiter: limiter, limit: limit, window: window, scope: scope}
+	return &RateLimit{limiter: limiter, limit: limit, window: window, scope: scope, clients: clients}
+}
+
+// Allow counts one event against an explicit key, for a caller that knows
+// something the middleware cannot see.
+//
+// Login needs it: limiting by address alone lets a botnet spread a guessing run
+// across thousands of hosts and never trip a counter, so the account being
+// guessed has to be counted too — and the account is in the request body, which
+// only the handler has parsed.
+func (m *RateLimit) Allow(ctx context.Context, key string) (cache.Decision, bool) {
+	if m == nil || m.limiter == nil || m.limit <= 0 {
+		return cache.Decision{Allowed: true}, true
+	}
+	decision, err := m.limiter.Allow(ctx, m.scope+":"+key, m.limit, m.window)
+	if err != nil {
+		log.Printf("rate limit: %v (allowing the request)", err)
+		return cache.Decision{Allowed: true}, true
+	}
+	return decision, decision.Allowed
+}
+
+// WriteRefusal answers a caller that ran out of budget.
+func (m *RateLimit) WriteRefusal(response http.ResponseWriter, decision cache.Decision) {
+	response.Header().Set("Retry-After", strconv.Itoa(int(decision.RetryAfter.Seconds())+1))
+	response.Header().Set("X-RateLimit-Limit", strconv.Itoa(m.limit))
+	response.Header().Set("X-RateLimit-Remaining", "0")
+	httpx.WriteError(response, http.StatusTooManyRequests, errTooManyRequests)
 }
 
 func (m *RateLimit) Require(next http.Handler) http.Handler {
@@ -44,20 +73,12 @@ func (m *RateLimit) Require(next http.Handler) http.Handler {
 			return
 		}
 
-		decision, err := m.limiter.Allow(request.Context(), m.scope+":"+callerKey(request), m.limit, m.window)
-		if err != nil {
-			log.Printf("rate limit: %v (allowing the request)", err)
-			next.ServeHTTP(response, request)
-			return
-		}
-		if !decision.Allowed {
+		decision, allowed := m.Allow(request.Context(), m.callerKey(request))
+		if !allowed {
 			// Retry-After is what lets a well-behaved client back off instead of
 			// hammering, which is the difference between a limiter that sheds
 			// load and one that merely renames it.
-			response.Header().Set("Retry-After", strconv.Itoa(int(decision.RetryAfter.Seconds())+1))
-			response.Header().Set("X-RateLimit-Limit", strconv.Itoa(m.limit))
-			response.Header().Set("X-RateLimit-Remaining", "0")
-			httpx.WriteError(response, http.StatusTooManyRequests, errTooManyRequests)
+			m.WriteRefusal(response, decision)
 			return
 		}
 
@@ -73,30 +94,11 @@ func (m *RateLimit) Require(next http.Handler) http.Handler {
 // The account comes first on purpose. Limiting by address alone punishes
 // everyone behind one corporate NAT and lets one account with a dozen proxies
 // through.
-func callerKey(request *http.Request) string {
+func (m *RateLimit) callerKey(request *http.Request) string {
 	if claims, ok := auth.ClaimsFromContext(request.Context()); ok && claims.UserID != "" {
 		return "user:" + claims.UserID
 	}
-	return "ip:" + clientIP(request)
-}
-
-func clientIP(request *http.Request) string {
-	// Only the first hop of X-Forwarded-For is meaningful, and only behind a
-	// proxy that sets it; the rest is client-controlled text.
-	if forwarded := request.Header.Get("X-Forwarded-For"); forwarded != "" {
-		if first, _, found := strings.Cut(forwarded, ","); found {
-			return strings.TrimSpace(first)
-		}
-		return strings.TrimSpace(forwarded)
-	}
-	if real := strings.TrimSpace(request.Header.Get("X-Real-IP")); real != "" {
-		return real
-	}
-	host, _, err := net.SplitHostPort(request.RemoteAddr)
-	if err != nil {
-		return request.RemoteAddr
-	}
-	return host
+	return "ip:" + m.clients.From(request)
 }
 
 var errTooManyRequests = &rateLimitError{}

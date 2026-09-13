@@ -64,8 +64,26 @@ const (
 	TicketPrefix = "tickets:item:"
 	// OrderPrefix covers single orders, the key a checkout screen polls.
 	OrderPrefix = "orders:item:"
+	// SessionPrefix covers "is this access token's session still live", the
+	// lookup the authentication middleware makes on EVERY authenticated
+	// request — the busiest query in the system once buyers start polling.
+	SessionPrefix = "sessions:jti:"
+	// SessionLivePrefix maps a session id back to the key above.
+	//
+	// Revoking and rotating name a session by id, while the hot lookup is keyed
+	// by the access token's JTI. Without this pointer a logout could not find
+	// the entry it has to drop, and the session would stay live until the entry
+	// expired on its own.
+	SessionLivePrefix = "sessions:live:"
 )
 
 func TicketKey(id string) string { return TicketPrefix + id }
 
 func OrderKey(id string) string { return OrderPrefix + id }
+
+// SessionKey names the liveness entry for one access token. Both the account
+// and the token id are in the key, so an entry can never answer for a different
+// account even if a JTI were somehow reused.
+func SessionKey(userID, jti string) string { return SessionPrefix + userID + ":" + jti }
+
+func SessionLiveKey(sessionID string) string { return SessionLivePrefix + sessionID }

@@ -23,6 +23,12 @@ type IdempotencyKey struct {
 
 	CreatedAt   time.Time `gorm:"not null;autoCreateTime"`
 	CompletedAt *time.Time
+	// LeaseExpiresAt is when an unfinished claim may be taken over by a retry.
+	//
+	// Nullable on purpose. A row written before leases existed has none, and
+	// "no lease" is exactly the orphan case a takeover is for — so NULL reads
+	// as lapsed rather than as forever.
+	LeaseExpiresAt *time.Time
 	// ExpiresAt is indexed because pruning queries it and nothing else.
 	ExpiresAt time.Time `gorm:"not null;index:idx_idempotency_expires_at"`
 }

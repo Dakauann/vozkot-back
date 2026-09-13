@@ -44,6 +44,9 @@ type Dependencies struct {
 	// CheckoutAdmission is a per-process bulkhead. It remains active even when
 	// Redis or the edge waiting room is unavailable.
 	CheckoutAdmission Middleware
+	// AuthLimit throttles the unauthenticated credential routes by client
+	// address. Nil when Redis is not configured.
+	AuthLimit Middleware
 	// MediaFiles is the local development asset server, nil when the object
 	// store is Cloudflare R2 and the CDN serves the bytes.
 	MediaFiles    http.Handler
@@ -65,7 +68,15 @@ func NewRouter(deps Dependencies) http.Handler {
 		httpx.WriteJSON(response, http.StatusOK, payload)
 	})
 
-	deps.Auth.RegisterPublic(router)
+	// Register, login and refresh are the only routes an anonymous caller can
+	// reach that cost real work: a login is a bcrypt compare, and free
+	// registration is what makes accounts a renewable resource for anyone
+	// holding inventory hostage.
+	var throttle func(http.Handler) http.Handler
+	if deps.AuthLimit != nil {
+		throttle = deps.AuthLimit.Require
+	}
+	deps.Auth.RegisterPublic(router, throttle)
 	deps.Auth.RegisterProtected(router, deps.AuthMiddleware.Require)
 
 	// Everything under /api/v1 is behind the session. The sub-mux exists

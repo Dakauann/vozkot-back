@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"vozkot/delivery/http/httpx"
 	authdomain "vozkot/domain/auth"
@@ -32,12 +33,35 @@ type Handler struct {
 	replay   *httpx.Idempotency
 }
 
-func NewHandler(checkout *checkoutUsecase.Service, payments *paymentUsecase.Service, store idempotencydomain.Store) *Handler {
-	return &Handler{
-		checkout: checkout,
-		payments: payments,
-		replay:   httpx.NewIdempotency(store, StatusFor),
-	}
+func NewHandler(
+	checkout *checkoutUsecase.Service,
+	payments *paymentUsecase.Service,
+	store idempotencydomain.Store,
+	lease time.Duration,
+) *Handler {
+	handler := &Handler{checkout: checkout, payments: payments}
+	handler.replay = httpx.NewIdempotency(store, StatusFor,
+		httpx.WithLease(lease),
+		// Recovery for a claim orphaned by a crash. The order table already
+		// carries the key under a unique index, so the order a dead request
+		// committed can be found and replayed — which is the difference
+		// between a buyer seeing the tickets they bought and a buyer
+		// reserving a second batch of them.
+		httpx.WithRecovery(func(ctx context.Context, key string) (httpx.Result, bool, error) {
+			item, err := checkout.FindByIdempotencyKey(ctx, key)
+			if errors.Is(err, orderdomain.ErrNotFound) {
+				return httpx.Result{}, false, nil
+			}
+			if err != nil {
+				return httpx.Result{}, false, err
+			}
+			return httpx.Result{
+				Status: http.StatusCreated,
+				Body:   OrderEnvelope{Data: toOrderResponse(item)},
+			}, true, nil
+		}),
+	)
+	return handler
 }
 
 func (h *Handler) Register(router *http.ServeMux) {
@@ -194,16 +218,17 @@ func (h *Handler) cancel(response http.ResponseWriter, request *http.Request) {
 }
 
 // @Summary		Estornar um pedido
-// @Description	Estorna um pedido pago no provedor de pagamento e devolve os ingressos ao estoque. Restrito a administradores.
+// @Description	Agenda o estorno de um pedido pago no provedor de pagamento e devolve os ingressos ao estoque. Restrito a administradores. O estorno é processado por um job durável e confirmado relendo a cobrança no provedor, então a resposta é 202 e o pedido deve ser consultado até ficar `refunded`. Pedir o estorno duas vezes estorna uma vez.
 // @Tags			Compras
 // @Produce		json
 // @Security		BearerAuth
 // @Param		id path string true "ID do pedido"
-// @Success		200 {object} OrderEnvelope
+// @Success		202 {object} OrderEnvelope
 // @Failure		401 {object} ErrorResponse
 // @Failure		403 {object} ErrorResponse
 // @Failure		404 {object} ErrorResponse
-// @Failure		502 {object} ErrorResponse
+// @Failure		422 {object} ErrorResponse
+// @Failure		503 {object} ErrorResponse
 // @Router		/api/v1/orders/{id}/refund [post]
 func (h *Handler) refund(response http.ResponseWriter, request *http.Request) {
 	claims, _ := authdomain.ClaimsFromContext(request.Context())
@@ -217,17 +242,16 @@ func (h *Handler) refund(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 
+	// Scheduled, not performed. Calling the provider on this request meant one
+	// slower than the write timeout left the money refunded at Mercado Pago and
+	// the order untouched here, with nothing to reconcile the two.
 	id := strings.TrimSpace(request.PathValue("id"))
-	if err := h.payments.Refund(request.Context(), id); err != nil {
-		httpx.WriteError(response, StatusFor(err), err)
-		return
-	}
-	item, err := h.checkout.Get(request.Context(), id)
+	item, err := h.payments.RequestRefund(request.Context(), id)
 	if err != nil {
 		httpx.WriteError(response, StatusFor(err), err)
 		return
 	}
-	httpx.WriteJSON(response, http.StatusOK, OrderEnvelope{Data: toOrderResponse(item)})
+	httpx.WriteJSON(response, http.StatusAccepted, OrderEnvelope{Data: toOrderResponse(item)})
 }
 
 // authorized loads the order and refuses one that belongs to someone else.
@@ -276,8 +300,16 @@ func StatusFor(err error) int {
 		errors.Is(err, ticketdomain.ErrNotOnSale),
 		errors.Is(err, idempotencydomain.ErrInFlight),
 		errors.Is(err, idempotencydomain.ErrRequestMismatch),
-		errors.Is(err, orderdomain.ErrIdempotencyMismatch):
+		errors.Is(err, orderdomain.ErrIdempotencyMismatch),
+		// Not 429: nothing is rate limited here. The account is holding as much
+		// unpaid inventory as it is allowed to, and the way out is to pay for
+		// one of those orders or cancel it — a conflict with state the caller
+		// owns, which is exactly what 409 says.
+		errors.Is(err, orderdomain.ErrTooManyOpenOrders),
+		errors.Is(err, orderdomain.ErrTooManyHeldTickets):
 		return http.StatusConflict
+	case errors.Is(err, paymentUsecase.ErrNotRefundable):
+		return http.StatusUnprocessableEntity
 	case errors.Is(err, orderdomain.ErrInvalidQuantity),
 		errors.Is(err, orderdomain.ErrInvalidBuyerName),
 		errors.Is(err, orderdomain.ErrInvalidBuyerEmail),
