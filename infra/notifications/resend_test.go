@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -36,17 +35,10 @@ func newTestSender(t *testing.T, maxRPS int, handler http.HandlerFunc) *EmailSen
 		FromName:     "Vozko Tickets",
 		ReplyTo:      "suporte@tickets.example",
 		MaxRPS:       maxRPS,
-	})
+	}, WithBaseURL(server.URL))
 	if sender == nil {
 		t.Fatal("expected a sender for a configured API key")
 	}
-	// The SDK resolves "emails" against BaseURL, which must therefore keep its
-	// trailing slash or the path is replaced instead of appended.
-	base, err := url.Parse(server.URL + "/")
-	if err != nil {
-		t.Fatalf("parse test server URL: %v", err)
-	}
-	sender.client.BaseURL = base
 	return sender
 }
 
@@ -215,12 +207,17 @@ func TestSendIsRateLimited(t *testing.T) {
 // The caller's context wins. A worker shutting down must not be held by a
 // provider call that has stopped answering.
 func TestSendRespectsTheCallerContext(t *testing.T) {
+	// Released with a defer rather than t.Cleanup: cleanups run last-in
+	// first-out, and the server's own Close was registered second, so a
+	// cleanup here would run after it — leaving Close waiting on the handler
+	// this channel is what frees.
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	defer close(release)
 	sender := newTestSender(t, 0, func(response http.ResponseWriter, request *http.Request) {
 		select {
 		case <-release:
 		case <-request.Context().Done():
+		case <-time.After(10 * time.Second):
 		}
 		accepted(response)
 	})

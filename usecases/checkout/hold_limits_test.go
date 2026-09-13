@@ -174,8 +174,8 @@ func TestOneBuyersLimitDoesNotBlockAnother(t *testing.T) {
 	}
 
 	_, err := h.service.Start(context.Background(), StartInput{
-		TicketID:       h.ticketID,
-		Quantity:       1,
+		Items:          []orderdomain.DraftItem{{TicketID: h.ticketID, Quantity: 1}},
+		Confirm:        true,
 		BuyerID:        other,
 		BuyerName:      "Joao Lima",
 		BuyerEmail:     "joao@exemplo.com.br",

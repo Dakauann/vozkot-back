@@ -8,11 +8,8 @@ import (
 
 func validDraft() Draft {
 	return Draft{
-		EventName:  "Festival Aurora",
+		EventID:    "evt_test",
 		Title:      "Pista Premium",
-		Venue:      "Arena Castelão",
-		City:       "Fortaleza, CE",
-		StartsAt:   time.Date(2026, 11, 15, 22, 0, 0, 0, time.UTC),
 		PriceCents: 24000,
 		Quantity:   500,
 	}
@@ -42,10 +39,8 @@ func TestNewRejectsIncompleteDrafts(t *testing.T) {
 		mutate func(*Draft)
 		want   error
 	}{
-		"no event":       {func(d *Draft) { d.EventName = "  " }, ErrInvalidEventName},
+		"no event":       {func(d *Draft) { d.EventID = "  " }, ErrInvalidEvent},
 		"no title":       {func(d *Draft) { d.Title = "" }, ErrInvalidTitle},
-		"no venue":       {func(d *Draft) { d.Venue = "" }, ErrInvalidVenue},
-		"no start":       {func(d *Draft) { d.StartsAt = time.Time{} }, ErrInvalidStartsAt},
 		"negative price": {func(d *Draft) { d.PriceCents = -1 }, ErrInvalidPrice},
 		"no stock":       {func(d *Draft) { d.Quantity = 0 }, ErrInvalidQuantity},
 		"bad status":     {func(d *Draft) { d.Status = "on-sale" }, ErrInvalidStatus},

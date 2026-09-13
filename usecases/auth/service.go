@@ -136,6 +136,17 @@ func (s *Service) Me(ctx context.Context, claims *domain.Claims) (*user.User, er
 	return item, nil
 }
 
+// StartSessionFor opens a session for an account that has already been
+// authenticated by some other means.
+//
+// Exported for the passwordless path, which proves identity with a code rather
+// than a password and then needs exactly the same session, cookies and rotation
+// the password path gets. A second implementation of "issue tokens" is how two
+// sign-in routes end up with two different session lifetimes.
+func (s *Service) StartSessionFor(ctx context.Context, item *user.User, ipAddress, deviceInfo string) (*domain.TokenPair, error) {
+	return s.startSession(ctx, item, ipAddress, deviceInfo)
+}
+
 func (s *Service) startSession(ctx context.Context, item *user.User, ipAddress, deviceInfo string) (*domain.TokenPair, error) {
 	pair, err := s.tokens.Issue(item)
 	if err != nil {

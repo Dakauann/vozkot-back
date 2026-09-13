@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -61,10 +62,33 @@ type EmailSender struct {
 
 var _ domain.Sender = (*EmailSender)(nil)
 
+// Option adjusts the sender at construction.
+type Option func(*EmailSender)
+
+// WithBaseURL points the client at another host.
+//
+// It exists for tests, which stand a real HTTP server in for Resend so that the
+// retry, rate limit and wire format under test are the real ones. Production
+// never sets it.
+func WithBaseURL(raw string) Option {
+	return func(e *EmailSender) {
+		// The SDK resolves "emails" against this, so the trailing slash is
+		// what makes the path append instead of replace.
+		if !strings.HasSuffix(raw, "/") {
+			raw += "/"
+		}
+		parsed, err := url.Parse(raw)
+		if err != nil {
+			return
+		}
+		e.client.BaseURL = parsed
+	}
+}
+
 // NewEmailSender builds the Resend-backed sender, or returns nil when no API
 // key is configured. A nil sender is never registered, so nothing above can
 // queue a message that could not have been delivered.
-func NewEmailSender(cfg config.NotificationsConfig) *EmailSender {
+func NewEmailSender(cfg config.NotificationsConfig, opts ...Option) *EmailSender {
 	if !cfg.Enabled() {
 		return nil
 	}
@@ -72,7 +96,7 @@ func NewEmailSender(cfg config.NotificationsConfig) *EmailSender {
 	if maxRPS <= 0 {
 		maxRPS = defaultResendMaxRPS
 	}
-	return &EmailSender{
+	sender := &EmailSender{
 		client:      resend.NewClient(strings.TrimSpace(cfg.ResendAPIKey)),
 		fromEmail:   strings.TrimSpace(cfg.FromEmail),
 		fromName:    strings.TrimSpace(cfg.FromName),
@@ -80,6 +104,10 @@ func NewEmailSender(cfg config.NotificationsConfig) *EmailSender {
 		limiter:     rate.NewLimiter(rate.Limit(maxRPS), maxRPS),
 		maxAttempts: emailSendMaxAttempts,
 	}
+	for _, opt := range opts {
+		opt(sender)
+	}
+	return sender
 }
 
 func (e *EmailSender) Channel() domain.Channel { return domain.ChannelEmail }

@@ -15,9 +15,15 @@ import "time"
 // type plus a sort of the entire backlog on every claim — fine when the queue
 // is empty, and exactly wrong during the burst a queue exists for.
 type Job struct {
-	ID      string `gorm:"primaryKey;type:varchar(48)"`
-	Type    string `gorm:"not null;type:varchar(64);index:idx_jobs_claim,priority:3"`
-	Payload []byte `gorm:"type:jsonb;not null;default:'{}'"`
+	ID   string `gorm:"primaryKey;type:varchar(48)"`
+	Type string `gorm:"not null;type:varchar(64);index:idx_jobs_claim,priority:3"`
+	// No column default. PostgreSQL stores one on a jsonb column as
+	// '{}'::jsonb, which never matches the literal in a struct tag, so
+	// AutoMigrate re-issues ALTER COLUMN SET DEFAULT on every boot — DDL in
+	// steady state, and a table lock on the busiest table in the system. The
+	// repository already defaults an empty payload in Go, which is the only
+	// place that writes one.
+	Payload []byte `gorm:"type:jsonb;not null"`
 
 	Status      string `gorm:"not null;type:varchar(16);default:'pending';index:idx_jobs_claim,priority:1"`
 	Attempts    int    `gorm:"not null;default:0"`

@@ -3,54 +3,32 @@ package ticket
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 
 	"gorm.io/gorm"
 
-	mediadomain "vozkot/domain/media"
 	domain "vozkot/domain/ticket"
-	mediaRepository "vozkot/infra/repositories/media"
 	ticketRepository "vozkot/infra/repositories/ticket"
-	"vozkot/infra/storage"
 	"vozkot/infra/testsupport"
-	mediaUsecase "vozkot/usecases/media"
 )
 
-// PostgreSQL for the rows, and the real local-disk adapter for the bytes: the
-// same code paths production runs when Cloudflare R2 is not configured. The
-// only thing a test double would add here is a way for these tests to pass
-// while the product fails.
-
-// pngBytes is a one-pixel PNG: enough for the upload path to have real content
-// without embedding a fixture file.
-var pngBytes = []byte{
-	0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a,
-	0x00, 0x00, 0x00, 0x0d, 'I', 'H', 'D', 'R',
-	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-	0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-	0x89,
-}
+// A ticket here is a TIER: a price and a number of seats, belonging to an
+// event. Everything about the happening — its name, venue, date, category, map
+// pin and artwork — lives on the event, and is tested in usecases/event.
+//
+// Real PostgreSQL, because what these tests are about is stock arithmetic the
+// database arbitrates.
 
 type harness struct {
 	service *Service
-	root    string
 	ownerID string
+	eventID string
 	db      *gorm.DB
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	db := testsupport.Database(t)
-	root := t.TempDir()
-
-	files, err := storage.NewLocal(root, "http://localhost:8080/media")
-	if err != nil {
-		t.Fatalf("local storage: %v", err)
-	}
-	library := mediaUsecase.NewService(mediaRepository.NewMediaRepository(db), files)
 
 	ownerID := testsupport.Unique("usr")
 	if err := db.Exec(`
@@ -59,15 +37,14 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("seed user: %v", err)
 	}
 	t.Cleanup(func() {
-		// Tickets cascade to media rows; the user row is removed last.
 		db.Exec("DELETE FROM tickets WHERE owner_id = ?", ownerID)
 		db.Exec("DELETE FROM users WHERE id = ?", ownerID)
 	})
 
 	return &harness{
-		service: NewService(ticketRepository.NewTicketRepository(db), library),
-		root:    root,
+		service: NewService(ticketRepository.NewTicketRepository(db)),
 		ownerID: ownerID,
+		eventID: testsupport.SeedEvent(t, db, ownerID),
 		db:      db,
 	}
 }
@@ -75,42 +52,14 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) createInput() CreateInput {
 	return CreateInput{
 		OwnerID:    h.ownerID,
-		EventName:  testsupport.Unique("Festival Aurora"),
+		EventID:    h.eventID,
 		Title:      "Pista",
-		Venue:      "Arena Castelão",
-		City:       "Fortaleza, CE",
-		StartsAt:   time.Date(2026, 11, 15, 22, 0, 0, 0, time.UTC),
 		PriceCents: 18000,
 		Quantity:   300,
 	}
 }
 
-// stored reports whether a storage key exists on disk.
-func (h *harness) stored(key string) bool {
-	_, err := os.Stat(filepath.Join(h.root, filepath.FromSlash(key)))
-	return err == nil
-}
-
-// objects counts the files under the storage root.
-func (h *harness) objects(t *testing.T) int {
-	t.Helper()
-	total := 0
-	err := filepath.WalkDir(h.root, func(_ string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !entry.IsDir() {
-			total++
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk storage: %v", err)
-	}
-	return total
-}
-
-func TestCreateStoresOwnerAndEmptyGallery(t *testing.T) {
+func TestCreateStartsAsADraftInBRL(t *testing.T) {
 	h := newHarness(t)
 
 	item, err := h.service.Create(context.Background(), h.createInput())
@@ -118,15 +67,31 @@ func TestCreateStoresOwnerAndEmptyGallery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if item.OwnerID != h.ownerID {
-		t.Fatalf("owner = %q, want %q", item.OwnerID, h.ownerID)
+	if item.OwnerID != h.ownerID || item.EventID != h.eventID {
+		t.Fatalf("owner = %q, event = %q, want %q and %q", item.OwnerID, item.EventID, h.ownerID, h.eventID)
 	}
-	if item.Media == nil {
-		t.Fatal("media = nil, want an empty slice so clients never receive null")
+	if item.Status != domain.StatusDraft {
+		t.Fatalf("status = %q, want a new tier to be invisible until someone publishes it", item.Status)
+	}
+	if item.Currency != domain.DefaultCurrency {
+		t.Fatalf("currency = %q, want %q", item.Currency, domain.DefaultCurrency)
 	}
 }
 
-func TestListHydratesGalleriesAndTotal(t *testing.T) {
+// A tier with no event cannot be listed, found or bought, so it cannot exist.
+func TestCreateRefusesATierWithNoEvent(t *testing.T) {
+	h := newHarness(t)
+	input := h.createInput()
+	input.EventID = "  "
+
+	_, err := h.service.Create(context.Background(), input)
+
+	if !errors.Is(err, domain.ErrInvalidEvent) {
+		t.Fatalf("Create() error = %v, want %v", err, domain.ErrInvalidEvent)
+	}
+}
+
+func TestListReturnsTheEventsTiersWithATotal(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 
@@ -134,16 +99,12 @@ func TestListHydratesGalleriesAndTotal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+	// A second tier of the SAME event, which is what Pista plus Camarote is.
 	second := h.createInput()
 	second.Title = "Camarote"
-	second.StartsAt = first.StartsAt.Add(48 * time.Hour)
+	second.PriceCents = first.PriceCents + 12000
 	if _, err := h.service.Create(ctx, second); err != nil {
 		t.Fatalf("Create() error = %v", err)
-	}
-	if _, err := h.service.AttachMedia(ctx, first.ID, mediadomain.Upload{
-		FileName: "capa.png", ContentType: "image/png", Data: pngBytes,
-	}); err != nil {
-		t.Fatalf("AttachMedia() error = %v", err)
 	}
 
 	page, err := h.service.List(ctx, domain.Filter{OwnerID: h.ownerID})
@@ -154,31 +115,40 @@ func TestListHydratesGalleriesAndTotal(t *testing.T) {
 	if page.Total != 2 || len(page.Items) != 2 {
 		t.Fatalf("total = %d, items = %d, want 2 and 2", page.Total, len(page.Items))
 	}
-	// Default order is by door date, so the nearer event leads.
-	if page.Items[0].ID != first.ID {
-		t.Fatalf("first item = %q, want %q (listing must lead with the next event)", page.Items[0].ID, first.ID)
-	}
-	if len(page.Items[0].Media) != 1 {
-		t.Fatalf("gallery size = %d, want 1: List must hydrate media, not leave it to the client", len(page.Items[0].Media))
+	for _, item := range page.Items {
+		if item.EventID != h.eventID {
+			t.Fatalf("tier %q belongs to event %q, want %q", item.ID, item.EventID, h.eventID)
+		}
 	}
 }
 
-func TestAttachMediaRejectsUnknownTicket(t *testing.T) {
+// The tier's own words only. Searching for the event is the event
+// repository's job, and it does it with a real full-text index.
+func TestSearchMatchesTheTiersOwnWords(t *testing.T) {
 	h := newHarness(t)
-
-	_, err := h.service.AttachMedia(context.Background(), "tkt_missing", mediadomain.Upload{
-		FileName: "capa.png", ContentType: "image/png", Data: pngBytes,
-	})
-
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("AttachMedia() error = %v, want %v", err, domain.ErrNotFound)
+	ctx := context.Background()
+	input := h.createInput()
+	input.Title = "Camarote Open Bar"
+	input.Description = "Inclui welcome drink"
+	if _, err := h.service.Create(ctx, input); err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
-	if h.objects(t) != 0 {
-		t.Fatal("an upload for a ticket that does not exist must not reach storage")
+
+	byTitle, err := h.service.List(ctx, domain.Filter{OwnerID: h.ownerID, Query: "open bar"})
+	if err != nil || len(byTitle.Items) != 1 {
+		t.Fatalf("search by title: items=%d err=%v", len(byTitle.Items), err)
+	}
+	byDescription, err := h.service.List(ctx, domain.Filter{OwnerID: h.ownerID, Query: "welcome"})
+	if err != nil || len(byDescription.Items) != 1 {
+		t.Fatalf("search by description: items=%d err=%v", len(byDescription.Items), err)
+	}
+	none, err := h.service.List(ctx, domain.Filter{OwnerID: h.ownerID, Query: "camarote-que-nao-existe"})
+	if err != nil || len(none.Items) != 0 {
+		t.Fatalf("search for nothing: items=%d err=%v", len(none.Items), err)
 	}
 }
 
-func TestAttachMediaRejectsUnsupportedType(t *testing.T) {
+func TestUpdateRewritesTheEditableFields(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	item, err := h.service.Create(ctx, h.createInput())
@@ -186,112 +156,103 @@ func TestAttachMediaRejectsUnsupportedType(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	_, err = h.service.AttachMedia(ctx, item.ID, mediadomain.Upload{
-		FileName: "contrato.pdf", ContentType: "application/pdf", Data: []byte("%PDF-1.7"),
+	updated, err := h.service.Update(ctx, item.ID, UpdateInput{
+		Title:       "Camarote",
+		Description: "Vista para o palco",
+		PriceCents:  35000,
+		Quantity:    120,
+		Status:      domain.StatusOnSale,
 	})
 
-	if !errors.Is(err, mediadomain.ErrUnsupportedType) {
-		t.Fatalf("AttachMedia() error = %v, want %v", err, mediadomain.ErrUnsupportedType)
-	}
-	if h.objects(t) != 0 {
-		t.Fatal("a rejected upload must not leave bytes in storage")
-	}
-}
-
-func TestRemoveMediaIsScopedToItsTicket(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	owner, _ := h.service.Create(ctx, h.createInput())
-	other, _ := h.service.Create(ctx, h.createInput())
-	asset, err := h.service.AttachMedia(ctx, owner.ID, mediadomain.Upload{
-		FileName: "capa.png", ContentType: "image/png", Data: pngBytes,
-	})
 	if err != nil {
-		t.Fatalf("AttachMedia() error = %v", err)
+		t.Fatalf("Update() error = %v", err)
 	}
-
-	if err := h.service.RemoveMedia(ctx, other.ID, asset.ID); !errors.Is(err, mediadomain.ErrNotFound) {
-		t.Fatalf("RemoveMedia() across tickets error = %v, want %v", err, mediadomain.ErrNotFound)
+	if updated.Title != "Camarote" || updated.PriceCents != 35000 || updated.Quantity != 120 {
+		t.Fatalf("update did not land: %+v", updated)
 	}
-	if !h.stored(asset.StorageKey) {
-		t.Fatal("a refused removal must leave the object in place")
-	}
-	if err := h.service.RemoveMedia(ctx, owner.ID, asset.ID); err != nil {
-		t.Fatalf("RemoveMedia() error = %v", err)
-	}
-	if h.stored(asset.StorageKey) {
-		t.Fatal("removing media must delete its object too")
+	// The event is not among the editable fields: moving a tier between events
+	// would move seats somebody already bought.
+	if updated.EventID != h.eventID {
+		t.Fatalf("event = %q, want it unchanged at %q", updated.EventID, h.eventID)
 	}
 }
 
-func TestDeleteClearsTheGallery(t *testing.T) {
+// Quantity may not be pushed below what is already sold or held: that would
+// promise refunds the box office cannot honour.
+func TestUpdateRefusesToShrinkBelowSoldAndHeld(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	item, _ := h.service.Create(ctx, h.createInput())
-	if _, err := h.service.AttachMedia(ctx, item.ID, mediadomain.Upload{
-		FileName: "capa.png", ContentType: "image/png", Data: pngBytes,
-	}); err != nil {
-		t.Fatalf("AttachMedia() error = %v", err)
+	item, err := h.service.Create(ctx, h.createInput())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if err := h.db.Exec("UPDATE tickets SET sold = 40, reserved = 10 WHERE id = ?", item.ID).Error; err != nil {
+		t.Fatalf("set stock: %v", err)
+	}
+
+	_, err = h.service.Update(ctx, item.ID, UpdateInput{
+		Title:      item.Title,
+		PriceCents: item.PriceCents,
+		Quantity:   49,
+		Status:     item.Status,
+	})
+
+	if !errors.Is(err, domain.ErrQuantityBelowSold) {
+		t.Fatalf("Update() error = %v, want %v", err, domain.ErrQuantityBelowSold)
+	}
+}
+
+func TestDeleteRefusesATierWithOrders(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	item, err := h.service.Create(ctx, h.createInput())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	orderID := testsupport.Unique("ord")
+	err = h.db.Exec(`
+		INSERT INTO orders (id, event_id, buyer_id, buyer_name, buyer_email, buyer_document,
+			total_cents, currency, status, hold_expires_at, confirmed,
+			payment_provider, payment_id, payment_status, payment_method,
+			pix_copy_paste, pix_qr_code_base64, created_at, updated_at)
+		VALUES (?, ?, ?, 'Maria', 'maria@exemplo.com.br', '12345678909',
+			18000, 'BRL', 'paid', NOW() + INTERVAL '30 minutes', true,
+			'mercadopago', '', '', 'pix', '', '', NOW(), NOW())`,
+		orderID, h.eventID, h.ownerID).Error
+	if err != nil {
+		t.Fatalf("seed order: %v", err)
+	}
+	// The line is what actually names the tier now, and it is the line's
+	// RESTRICT that this test is about.
+	err = h.db.Exec(`
+		INSERT INTO order_items (id, order_id, ticket_id, ticket_title, quantity, unit_price_cents, total_cents, created_at)
+		VALUES (?, ?, ?, 'Pista', 1, 18000, 18000, NOW())`,
+		testsupport.Unique("oi"), orderID, item.ID).Error
+	if err != nil {
+		t.Fatalf("seed order item: %v", err)
+	}
+	t.Cleanup(func() { h.db.Exec("DELETE FROM orders WHERE id = ?", orderID) })
+
+	err = h.service.Delete(ctx, item.ID)
+
+	if !errors.Is(err, domain.ErrHasOrders) {
+		t.Fatalf("Delete() error = %v, want %v: the orders are the record of money that changed hands", err, domain.ErrHasOrders)
+	}
+}
+
+func TestDeleteRemovesATierWithNoOrders(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	item, err := h.service.Create(ctx, h.createInput())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
 
 	if err := h.service.Delete(ctx, item.ID); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
 
-	if h.objects(t) != 0 {
-		t.Fatalf("stored objects = %d, want 0: deleting a ticket must not orphan its assets", h.objects(t))
-	}
 	if _, err := h.service.Get(ctx, item.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Get() after delete error = %v, want %v", err, domain.ErrNotFound)
-	}
-}
-
-func TestDeleteRefusesATicketWithOrders(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	item, _ := h.service.Create(ctx, h.createInput())
-	if err := h.db.Exec(`
-		INSERT INTO orders (id, ticket_id, buyer_id, buyer_name, buyer_email, quantity, unit_price_cents,
-		                    total_cents, currency, status, hold_expires_at, created_at, updated_at)
-		VALUES (?, ?, ?, 'Maria', 'maria@exemplo.com.br', 1, 18000, 18000, 'BRL', 'paid', NOW(), NOW(), NOW())`,
-		testsupport.Unique("ord"), item.ID, h.ownerID).Error; err != nil {
-		t.Fatalf("seed order: %v", err)
-	}
-	t.Cleanup(func() {
-		h.db.Exec("DELETE FROM jobs WHERE payload->>'orderId' IN (SELECT id FROM orders WHERE ticket_id = ?)", item.ID)
-		h.db.Exec("DELETE FROM orders WHERE ticket_id = ?", item.ID)
-	})
-
-	// A tier with money behind it is the record of that money. The foreign key
-	// is RESTRICT, and the API must translate that into something an operator
-	// can act on rather than a 500.
-	err := h.service.Delete(ctx, item.ID)
-
-	if !errors.Is(err, domain.ErrHasOrders) {
-		t.Fatalf("Delete() error = %v, want %v", err, domain.ErrHasOrders)
-	}
-}
-
-func TestUpdateRewritesTheEditableFields(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	item, _ := h.service.Create(ctx, h.createInput())
-
-	updated, err := h.service.Update(ctx, item.ID, UpdateInput{
-		EventName:  "Festival Aurora",
-		Title:      "Camarote",
-		Venue:      "Arena Castelão",
-		City:       "Fortaleza, CE",
-		StartsAt:   item.StartsAt,
-		PriceCents: 35000,
-		Quantity:   120,
-		Status:     domain.StatusOnSale,
-	})
-
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if updated.Title != "Camarote" || updated.PriceCents != 35000 || updated.Status != domain.StatusOnSale {
-		t.Fatalf("update did not apply: %+v", updated)
 	}
 }

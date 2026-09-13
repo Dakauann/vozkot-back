@@ -10,12 +10,13 @@ import (
 
 func validDraft() Draft {
 	return Draft{
-		TicketID:       "tkt_1",
-		BuyerName:      "Maria Souza",
-		BuyerEmail:     "maria@exemplo.com.br",
-		BuyerDocument:  "123.456.789-09",
-		Quantity:       2,
-		UnitPriceCents: 24000,
+		EventID:       "evt_1",
+		BuyerName:     "Maria Souza",
+		BuyerEmail:    "maria@exemplo.com.br",
+		BuyerDocument: "123.456.789-09",
+		Items: []Item{
+			{TicketID: "tkt_1", TicketTitle: "Pista", Quantity: 2, UnitPriceCents: 24000},
+		},
 	}
 }
 
@@ -49,12 +50,14 @@ func TestNewRejectsWhatCannotBeCharged(t *testing.T) {
 		mutate func(*Draft)
 		want   error
 	}{
-		"no ticket":      {func(d *Draft) { d.TicketID = " " }, ErrInvalidTicket},
-		"zero quantity":  {func(d *Draft) { d.Quantity = 0 }, ErrInvalidQuantity},
-		"hoarding":       {func(d *Draft) { d.Quantity = MaxQuantityPerOrder + 1 }, ErrInvalidQuantity},
+		"no event":       {func(d *Draft) { d.EventID = " " }, ErrInvalidEvent},
+		"no ticket":      {func(d *Draft) { d.Items[0].TicketID = " " }, ErrInvalidTicket},
+		"no items":       {func(d *Draft) { d.Items = nil }, ErrInvalidQuantity},
+		"zero quantity":  {func(d *Draft) { d.Items[0].Quantity = 0 }, ErrInvalidQuantity},
+		"hoarding":       {func(d *Draft) { d.Items[0].Quantity = MaxQuantityPerOrder + 1 }, ErrInvalidQuantity},
 		"no buyer name":  {func(d *Draft) { d.BuyerName = "  " }, ErrInvalidBuyerName},
 		"bad email":      {func(d *Draft) { d.BuyerEmail = "maria@" }, ErrInvalidBuyerEmail},
-		"negative price": {func(d *Draft) { d.UnitPriceCents = -1 }, payment.ErrInvalidAmount},
+		"negative price": {func(d *Draft) { d.Items[0].UnitPriceCents = -1 }, payment.ErrInvalidAmount},
 	}
 
 	for name, testCase := range cases {

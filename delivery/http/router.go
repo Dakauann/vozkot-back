@@ -8,6 +8,7 @@ import (
 
 	authHTTP "vozkot/delivery/http/auth"
 	checkoutHTTP "vozkot/delivery/http/checkout"
+	eventHTTP "vozkot/delivery/http/event"
 	"vozkot/delivery/http/httpx"
 	ticketHTTP "vozkot/delivery/http/ticket"
 	webhooksHTTP "vozkot/delivery/http/webhooks"
@@ -29,8 +30,10 @@ type Middleware interface {
 // and a call site with eight positional arguments is one rename away from
 // passing the wrong handler to the wrong route.
 type Dependencies struct {
-	Auth     *authHTTP.Handler
-	Tickets  *ticketHTTP.Handler
+	Auth    *authHTTP.Handler
+	Tickets *ticketHTTP.Handler
+	// Events is the catalogue: public buyer routes plus operator routes.
+	Events   *eventHTTP.Handler
 	Checkout *checkoutHTTP.Handler
 	// Webhooks is nil when no payment provider is configured, and the route is
 	// then not mounted at all — a webhook endpoint that cannot verify a
@@ -78,17 +81,31 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	deps.Auth.RegisterPublic(router, throttle)
 	deps.Auth.RegisterProtected(router, deps.AuthMiddleware.Require)
+	// Passwordless sign-in and the identity block. Mounted only when the
+	// encryption keyring exists; the handler decides, because it is the thing
+	// that knows whether it was given one.
+	deps.Auth.RegisterVerification(router, throttle, deps.AuthMiddleware.Require)
 
 	// Everything under /api/v1 is behind the session. The sub-mux exists
 	// because Go's ServeMux applies middleware per pattern, not per prefix.
+	// The public catalogue. No session, and the handlers pin the status
+	// themselves so a query parameter can never list an unannounced line-up.
+	if deps.Events != nil {
+		deps.Events.RegisterPublic(router)
+	}
+
 	protected := http.NewServeMux()
 	deps.Tickets.Register(protected)
+	if deps.Events != nil {
+		deps.Events.RegisterProtected(protected)
+	}
 	if deps.Checkout != nil {
 		deps.Checkout.Register(protected)
 	}
 	for _, pattern := range []string{
 		"/api/v1/tickets", "/api/v1/tickets/",
 		"/api/v1/orders", "/api/v1/orders/",
+		"/api/v1/events", "/api/v1/events/",
 	} {
 		router.Handle(pattern, deps.AuthMiddleware.Require(protected))
 	}
@@ -110,6 +127,17 @@ func NewRouter(deps Dependencies) http.Handler {
 
 	// The webhook is public by necessity — the provider has no session — and
 	// authenticated by its HMAC signature instead.
+	//
+	// Deliberately NOT rate limited, and it must stay that way. Every
+	// notification arrives from the provider's own addresses, so a per-address
+	// limit would put the entire world's payments in one bucket and start
+	// refusing them the moment a sale got busy. What a refusal buys is worse
+	// than nothing: a 429 makes Mercado Pago redeliver, which adds load rather
+	// than shedding it, and every rejected delivery is a buyer who has paid
+	// waiting on the reconciliation sweep instead of on a webhook. The endpoint
+	// is already cheap on purpose — one HMAC and one INSERT … ON CONFLICT, no
+	// provider call, no order read — and a forgery costs a 401. Pace this at the
+	// edge by source address if it ever needs pacing, never here.
 	if deps.Webhooks != nil {
 		deps.Webhooks.Register(router)
 	}

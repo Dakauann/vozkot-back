@@ -33,10 +33,8 @@ const DefaultCurrency = "BRL"
 
 var (
 	ErrNotFound          = errors.New("ticket not found")
-	ErrInvalidEventName  = errors.New("event name is required")
+	ErrInvalidEvent      = errors.New("a ticket tier must belong to an event")
 	ErrInvalidTitle      = errors.New("ticket title is required")
-	ErrInvalidVenue      = errors.New("venue is required")
-	ErrInvalidStartsAt   = errors.New("event start is required")
 	ErrInvalidPrice      = errors.New("price cannot be negative")
 	ErrInvalidQuantity   = errors.New("quantity must be greater than zero")
 	ErrInvalidStatus     = errors.New("ticket status is invalid")
@@ -61,14 +59,17 @@ var (
 // field the domain does not have, and mapping is what keeps that drift from
 // reaching in here.
 type Ticket struct {
-	ID          string
-	OwnerID     string
-	EventName   string
+	ID      string
+	OwnerID string
+	// EventID is the happening this tier sells admission to.
+	//
+	// The event owns the name, the venue, the city, the date, the category and
+	// the map pin. A tier owns a price and a number of seats, and nothing else:
+	// two tiers of one evening that could disagree about where it was is the
+	// duplication this field exists to remove.
+	EventID     string
 	Title       string
 	Description string
-	Venue       string
-	City        string
-	StartsAt    time.Time
 	PriceCents  int64
 	Currency    string
 	Quantity    int
@@ -87,12 +88,11 @@ type Ticket struct {
 // take the same shape because they validate the same rules; what differs is
 // only which fields the caller is allowed to leave alone.
 type Draft struct {
-	EventName   string
+	// EventID is required: a tier with no event cannot be listed, found or
+	// bought.
+	EventID     string
 	Title       string
 	Description string
-	Venue       string
-	City        string
-	StartsAt    time.Time
 	PriceCents  int64
 	Quantity    int
 	Status      Status
@@ -116,12 +116,9 @@ func New(id, ownerID string, draft Draft, now time.Time) (*Ticket, error) {
 	return &Ticket{
 		ID:          id,
 		OwnerID:     ownerID,
-		EventName:   normalized.EventName,
+		EventID:     normalized.EventID,
 		Title:       normalized.Title,
 		Description: normalized.Description,
-		Venue:       normalized.Venue,
-		City:        normalized.City,
-		StartsAt:    normalized.StartsAt.UTC(),
 		PriceCents:  normalized.PriceCents,
 		Currency:    DefaultCurrency,
 		Quantity:    normalized.Quantity,
@@ -154,12 +151,11 @@ func (t *Ticket) Apply(draft Draft, now time.Time) error {
 		return ErrInvalidStatus
 	}
 
-	t.EventName = normalized.EventName
+	// EventID is deliberately not editable here. Moving a tier to a different
+	// event would move the seats somebody already bought, and the orders
+	// against it still name the old one.
 	t.Title = normalized.Title
 	t.Description = normalized.Description
-	t.Venue = normalized.Venue
-	t.City = normalized.City
-	t.StartsAt = normalized.StartsAt.UTC()
 	t.PriceCents = normalized.PriceCents
 	t.Quantity = normalized.Quantity
 	t.Status = normalized.Status
@@ -224,23 +220,15 @@ func (s Status) Valid() bool {
 }
 
 func (d Draft) normalize() (Draft, error) {
-	d.EventName = strings.TrimSpace(d.EventName)
+	d.EventID = strings.TrimSpace(d.EventID)
 	d.Title = strings.TrimSpace(d.Title)
 	d.Description = strings.TrimSpace(d.Description)
-	d.Venue = strings.TrimSpace(d.Venue)
-	d.City = strings.TrimSpace(d.City)
 
-	if d.EventName == "" {
-		return d, ErrInvalidEventName
+	if d.EventID == "" {
+		return d, ErrInvalidEvent
 	}
 	if d.Title == "" {
 		return d, ErrInvalidTitle
-	}
-	if d.Venue == "" {
-		return d, ErrInvalidVenue
-	}
-	if d.StartsAt.IsZero() {
-		return d, ErrInvalidStartsAt
 	}
 	if d.PriceCents < 0 {
 		return d, ErrInvalidPrice

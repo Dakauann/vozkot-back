@@ -106,14 +106,18 @@ func TestAuditRecoversARefundNobodyWasToldAbout(t *testing.T) {
 func TestAuditIgnoresOrdersWhoseEventHasPassed(t *testing.T) {
 	h := newHarness(t, 20)
 	item := h.paid(t, 1)
-	if err := h.db.Exec("UPDATE tickets SET starts_at = NOW() - INTERVAL '1 day' WHERE id = ?", h.ticketID).Error; err != nil {
+	// The date lives on the EVENT now, not on the tier whose price was paid.
+	err := h.db.Exec(`
+		UPDATE events SET starts_at = NOW() - INTERVAL '1 day'
+		WHERE id = (SELECT event_id FROM tickets WHERE id = ?)`, h.ticketID).Error
+	if err != nil {
 		t.Fatalf("age the event: %v", err)
 	}
 
-	scheduled, err := h.service.AuditSettled(context.Background(), 50)
+	scheduled, auditErr := h.service.AuditSettled(context.Background(), 50)
 
-	if err != nil {
-		t.Fatalf("AuditSettled() error = %v", err)
+	if auditErr != nil {
+		t.Fatalf("AuditSettled() error = %v", auditErr)
 	}
 	if got := h.openJobs(t, queuedomain.TypeSyncPayment, item.ID); got != 0 {
 		t.Fatalf("the audit scheduled %d job(s) for an event that already happened (scheduled=%d)", got, scheduled)

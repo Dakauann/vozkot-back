@@ -1,5 +1,10 @@
-// Package media holds the assets attached to a ticket: the artwork buyers see
-// on a listing and the short clips that sell an event.
+// Package media holds the assets attached to an EVENT: the artwork buyers see
+// on a listing card and on the event page, and the short clips that sell it.
+//
+// Attached to the event and not to a ticket tier, because that is what they
+// depict. An evening selling Pista and Camarote has one poster, not one per
+// price, and a listing card showing a tier's image would have to pick one of
+// them arbitrarily.
 //
 // The package knows nothing about HTTP, GORM or Cloudflare. It defines what a
 // media item is, which formats are acceptable and how large each may be; where
@@ -28,7 +33,7 @@ var (
 	ErrUnsupportedType = errors.New("media type is not supported")
 	ErrEmptyFile       = errors.New("media file is empty")
 	ErrFileTooLarge    = errors.New("media file is larger than allowed")
-	ErrLimitReached    = errors.New("media limit reached for this ticket")
+	ErrLimitReached    = errors.New("media limit reached for this event")
 )
 
 const (
@@ -39,7 +44,7 @@ const (
 	MaxVideoBytes = 50 << 20
 
 	// A listing is a gallery, not a media library.
-	MaxItemsPerTicket = 12
+	MaxItemsPerEvent = 12
 )
 
 // supportedTypes is an allowlist, not a filter. Anything absent here is
@@ -73,21 +78,48 @@ var extensions = map[string]string{
 // Media is one asset attached to one ticket.
 type Media struct {
 	ID          string
-	TicketID    string
+	EventID     string
 	Kind        Kind
 	StorageKey  string
 	URL         string
 	ContentType string
 	SizeBytes   int64
 	Position    int
-	CreatedAt   time.Time
+
+	// Width and Height are the stored image's real pixel dimensions.
+	//
+	// They exist so a client can reserve the right box BEFORE the bytes
+	// arrive. Without them every image in a grid resizes the page as it loads,
+	// which is the layout shift that makes a listing feel broken and that
+	// Core Web Vitals measures directly. Zero for a video, and zero for an
+	// asset uploaded before this pipeline existed.
+	Width  int
+	Height int
+
+	// BlurDataURL is a tiny blurred stand-in, inline, for the moment between
+	// layout and the real image arriving.
+	//
+	// A ~20px JPEG as a data URI rather than BlurHash or ThumbHash, and the
+	// reason is that it needs NO JavaScript: it is an ordinary src the browser
+	// decodes on first paint, present in the server-rendered HTML. A hash is
+	// smaller on the wire but has to be decoded by a library in the client,
+	// which costs a bundle, a hydration boundary and a frame of blank space —
+	// and only wins past roughly fifty images on one page, which a card grid
+	// does not reach above the fold.
+	BlurDataURL string
+
+	// DominantColor is the last fallback, for a client that cannot use the
+	// blur at all. Hex, including the leading hash.
+	DominantColor string
+
+	CreatedAt time.Time
 }
 
 // Upload is the request to store one asset. Data is held in memory because the
 // ceilings above are small enough to make streaming machinery not worth its
 // complexity here; raise MaxVideoBytes much further and that trade flips.
 type Upload struct {
-	TicketID    string
+	EventID     string
 	FileName    string
 	ContentType string
 	Data        []byte

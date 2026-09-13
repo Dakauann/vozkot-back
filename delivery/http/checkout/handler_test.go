@@ -56,9 +56,9 @@ func newHarness(t *testing.T, capacity int) *harness {
 		VALUES (?, 'Checkout HTTP', ?, 'x', 'user', 0, NOW(), NOW())`, userID, userID+"@vozkot.test").Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
+	eventID := testsupport.SeedEvent(t, db, userID)
 	ticket, err := ticketdomain.New(testsupport.Unique("tkt"), userID, ticketdomain.Draft{
-		EventName: "Festival Aurora", Title: "Pista", Venue: "Arena",
-		StartsAt: time.Now().Add(720 * time.Hour), PriceCents: 24000, Quantity: capacity,
+		EventID: eventID, Title: "Pista", PriceCents: 24000, Quantity: capacity,
 		Status: ticketdomain.StatusOnSale,
 	}, time.Now())
 	if err != nil {
@@ -68,17 +68,17 @@ func newHarness(t *testing.T, capacity int) *harness {
 		t.Fatalf("create ticket: %v", err)
 	}
 	t.Cleanup(func() {
-		db.Exec("DELETE FROM jobs WHERE payload->>'orderId' IN (SELECT id FROM orders WHERE ticket_id = ?)", ticket.ID)
-		db.Exec("DELETE FROM orders WHERE ticket_id = ?", ticket.ID)
+		db.Exec("DELETE FROM jobs WHERE payload->>'orderId' IN (SELECT order_id FROM order_items WHERE ticket_id = ?)", ticket.ID)
+		db.Exec("DELETE FROM orders WHERE id IN (SELECT order_id FROM order_items WHERE ticket_id = ?)", ticket.ID)
 		db.Exec("DELETE FROM tickets WHERE id = ?", ticket.ID)
 		db.Exec("DELETE FROM users WHERE id = ?", userID)
 	})
 
-	checkout := checkoutUsecase.NewService(uow.NewRunner(db), orders, tickets, dispatcher, 30*time.Minute, orderdomain.HoldLimits{})
+	checkout := checkoutUsecase.NewService(uow.NewRunner(db), orders, tickets, dispatcher, 30*time.Minute, 10*time.Minute, orderdomain.HoldLimits{})
 	payments := paymentUsecase.NewService(uow.NewRunner(db), orders, nil, queueRepository.NewJobRepository(db), dispatcher, nil)
 
 	mux := http.NewServeMux()
-	NewHandler(checkout, payments, keys, idempotencydomain.DefaultLease).Register(mux)
+	NewHandler(checkout, payments, nil, keys, idempotencydomain.DefaultLease).Register(mux)
 	return &harness{db: db, mux: mux, keys: keys, ticketID: ticket.ID, userID: userID}
 }
 

@@ -17,8 +17,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	eventdomain "vozkot/domain/event"
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
 	"vozkot/domain/queue"
@@ -92,7 +94,7 @@ func (s *Service) CreateCharge(ctx context.Context, orderID string) error {
 		Method:            item.PaymentMethod,
 		AmountCents:       item.TotalCents,
 		Currency:          item.Currency,
-		Description:       fmt.Sprintf("Ingresso %s x%d", item.TicketID, item.Quantity),
+		Description:       describe(item),
 		ExternalReference: item.ID,
 		// The charge dies with the hold. A PIX code that outlives the
 		// reservation invites a payment for tickets that are already back on
@@ -496,7 +498,7 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 			// expired reservation is frequent — a buyer opens the bank app,
 			// gets distracted, pays eleven minutes later — so the stock is
 			// asked for again rather than assumed.
-			reserved, err := repositories.Tickets().Reserve(ctx, item.TicketID, item.Quantity)
+			reserved, err := reserveAll(ctx, repositories, item)
 			if err != nil {
 				return err
 			}
@@ -514,7 +516,7 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 		changed, err := item.Apply(next, s.now())
 		if err != nil {
 			if reservedLate {
-				if releaseErr := repositories.Tickets().Release(ctx, item.TicketID, item.Quantity); releaseErr != nil {
+				if releaseErr := releaseAll(ctx, repositories, item); releaseErr != nil {
 					return releaseErr
 				}
 			}
@@ -531,7 +533,7 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 			// The same event again. This is the redelivery case and it must not
 			// touch stock a second time.
 			if reservedLate {
-				if releaseErr := repositories.Tickets().Release(ctx, item.TicketID, item.Quantity); releaseErr != nil {
+				if releaseErr := releaseAll(ctx, repositories, item); releaseErr != nil {
 					return releaseErr
 				}
 			}
@@ -542,12 +544,14 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 		case orderdomain.StatusPaid:
 			// Either the hold this order already had, or the one just taken
 			// back for it.
-			if err := repositories.Tickets().Commit(ctx, item.TicketID, item.Quantity); err != nil {
-				return err
+			for _, line := range item.Items {
+				if err := repositories.Tickets().Commit(ctx, line.TicketID, line.Quantity); err != nil {
+					return err
+				}
 			}
 		case orderdomain.StatusExpired, orderdomain.StatusFailed, orderdomain.StatusCancelled:
 			if previous.HoldsStock() {
-				if err := repositories.Tickets().Release(ctx, item.TicketID, item.Quantity); err != nil {
+				if err := releaseAll(ctx, repositories, item); err != nil {
 					return err
 				}
 			}
@@ -555,8 +559,10 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 			// Only stock that was actually sold comes back; refunding an order
 			// that never completed would credit inventory already released.
 			if previous == orderdomain.StatusPaid {
-				if err := repositories.Tickets().ReleaseSold(ctx, item.TicketID, item.Quantity); err != nil {
-					return err
+				for _, line := range item.Items {
+					if err := repositories.Tickets().ReleaseSold(ctx, line.TicketID, line.Quantity); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -595,17 +601,35 @@ func (s *Service) raise(
 	ctx context.Context,
 	repositories uow.Repositories,
 	item *orderdomain.Order,
-	compose func(context.Context, queue.Queue, *orderdomain.Order, *ticketdomain.Ticket) (*queue.Job, error),
+	compose func(context.Context, queue.Queue, *orderdomain.Order, *ticketdomain.Ticket, *eventdomain.Event) (*queue.Job, error),
 ) (*queue.Job, error) {
 	if s.notifications == nil {
 		// No provider configured: skip the read as well as the message.
 		return nil, nil
 	}
-	tier, err := repositories.Tickets().GetByID(ctx, item.TicketID)
-	if err != nil && !errors.Is(err, ticketdomain.ErrNotFound) {
-		return nil, err
+	// The event carries what the receipt actually reads as: the show, the door
+	// time, the venue. Read straight off the order, which now names the night
+	// it is for — the tiers underneath it only ever agreed about that anyway.
+	var happening *eventdomain.Event
+	if item.EventID != "" {
+		found, err := repositories.Events().GetByID(ctx, item.EventID)
+		if err != nil && !errors.Is(err, eventdomain.ErrNotFound) {
+			return nil, err
+		}
+		happening = found
 	}
-	return compose(ctx, repositories.Jobs(), item, tier)
+	// The tier is still read for a single-line order, because a receipt for one
+	// tier can name it in the subject. A multi-line order has no single tier to
+	// name and the message lists the lines instead.
+	var tier *ticketdomain.Ticket
+	if len(item.Items) == 1 {
+		found, err := repositories.Tickets().GetByID(ctx, item.Items[0].TicketID)
+		if err != nil && !errors.Is(err, ticketdomain.ErrNotFound) {
+			return nil, err
+		}
+		tier = found
+	}
+	return compose(ctx, repositories.Jobs(), item, tier, happening)
 }
 
 func (s *Service) fetch(ctx context.Context, chargeID string) (*paymentdomain.Charge, error) {
@@ -632,4 +656,65 @@ func randomID() string {
 		return "job_" + time.Now().UTC().Format("20060102150405000000000")
 	}
 	return "job_" + hex.EncodeToString(buffer)
+}
+
+// reserveAll takes stock back for every line of a late-paid order, or takes
+// none at all.
+//
+// All or nothing is the only honest answer. An order half-reserved is an order
+// the buyer paid for in full and would be admitted on in part, and there is no
+// status that describes that — so a line that cannot be re-taken releases the
+// lines above it and the whole order becomes a refund the box office owes.
+//
+// The lines are walked in the order they are held, which NormalizeItems sorted
+// by tier id at checkout. Two settlements racing over the same two tiers
+// therefore lock them in the same sequence and cannot deadlock.
+func reserveAll(ctx context.Context, repositories uow.Repositories, item *orderdomain.Order) (bool, error) {
+	taken := make([]orderdomain.Item, 0, len(item.Items))
+	for _, line := range item.Items {
+		reserved, err := repositories.Tickets().Reserve(ctx, line.TicketID, line.Quantity)
+		if err != nil {
+			return false, err
+		}
+		if reserved {
+			taken = append(taken, line)
+			continue
+		}
+		for _, undo := range taken {
+			if err := repositories.Tickets().Release(ctx, undo.TicketID, undo.Quantity); err != nil {
+				return false, err
+			}
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+// releaseAll returns every line's held stock.
+func releaseAll(ctx context.Context, repositories uow.Repositories, item *orderdomain.Order) error {
+	for _, line := range item.Items {
+		if err := repositories.Tickets().Release(ctx, line.TicketID, line.Quantity); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// describe is what the buyer will see on their bank statement.
+//
+// The tier titles rather than their ids, because "Ingresso tkt_9f2c1a x2" is
+// what a chargeback looks like: nobody recognises it, so they dispute it.
+func describe(item *orderdomain.Order) string {
+	if len(item.Items) == 0 {
+		return "Ingressos"
+	}
+	parts := make([]string, 0, len(item.Items))
+	for _, line := range item.Items {
+		title := line.TicketTitle
+		if title == "" {
+			title = line.TicketID
+		}
+		parts = append(parts, fmt.Sprintf("%dx %s", line.Quantity, title))
+	}
+	return "Ingressos: " + strings.Join(parts, ", ")
 }

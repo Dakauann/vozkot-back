@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,11 +12,13 @@ import (
 
 	"vozkot/delivery/http/httpx"
 	authdomain "vozkot/domain/auth"
+	eventdomain "vozkot/domain/event"
 	idempotencydomain "vozkot/domain/idempotency"
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
 	ticketdomain "vozkot/domain/ticket"
 	checkoutUsecase "vozkot/usecases/checkout"
+	eventUsecase "vozkot/usecases/event"
 	paymentUsecase "vozkot/usecases/payment"
 )
 
@@ -30,16 +33,21 @@ const (
 type Handler struct {
 	checkout *checkoutUsecase.Service
 	payments *paymentUsecase.Service
-	replay   *httpx.Idempotency
+	// events resolves the night an order is for, so a listing can name the show
+	// rather than an id. Optional: without it an order still renders, minus its
+	// event block.
+	events *eventUsecase.Service
+	replay *httpx.Idempotency
 }
 
 func NewHandler(
 	checkout *checkoutUsecase.Service,
 	payments *paymentUsecase.Service,
+	events *eventUsecase.Service,
 	store idempotencydomain.Store,
 	lease time.Duration,
 ) *Handler {
-	handler := &Handler{checkout: checkout, payments: payments}
+	handler := &Handler{checkout: checkout, payments: payments, events: events}
 	handler.replay = httpx.NewIdempotency(store, StatusFor,
 		httpx.WithLease(lease),
 		// Recovery for a claim orphaned by a crash. The order table already
@@ -47,6 +55,10 @@ func NewHandler(
 		// committed can be found and replayed — which is the difference
 		// between a buyer seeing the tickets they bought and a buyer
 		// reserving a second batch of them.
+		// Failures on this endpoint are ones a buyer can act on — holding too
+		// much already, or somebody else taking the last ones — and each wants
+		// a different way out on screen.
+		httpx.WithCodes(CodeFor),
 		httpx.WithRecovery(func(ctx context.Context, key string) (httpx.Result, bool, error) {
 			item, err := checkout.FindByIdempotencyKey(ctx, key)
 			if errors.Is(err, orderdomain.ErrNotFound) {
@@ -66,6 +78,7 @@ func NewHandler(
 
 func (h *Handler) Register(router *http.ServeMux) {
 	router.HandleFunc("POST /api/v1/checkout", h.create)
+	router.HandleFunc("POST /api/v1/orders/{id}/confirm", h.confirm)
 	router.HandleFunc("GET /api/v1/orders", h.list)
 	router.HandleFunc("GET /api/v1/orders/{id}", h.get)
 	router.HandleFunc("POST /api/v1/orders/{id}/cancel", h.cancel)
@@ -102,8 +115,8 @@ func (h *Handler) create(response http.ResponseWriter, request *http.Request) {
 		}
 
 		item, err := h.checkout.Start(ctx, checkoutUsecase.StartInput{
-			TicketID:       strings.TrimSpace(payload.TicketID),
-			Quantity:       payload.Quantity,
+			Items:          payload.Lines(),
+			Confirm:        payload.Confirm,
 			BuyerID:        claims.UserID,
 			BuyerName:      payload.Buyer.Name,
 			BuyerEmail:     payload.Buyer.Email,
@@ -114,8 +127,51 @@ func (h *Handler) create(response http.ResponseWriter, request *http.Request) {
 		if err != nil {
 			return httpx.Result{}, err
 		}
-		return httpx.Result{Status: http.StatusCreated, Body: OrderEnvelope{Data: toOrderResponse(item)}}, nil
+		return httpx.Result{Status: http.StatusCreated, Body: OrderEnvelope{Data: h.withEvent(ctx, item)}}, nil
 	})
+}
+
+// @Summary		Confirmar os dados do comprador
+// @Description	Registra nome, e-mail e documento do comprador, estende a reserva para a janela de pagamento e solicita a cobrança PIX. Reservar e confirmar são passos separados porque os ingressos saem do estoque assim que o comprador chega ao formulário, e não depois de preenchê-lo. Confirmar duas vezes atualiza os dados sem estender a reserva de novo nem criar uma segunda cobrança.
+// @Tags			Compras
+// @Accept		json
+// @Produce		json
+// @Security		BearerAuth
+// @Param		id path string true "ID do pedido"
+// @Param		request body ConfirmRequest true "Dados do comprador"
+// @Success		200 {object} OrderEnvelope
+// @Failure		400 {object} ErrorResponse
+// @Failure		401 {object} ErrorResponse
+// @Failure		404 {object} ErrorResponse
+// @Failure		409 {object} ErrorResponse "A reserva expirou"
+// @Failure		422 {object} ErrorResponse
+// @Router		/api/v1/orders/{id}/confirm [post]
+func (h *Handler) confirm(response http.ResponseWriter, request *http.Request) {
+	claims, _ := authdomain.ClaimsFromContext(request.Context())
+	if claims == nil {
+		httpx.WriteError(response, http.StatusUnauthorized, authdomain.ErrUnauthorized)
+		return
+	}
+
+	var payload ConfirmRequest
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		httpx.WriteError(response, http.StatusBadRequest, errors.New("request body must be a JSON object"))
+		return
+	}
+
+	item, err := h.checkout.Confirm(request.Context(), checkoutUsecase.ConfirmInput{
+		OrderID:       request.PathValue("id"),
+		BuyerID:       claims.UserID,
+		BuyerName:     payload.Buyer.Name,
+		BuyerEmail:    payload.Buyer.Email,
+		BuyerDocument: payload.Buyer.Document,
+		Method:        paymentdomain.Method(strings.TrimSpace(payload.Method)),
+	})
+	if err != nil {
+		writeFailure(response, err)
+		return
+	}
+	httpx.WriteJSON(response, http.StatusOK, OrderEnvelope{Data: h.withEvent(request.Context(), item)})
 }
 
 // @Summary		Listar pedidos
@@ -125,6 +181,7 @@ func (h *Handler) create(response http.ResponseWriter, request *http.Request) {
 // @Security		BearerAuth
 // @Param		status query string false "Status do pedido" Enums(pending_payment,paid,expired,cancelled,failed,refunded,refund_required)
 // @Param		ticketId query string false "Filtrar por ingresso"
+// @Param		eventId query string false "Filtrar pelos pedidos de um evento"
 // @Param		limit query int false "Itens por página (padrão 20, máximo 100)"
 // @Param		offset query int false "Deslocamento da paginação"
 // @Success		200 {object} OrderListEnvelope
@@ -147,8 +204,12 @@ func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
 	filter := orderdomain.Filter{
 		Status:   orderdomain.Status(strings.TrimSpace(query.Get("status"))),
 		TicketID: strings.TrimSpace(query.Get("ticketId")),
-		Limit:    limit,
-		Offset:   offset,
+		// Every order for one night, which is what an organiser looking at
+		// their own event asks for — and what a buyer asking "what did I buy
+		// for this show" asks for too. The buyer scoping below still applies.
+		EventID: strings.TrimSpace(query.Get("eventId")),
+		Limit:   limit,
+		Offset:  offset,
 	}
 	// An operator sees the whole box office; a buyer sees only their own
 	// orders. Scoping here rather than in the use case keeps the rule where the
@@ -159,11 +220,11 @@ func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
 
 	page, err := h.checkout.List(request.Context(), filter)
 	if err != nil {
-		httpx.WriteError(response, StatusFor(err), err)
+		writeFailure(response, err)
 		return
 	}
 	httpx.WriteJSON(response, http.StatusOK, OrderListEnvelope{
-		Data:   toOrderResponses(page.Items),
+		Data:   h.withEvents(request.Context(), page.Items),
 		Total:  page.Total,
 		Limit:  limit,
 		Offset: offset,
@@ -184,10 +245,10 @@ func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
 func (h *Handler) get(response http.ResponseWriter, request *http.Request) {
 	item, err := h.authorized(request)
 	if err != nil {
-		httpx.WriteError(response, StatusFor(err), err)
+		writeFailure(response, err)
 		return
 	}
-	httpx.WriteJSON(response, http.StatusOK, OrderEnvelope{Data: toOrderResponse(item)})
+	httpx.WriteJSON(response, http.StatusOK, OrderEnvelope{Data: h.withEvent(request.Context(), item)})
 }
 
 // @Summary		Cancelar um pedido
@@ -206,12 +267,12 @@ func (h *Handler) get(response http.ResponseWriter, request *http.Request) {
 func (h *Handler) cancel(response http.ResponseWriter, request *http.Request) {
 	item, err := h.authorized(request)
 	if err != nil {
-		httpx.WriteError(response, StatusFor(err), err)
+		writeFailure(response, err)
 		return
 	}
 	cancelled, err := h.checkout.Cancel(request.Context(), item.ID)
 	if err != nil {
-		httpx.WriteError(response, StatusFor(err), err)
+		writeFailure(response, err)
 		return
 	}
 	httpx.WriteJSON(response, http.StatusOK, OrderEnvelope{Data: toOrderResponse(cancelled)})
@@ -248,7 +309,7 @@ func (h *Handler) refund(response http.ResponseWriter, request *http.Request) {
 	id := strings.TrimSpace(request.PathValue("id"))
 	item, err := h.payments.RequestRefund(request.Context(), id)
 	if err != nil {
-		httpx.WriteError(response, StatusFor(err), err)
+		writeFailure(response, err)
 		return
 	}
 	httpx.WriteJSON(response, http.StatusAccepted, OrderEnvelope{Data: toOrderResponse(item)})
@@ -335,4 +396,62 @@ func intQuery(raw string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+// withEvents resolves the night behind a page of orders in ONE query.
+//
+// A listing of twenty orders spans at most twenty events and usually far fewer,
+// so the ids are de-duplicated first. Reading them one order at a time is the
+// N+1 that turns a dashboard into a timeout on the day somebody has a hundred
+// orders.
+//
+// A failure here costs the page its event titles and nothing else. An orders
+// list that 500s because the catalogue was briefly unavailable would be a worse
+// answer than one that shows the orders.
+func (h *Handler) withEvents(ctx context.Context, items []orderdomain.Order) []OrderResponse {
+	responses := toOrderResponses(items)
+	if h.events == nil || len(responses) == 0 {
+		return responses
+	}
+	seen := make(map[string]struct{}, len(responses))
+	ids := make([]string, 0, len(responses))
+	for _, item := range responses {
+		if item.EventID == "" {
+			continue
+		}
+		if _, already := seen[item.EventID]; already {
+			continue
+		}
+		seen[item.EventID] = struct{}{}
+		ids = append(ids, item.EventID)
+	}
+	if len(ids) == 0 {
+		return responses
+	}
+
+	page, err := h.events.List(ctx, eventdomain.Filter{IDs: ids, Limit: len(ids)})
+	if err != nil {
+		log.Printf("orders: could not resolve %d event(s) for a listing: %v", len(ids), err)
+		return responses
+	}
+	found := make(map[string]*eventdomain.Event, len(page.Items))
+	for index := range page.Items {
+		happening := &page.Items[index].Event
+		found[happening.ID] = happening
+	}
+	attachEvents(responses, found)
+	return responses
+}
+
+// withEvent is the single-order case, kept on the same path so one order and a
+// page of them can never disagree about what an order looks like.
+func (h *Handler) withEvent(ctx context.Context, item *orderdomain.Order) OrderResponse {
+	responses := h.withEvents(ctx, []orderdomain.Order{*item})
+	return responses[0]
+}
+
+// writeFailure answers with both halves: the sentence for the buyer and the
+// code the client branches on.
+func writeFailure(response http.ResponseWriter, err error) {
+	httpx.WriteCodedError(response, StatusFor(err), CodeFor(err), err)
 }

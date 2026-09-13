@@ -166,6 +166,34 @@ func Unique(prefix string) string {
 	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), sequence)
 }
 
+// SeedEvent creates the event a ticket tier has to belong to, and returns its
+// id.
+//
+// Raw SQL rather than the repository, so this stays usable from the repository
+// package's own tests without importing it. Published rather than draft: a test
+// that seeds a tier almost always goes on to sell from it, and a draft event
+// would be invisible to every listing that looks.
+func SeedEvent(t *testing.T, db *gorm.DB, ownerID string) string {
+	t.Helper()
+	id := Unique("evt")
+	err := db.Exec(`
+		INSERT INTO events
+			(id, owner_id, slug, name, description, category, venue, address,
+			 neighborhood, city, uf, postal_code, starts_at, status, created_at, updated_at)
+		VALUES (?, ?, ?, 'Festival Aurora', '', 'festas_shows', 'Arena Castelao', '',
+		        '', 'Fortaleza', 'CE', '', ?, 'published', NOW(), NOW())`,
+		id, ownerID, id, time.Now().Add(720*time.Hour).UTC()).Error
+	if err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	t.Cleanup(func() {
+		// Tiers reference the event with ON DELETE RESTRICT, so they go first.
+		db.Exec("DELETE FROM tickets WHERE event_id = ?", id)
+		db.Exec("DELETE FROM events WHERE id = ?", id)
+	})
+	return id
+}
+
 // CountJobs counts jobs of one type in one status. Tests give their jobs a
 // unique type, so counting by type is what keeps packages that run in parallel
 // against the same database from seeing each other's rows — the alternative,

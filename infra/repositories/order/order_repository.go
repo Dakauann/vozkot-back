@@ -23,9 +23,19 @@ func NewOrderRepository(db *gorm.DB) *OrderRepository {
 	return &OrderRepository{db: db}
 }
 
+// Create writes the order and its lines.
+//
+// Both, or neither. The caller is always inside a unit of work — checkout
+// reserves stock in the same transaction — so an order that committed without
+// its items is not a state this can reach. The items are written with their own
+// conflict clause because a retry that got as far as the lines before dying
+// must be able to finish rather than fail on rows it wrote itself.
 func (r *OrderRepository) Create(ctx context.Context, item *domain.Order) error {
 	record := toSchema(item)
-	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+	result := r.db.WithContext(ctx).
+		Omit(clause.Associations).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&record)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -36,7 +46,19 @@ func (r *OrderRepository) Create(ctx context.Context, item *domain.Order) error 
 		// ordinary traffic, not a failed statement to log.
 		return domain.ErrIdempotencyMismatch
 	}
-	*item = *toDomain(&record)
+
+	lines := itemsToSchema(item)
+	if len(lines) > 0 {
+		if err := r.db.WithContext(ctx).
+			Clauses(clause.OnConflict{DoNothing: true}).
+			Create(&lines).Error; err != nil {
+			return err
+		}
+	}
+
+	stored := toDomain(&record)
+	stored.Items = item.Items
+	*item = *stored
 	return nil
 }
 
@@ -45,13 +67,21 @@ func (r *OrderRepository) GetByID(ctx context.Context, id string) (*domain.Order
 	if err := r.db.WithContext(ctx).First(&record, "id = ?", id).Error; err != nil {
 		return nil, translate(err)
 	}
-	return toDomain(&record), nil
+	item := toDomain(&record)
+	if err := r.attachItems(ctx, []*domain.Order{item}); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 // GetByIDForUpdate takes the row lock a settlement needs.
 //
 // SELECT ... FOR UPDATE, not a Go mutex: the two concurrent settlements may be
 // on different machines, and the only lock they share is the database's.
+//
+// The lock is on the order row alone. The lines are immutable once written —
+// nothing in the system ever updates an order_item — so reading them outside
+// the lock cannot see a half-changed set.
 func (r *OrderRepository) GetByIDForUpdate(ctx context.Context, id string) (*domain.Order, error) {
 	var record schema.Order
 	if err := r.db.WithContext(ctx).
@@ -59,7 +89,11 @@ func (r *OrderRepository) GetByIDForUpdate(ctx context.Context, id string) (*dom
 		First(&record, "id = ?", id).Error; err != nil {
 		return nil, translate(err)
 	}
-	return toDomain(&record), nil
+	item := toDomain(&record)
+	if err := r.attachItems(ctx, []*domain.Order{item}); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 func (r *OrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*domain.Order, error) {
@@ -71,7 +105,11 @@ func (r *OrderRepository) FindByIdempotencyKey(ctx context.Context, key string) 
 	if err := r.db.WithContext(ctx).First(&record, "idempotency_key = ?", key).Error; err != nil {
 		return nil, translate(err)
 	}
-	return toDomain(&record), nil
+	item := toDomain(&record)
+	if err := r.attachItems(ctx, []*domain.Order{item}); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 func (r *OrderRepository) FindByPaymentID(ctx context.Context, provider, paymentID string) (*domain.Order, error) {
@@ -87,7 +125,11 @@ func (r *OrderRepository) FindByPaymentID(ctx context.Context, provider, payment
 	if err := query.First(&record).Error; err != nil {
 		return nil, translate(err)
 	}
-	return toDomain(&record), nil
+	item := toDomain(&record)
+	if err := r.attachItems(ctx, []*domain.Order{item}); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 func (r *OrderRepository) List(ctx context.Context, filter domain.Filter) ([]domain.Order, error) {
@@ -107,9 +149,20 @@ func (r *OrderRepository) List(ctx context.Context, filter domain.Filter) ([]dom
 	if err := query.Find(&records).Error; err != nil {
 		return nil, err
 	}
+
 	items := make([]domain.Order, 0, len(records))
 	for index := range records {
 		items = append(items, *toDomain(&records[index]))
+	}
+	// One extra query for the whole page rather than one per order. A listing
+	// of twenty orders is the dashboard's normal request, and the N+1 version
+	// of it is twenty-one round trips for a screen.
+	pointers := make([]*domain.Order, 0, len(items))
+	for index := range items {
+		pointers = append(pointers, &items[index])
+	}
+	if err := r.attachItems(ctx, pointers); err != nil {
+		return nil, err
 	}
 	return items, nil
 }
@@ -122,11 +175,20 @@ func (r *OrderRepository) Count(ctx context.Context, filter domain.Filter) (int6
 	return total, nil
 }
 
+// Update writes back only what can change after an order exists.
+//
+// The items are absent on purpose. What was bought is settled at checkout, and
+// a path that could rewrite a line would be a path that could rewrite what
+// somebody paid for.
 func (r *OrderRepository) Update(ctx context.Context, item *domain.Order) error {
 	record := toSchema(item)
 	result := r.db.WithContext(ctx).Model(&schema.Order{}).Where("id = ?", record.ID).Updates(map[string]any{
+		"buyer_name":         record.BuyerName,
+		"buyer_email":        record.BuyerEmail,
+		"buyer_document":     record.BuyerDocument,
 		"status":             record.Status,
 		"hold_expires_at":    record.HoldExpiresAt,
+		"confirmed":          record.Confirmed,
 		"payment_provider":   record.PaymentProvider,
 		"payment_id":         record.PaymentID,
 		"payment_status":     record.PaymentStatus,
@@ -183,6 +245,16 @@ func (r *OrderRepository) ClaimExpired(ctx context.Context, now time.Time, limit
 	for index := range records {
 		items = append(items, *toDomain(&records[index]))
 	}
+	// RETURNING gives back the order rows and nothing else, and the caller is
+	// about to release stock against every line. Loading them is not an
+	// optimisation here — without the items the sweep would release nothing.
+	pointers := make([]*domain.Order, 0, len(items))
+	for index := range items {
+		pointers = append(pointers, &items[index])
+	}
+	if err := r.attachItems(ctx, pointers); err != nil {
+		return nil, err
+	}
 	return items, nil
 }
 
@@ -207,7 +279,15 @@ const buyerHoldLockNamespace int32 = 21781
 // Keyed on a hash of the buyer id, so two different accounts may occasionally
 // share a lock. That costs the unlucky pair one short wait and nothing else:
 // the hash is never used to decide who holds what, only to decide who waits.
-func (r *OrderRepository) CountOpenHoldsForUpdate(ctx context.Context, buyerID, ticketID string) (domain.OpenHolds, error) {
+//
+// The per-tier counts come back as a map covering the tiers asked about. An
+// order now spans several tiers, and a cap that checked only the first of them
+// would be a cap the buyer chooses the strength of by reordering their basket.
+func (r *OrderRepository) CountOpenHoldsForUpdate(
+	ctx context.Context,
+	buyerID string,
+	ticketIDs []string,
+) (domain.OpenHolds, error) {
 	buyerID = strings.TrimSpace(buyerID)
 	if buyerID == "" {
 		// A sale with no account behind it — an operator at the door — has no
@@ -221,21 +301,81 @@ func (r *OrderRepository) CountOpenHoldsForUpdate(ctx context.Context, buyerID, 
 		return domain.OpenHolds{}, err
 	}
 
-	var counted struct {
-		Orders         int
-		TicketsForTier int
+	holds := domain.OpenHolds{TicketsByTier: make(map[string]int, len(ticketIDs))}
+
+	var openOrders int64
+	if err := r.db.WithContext(ctx).Model(&schema.Order{}).
+		Where("buyer_id = ? AND status = ?", buyerID, string(domain.StatusPendingPayment)).
+		Count(&openOrders).Error; err != nil {
+		return domain.OpenHolds{}, err
 	}
+	holds.Orders = int(openOrders)
+
+	if len(ticketIDs) == 0 {
+		return holds, nil
+	}
+
+	var counted []struct {
+		TicketID string
+		Quantity int
+	}
+	// Grouped in the database rather than summed in Go: the buyer may hold
+	// dozens of lines across their open orders, and only the totals are wanted.
 	err := r.db.WithContext(ctx).Raw(`
-		SELECT COUNT(*)                                                  AS orders,
-		       COALESCE(SUM(quantity) FILTER (WHERE ticket_id = ?), 0)   AS tickets_for_tier
-		FROM orders
-		WHERE buyer_id = ? AND status = ?`,
-		ticketID, buyerID, string(domain.StatusPendingPayment),
+		SELECT i.ticket_id AS ticket_id, COALESCE(SUM(i.quantity), 0) AS quantity
+		FROM order_items i
+		JOIN orders o ON o.id = i.order_id
+		WHERE o.buyer_id = ? AND o.status = ? AND i.ticket_id IN ?
+		GROUP BY i.ticket_id`,
+		buyerID, string(domain.StatusPendingPayment), ticketIDs,
 	).Scan(&counted).Error
 	if err != nil {
 		return domain.OpenHolds{}, err
 	}
-	return domain.OpenHolds{Orders: counted.Orders, TicketsForTier: counted.TicketsForTier}, nil
+	for _, row := range counted {
+		holds.TicketsByTier[row.TicketID] = row.Quantity
+	}
+	return holds, nil
+}
+
+// attachItems loads the lines for a page of orders in one query.
+func (r *OrderRepository) attachItems(ctx context.Context, orders []*domain.Order) error {
+	if len(orders) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(orders))
+	for _, item := range orders {
+		ids = append(ids, item.ID)
+	}
+
+	var records []schema.OrderItem
+	// Ordered by ticket id so an order's lines always come back in the same
+	// sequence the domain sorted them into — which is the sequence the
+	// reservation loop takes its locks in.
+	if err := r.db.WithContext(ctx).
+		Where("order_id IN ?", ids).
+		Order("order_id, ticket_id").
+		Find(&records).Error; err != nil {
+		return err
+	}
+
+	grouped := make(map[string][]domain.Item, len(orders))
+	for index := range records {
+		record := records[index]
+		grouped[record.OrderID] = append(grouped[record.OrderID], domain.Item{
+			ID:             record.ID,
+			OrderID:        record.OrderID,
+			TicketID:       record.TicketID,
+			TicketTitle:    record.TicketTitle,
+			Quantity:       record.Quantity,
+			UnitPriceCents: record.UnitPriceCents,
+			TotalCents:     record.TotalCents,
+		})
+	}
+	for _, item := range orders {
+		item.Items = grouped[item.ID]
+	}
+	return nil
 }
 
 // buyerLockKey folds a buyer id into the int32 an advisory lock takes.
@@ -252,7 +392,17 @@ func buyerLockKey(buyerID string) int32 {
 
 func applyFilter(query *gorm.DB, filter domain.Filter) *gorm.DB {
 	if filter.TicketID != "" {
-		query = query.Where("ticket_id = ?", filter.TicketID)
+		// Through the lines, because a tier is no longer a column on the order.
+		// EXISTS rather than a join: the line is not wanted, only the fact that
+		// one names this tier, and a join would need de-duplicating.
+		query = query.Where(`
+			EXISTS (
+				SELECT 1 FROM order_items
+				WHERE order_items.order_id = orders.id AND order_items.ticket_id = ?
+			)`, filter.TicketID)
+	}
+	if filter.EventID != "" {
+		query = query.Where("orders.event_id = ?", filter.EventID)
 	}
 	if filter.BuyerID != "" {
 		query = query.Where("buyer_id = ?", filter.BuyerID)
@@ -261,11 +411,14 @@ func applyFilter(query *gorm.DB, filter domain.Filter) *gorm.DB {
 		query = query.Where("status = ?", string(filter.Status))
 	}
 	if !filter.EventNotBefore.IsZero() {
-		// EXISTS rather than a join: the row is not wanted, only the fact that
-		// its event is still ahead, and a join would have to be de-duplicated.
-		query = query.Where(
-			"EXISTS (SELECT 1 FROM tickets WHERE tickets.id = orders.ticket_id AND tickets.starts_at >= ?)",
-			filter.EventNotBefore.UTC())
+		// Straight to the event the order names. It used to have to go through
+		// the tier, because the order only knew a price; it now knows the
+		// night.
+		query = query.Where(`
+			EXISTS (
+				SELECT 1 FROM events
+				WHERE events.id = orders.event_id AND events.starts_at >= ?
+			)`, filter.EventNotBefore.UTC())
 	}
 	return query
 }
@@ -284,17 +437,16 @@ func toSchema(item *domain.Order) schema.Order {
 	}
 	return schema.Order{
 		ID:              item.ID,
-		TicketID:        item.TicketID,
+		EventID:         item.EventID,
 		BuyerID:         item.BuyerID,
 		BuyerName:       item.BuyerName,
 		BuyerEmail:      item.BuyerEmail,
 		BuyerDocument:   item.BuyerDocument,
-		Quantity:        item.Quantity,
-		UnitPriceCents:  item.UnitPriceCents,
 		TotalCents:      item.TotalCents,
 		Currency:        item.Currency,
 		Status:          string(item.Status),
 		HoldExpiresAt:   item.HoldExpiresAt,
+		Confirmed:       item.Confirmed,
 		PaymentProvider: string(item.PaymentProvider),
 		PaymentID:       item.PaymentID,
 		PaymentStatus:   string(item.PaymentStatus),
@@ -309,6 +461,23 @@ func toSchema(item *domain.Order) schema.Order {
 	}
 }
 
+func itemsToSchema(item *domain.Order) []schema.OrderItem {
+	lines := make([]schema.OrderItem, 0, len(item.Items))
+	for _, line := range item.Items {
+		lines = append(lines, schema.OrderItem{
+			ID:             line.ID,
+			OrderID:        item.ID,
+			TicketID:       line.TicketID,
+			TicketTitle:    line.TicketTitle,
+			Quantity:       line.Quantity,
+			UnitPriceCents: line.UnitPriceCents,
+			TotalCents:     line.TotalCents,
+			CreatedAt:      item.CreatedAt,
+		})
+	}
+	return lines
+}
+
 func toDomain(record *schema.Order) *domain.Order {
 	key := ""
 	if record.IdempotencyKey != nil {
@@ -316,17 +485,16 @@ func toDomain(record *schema.Order) *domain.Order {
 	}
 	return &domain.Order{
 		ID:              record.ID,
-		TicketID:        record.TicketID,
+		EventID:         record.EventID,
 		BuyerID:         record.BuyerID,
 		BuyerName:       record.BuyerName,
 		BuyerEmail:      record.BuyerEmail,
 		BuyerDocument:   record.BuyerDocument,
-		Quantity:        record.Quantity,
-		UnitPriceCents:  record.UnitPriceCents,
 		TotalCents:      record.TotalCents,
 		Currency:        record.Currency,
 		Status:          domain.Status(record.Status),
 		HoldExpiresAt:   record.HoldExpiresAt,
+		Confirmed:       record.Confirmed,
 		PaymentProvider: payment.Provider(record.PaymentProvider),
 		PaymentID:       record.PaymentID,
 		PaymentStatus:   payment.Status(record.PaymentStatus),

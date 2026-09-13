@@ -7,11 +7,15 @@ import (
 
 // Filter selects orders for a listing.
 type Filter struct {
+	// TicketID selects orders with a line for that tier, which is now a
+	// question about the items rather than about the order.
 	TicketID string
-	BuyerID  string
-	Status   Status
-	Limit    int
-	Offset   int
+	// EventID selects every order for one night, across all of its tiers.
+	EventID string
+	BuyerID string
+	Status  Status
+	Limit   int
+	Offset  int
 	// OldestUpdatedFirst is used by recovery sweeps. Successful reconciliation
 	// refreshes UpdatedAt, rotating still-pending orders behind work that has
 	// not been checked yet instead of starving the oldest payment forever.
@@ -67,5 +71,8 @@ type Repository interface {
 	// It is meaningful ONLY inside a unit of work. Called on its own the lock is
 	// taken and released by the same implicit transaction, and the number is
 	// stale before the caller reads it.
-	CountOpenHoldsForUpdate(ctx context.Context, buyerID, ticketID string) (OpenHolds, error)
+	// ticketIDs are the tiers this checkout touches; the counts come back
+	// only for those. Passing none still takes the lock and still counts open
+	// orders, which is what a caller with no per-tier cap wants.
+	CountOpenHoldsForUpdate(ctx context.Context, buyerID string, ticketIDs []string) (OpenHolds, error)
 }

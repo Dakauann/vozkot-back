@@ -15,6 +15,7 @@ package uow
 import (
 	"context"
 
+	"vozkot/domain/event"
 	"vozkot/domain/order"
 	"vozkot/domain/queue"
 	"vozkot/domain/ticket"
@@ -24,6 +25,10 @@ import (
 type Repositories interface {
 	Orders() order.Repository
 	Tickets() ticket.Repository
+	// Events is read during settlement: a receipt names the show, the door
+	// time and the venue, and those live on the event rather than on the tier
+	// whose price was paid.
+	Events() event.Repository
 	Jobs() queue.Queue
 }
 

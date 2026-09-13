@@ -79,6 +79,7 @@ var _ domain.Renderer = (*Renderer)(nil)
 var files = map[domain.Template]string{
 	domain.TemplateOrderPending:   "order_pending.html",
 	domain.TemplateOrderConfirmed: "order_confirmed.html",
+	domain.TemplateSignInCode:     "sign_in_code.html",
 }
 
 // NewRenderer parses every email template against the shared layout and

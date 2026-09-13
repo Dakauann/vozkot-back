@@ -116,6 +116,23 @@ func (p *stubProvider) handler() http.HandlerFunc {
 	}
 }
 
+// amount is what the provider was actually asked to charge, in reais.
+//
+// Read back off the stub rather than off the order, because the point of
+// asserting it is that the two AGREE: an order whose total says one thing and
+// whose charge says another is money the box office either loses or cannot
+// justify.
+func (p *stubProvider) amount(id string) float64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	payment, ok := p.payments[id]
+	if !ok {
+		return 0
+	}
+	value, _ := payment["transaction_amount"].(float64)
+	return value
+}
+
 // move sets the state the provider reports for a payment from now on.
 func (p *stubProvider) move(id, status string, detail string) {
 	p.mu.Lock()
@@ -133,6 +150,7 @@ type harness struct {
 	tickets  ticketdomain.Repository
 	provider *stubProvider
 	ticketID string
+	eventID  string
 	ownerID  string
 }
 
@@ -157,11 +175,10 @@ func newHarness(t *testing.T, capacity int) *harness {
 		VALUES (?, 'Payment Test', ?, 'x', 'user', 0, NOW(), NOW())`, ownerID, ownerID+"@vozkot.test").Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
+	eventID := testsupport.SeedEvent(t, db, ownerID)
 	ticket, err := ticketdomain.New(testsupport.Unique("tkt"), ownerID, ticketdomain.Draft{
-		EventName:  "Festival Aurora",
+		EventID:    eventID,
 		Title:      "Pista",
-		Venue:      "Arena",
-		StartsAt:   time.Now().Add(720 * time.Hour),
 		PriceCents: 24000,
 		Quantity:   capacity,
 		Status:     ticketdomain.StatusOnSale,
@@ -176,10 +193,10 @@ func newHarness(t *testing.T, capacity int) *harness {
 		// Notification jobs first: they are found through the orders, which the
 		// next statement removes.
 		db.Exec(`DELETE FROM jobs WHERE type = ? AND EXISTS (
-			SELECT 1 FROM orders o WHERE o.ticket_id = ? AND jobs.dedupe_key LIKE '%:' || o.id)`,
+			SELECT 1 FROM order_items i WHERE i.ticket_id = ? AND jobs.dedupe_key LIKE '%:' || i.order_id)`,
 			queuedomain.TypeSendNotification, ticket.ID)
-		db.Exec("DELETE FROM jobs WHERE payload->>'orderId' IN (SELECT id FROM orders WHERE ticket_id = ?)", ticket.ID)
-		db.Exec("DELETE FROM orders WHERE ticket_id = ?", ticket.ID)
+		db.Exec("DELETE FROM jobs WHERE payload->>'orderId' IN (SELECT order_id FROM order_items WHERE ticket_id = ?)", ticket.ID)
+		db.Exec("DELETE FROM orders WHERE id IN (SELECT order_id FROM order_items WHERE ticket_id = ?)", ticket.ID)
 		db.Exec("DELETE FROM tickets WHERE id = ?", ticket.ID)
 		db.Exec("DELETE FROM users WHERE id = ?", ownerID)
 	})
@@ -196,6 +213,7 @@ func newHarness(t *testing.T, capacity int) *harness {
 		tickets:  tickets,
 		provider: provider,
 		ticketID: ticket.ID,
+		eventID:  eventID,
 		ownerID:  ownerID,
 	}
 }
@@ -210,13 +228,18 @@ func (h *harness) pendingOrder(t *testing.T, quantity int) *orderdomain.Order {
 		t.Fatalf("reserve: reserved=%t err=%v", reserved, err)
 	}
 	item, err := orderdomain.New(testsupport.Unique("ord"), orderdomain.Draft{
-		TicketID:       h.ticketID,
-		BuyerID:        h.ownerID,
-		BuyerName:      "Maria Souza",
-		BuyerEmail:     "maria@exemplo.com.br",
-		BuyerDocument:  "12345678909",
-		Quantity:       quantity,
-		UnitPriceCents: 24000,
+		EventID:       h.eventID,
+		BuyerID:       h.ownerID,
+		BuyerName:     "Maria Souza",
+		BuyerEmail:    "maria@exemplo.com.br",
+		BuyerDocument: "12345678909",
+		Items: []orderdomain.Item{{
+			ID:             testsupport.Unique("oi"),
+			TicketID:       h.ticketID,
+			TicketTitle:    "Pista",
+			Quantity:       quantity,
+			UnitPriceCents: 24000,
+		}},
 	}, 30*time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("build order: %v", err)
@@ -275,7 +298,12 @@ func (h *harness) expireOrder(orderID string) error {
 	if err := h.orders.Update(ctx, stored); err != nil {
 		return err
 	}
-	return h.tickets.Release(ctx, stored.TicketID, stored.Quantity)
+	for _, line := range stored.Items {
+		if err := h.tickets.Release(ctx, line.TicketID, line.Quantity); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func TestCreateChargeAttachesThePixCodeWithoutMovingTheOrder(t *testing.T) {
@@ -398,6 +426,142 @@ func TestRedeliveredApprovalMovesStockOnce(t *testing.T) {
 	stock := h.stock(t)
 	if stock.Sold != 3 || stock.Reserved != 0 {
 		t.Fatalf("sold = %d, reserved = %d after five concurrent deliveries, want 3 and 0", stock.Sold, stock.Reserved)
+	}
+}
+
+// messages returns the buyer notifications raised for one order, read back out
+// of the same table the settlement wrote them to.
+func (h *harness) messages(t *testing.T, orderID string) []notificationdomain.Payload {
+	t.Helper()
+	var rows []struct {
+		Payload []byte
+	}
+	if err := h.db.Raw(`SELECT payload FROM jobs WHERE type = ? AND dedupe_key LIKE ? ORDER BY created_at`,
+		queuedomain.TypeSendNotification, "%:"+orderID).Scan(&rows).Error; err != nil {
+		t.Fatalf("read notification jobs: %v", err)
+	}
+	payloads := make([]notificationdomain.Payload, 0, len(rows))
+	for _, row := range rows {
+		var payload notificationdomain.Payload
+		if err := json.Unmarshal(row.Payload, &payload); err != nil {
+			t.Fatalf("decode notification payload: %v", err)
+		}
+		payloads = append(payloads, payload)
+	}
+	return payloads
+}
+
+// A settled sale and the buyer's receipt are written in ONE transaction, so
+// there is no state in which the money moved and the message did not.
+func TestApprovedPaymentQueuesTheReceipt(t *testing.T) {
+	h := newHarness(t, 10)
+	item := h.pendingOrder(t, 2)
+	paymentID := h.charge(t, item)
+	h.provider.move(paymentID, mercadopago.StatusApproved, mercadopago.DetailAccredited)
+
+	if err := h.service.SyncPayment(context.Background(), paymentID); err != nil {
+		t.Fatalf("SyncPayment() error = %v", err)
+	}
+
+	confirmations := 0
+	for _, message := range h.messages(t, item.ID) {
+		if message.Template != notificationdomain.TemplateOrderConfirmed {
+			continue
+		}
+		confirmations++
+		if message.Channel != notificationdomain.ChannelEmail {
+			t.Errorf("channel = %q", message.Channel)
+		}
+		if message.Email != item.BuyerEmail {
+			t.Errorf("recipient = %q, want %q", message.Email, item.BuyerEmail)
+		}
+		// The message carries what was true when the money arrived, not a
+		// pointer to state that can be edited afterwards.
+		if message.Data["Total"] != "R$ 480,00" {
+			t.Errorf("total = %v, want R$ 480,00", message.Data["Total"])
+		}
+		if message.Data["EventName"] != "Festival Aurora" {
+			t.Errorf("event = %v", message.Data["EventName"])
+		}
+	}
+	if confirmations != 1 {
+		t.Fatalf("%d receipt(s) queued, want 1", confirmations)
+	}
+}
+
+// The same guarantee under the traffic that actually happens: Mercado Pago
+// delivering one approval five times, processed at once. The stock moves once
+// and so does the buyer's inbox.
+func TestRedeliveredApprovalQueuesOneReceipt(t *testing.T) {
+	h := newHarness(t, 10)
+	item := h.pendingOrder(t, 3)
+	paymentID := h.charge(t, item)
+	h.provider.move(paymentID, mercadopago.StatusApproved, mercadopago.DetailAccredited)
+
+	var wait sync.WaitGroup
+	wait.Add(5)
+	for index := 0; index < 5; index++ {
+		go func() {
+			defer wait.Done()
+			if err := h.service.SyncPayment(context.Background(), paymentID); err != nil {
+				t.Errorf("SyncPayment() error = %v", err)
+			}
+		}()
+	}
+	wait.Wait()
+
+	confirmations := 0
+	for _, message := range h.messages(t, item.ID) {
+		if message.Template == notificationdomain.TemplateOrderConfirmed {
+			confirmations++
+		}
+	}
+	if confirmations != 1 {
+		t.Fatalf("%d receipt(s) queued after five deliveries, want 1", confirmations)
+	}
+}
+
+// The "here is how to pay" message waits for the provider to issue a code.
+// Raised at checkout it would have promised a PIX payload that did not exist.
+func TestCreatedChargeQueuesThePaymentInstructions(t *testing.T) {
+	h := newHarness(t, 10)
+	item := h.pendingOrder(t, 1)
+
+	h.charge(t, item)
+
+	instructions := 0
+	for _, message := range h.messages(t, item.ID) {
+		if message.Template != notificationdomain.TemplateOrderPending {
+			continue
+		}
+		instructions++
+		if code, _ := message.Data["PixCopyPaste"].(string); code == "" {
+			t.Error("the payment instructions carry no PIX code")
+		}
+		if message.Data["PaymentDeadline"] == "" {
+			t.Error("the payment instructions carry no deadline")
+		}
+	}
+	if instructions != 1 {
+		t.Fatalf("%d instruction message(s) queued, want 1", instructions)
+	}
+}
+
+// A settlement that moves nothing raises nothing. A provider re-reporting
+// "pending" must not put a second copy of the instructions in an inbox.
+func TestRepeatedPendingReportsQueueNothingNew(t *testing.T) {
+	h := newHarness(t, 10)
+	item := h.pendingOrder(t, 1)
+	paymentID := h.charge(t, item)
+
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := h.service.SyncPayment(context.Background(), paymentID); err != nil {
+			t.Fatalf("SyncPayment() error = %v", err)
+		}
+	}
+
+	if got := len(h.messages(t, item.ID)); got != 1 {
+		t.Fatalf("%d message(s) queued, want 1", got)
 	}
 }
 

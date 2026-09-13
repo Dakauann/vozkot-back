@@ -9,10 +9,12 @@ package uow
 import (
 	"context"
 
+	"vozkot/domain/event"
 	"vozkot/domain/order"
 	"vozkot/domain/queue"
 	"vozkot/domain/ticket"
 	domain "vozkot/domain/uow"
+	eventRepository "vozkot/infra/repositories/event"
 	orderRepository "vozkot/infra/repositories/order"
 	queueRepository "vozkot/infra/repositories/queue"
 	ticketRepository "vozkot/infra/repositories/ticket"
@@ -44,4 +46,5 @@ func (r *repositories) Orders() order.Repository { return orderRepository.NewOrd
 func (r *repositories) Tickets() ticket.Repository {
 	return ticketRepository.NewTicketRepository(r.tx)
 }
-func (r *repositories) Jobs() queue.Queue { return queueRepository.NewJobRepository(r.tx) }
+func (r *repositories) Events() event.Repository { return eventRepository.NewEventRepository(r.tx) }
+func (r *repositories) Jobs() queue.Queue        { return queueRepository.NewJobRepository(r.tx) }

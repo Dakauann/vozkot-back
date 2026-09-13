@@ -4,14 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	delivery "vozkot/delivery/http"
 	authHTTP "vozkot/delivery/http/auth"
 	checkoutHTTP "vozkot/delivery/http/checkout"
+	eventHTTP "vozkot/delivery/http/event"
 	ticketHTTP "vozkot/delivery/http/ticket"
 	webhooksHTTP "vozkot/delivery/http/webhooks"
 	authdomain "vozkot/domain/auth"
@@ -23,13 +26,18 @@ import (
 	queuedomain "vozkot/domain/queue"
 	ticketdomain "vozkot/domain/ticket"
 	"vozkot/infra/config"
+	"vozkot/infra/crypto/pii"
+	"vozkot/infra/crypto/piigorm"
 	"vozkot/infra/database"
+	"vozkot/infra/geocoding"
 	authMiddleware "vozkot/infra/http/middleware"
+	"vozkot/infra/imaging"
 	"vozkot/infra/mercadopago"
 	"vozkot/infra/notifications"
 	"vozkot/infra/rabbitmq"
 	redisCache "vozkot/infra/redis"
 	authRepository "vozkot/infra/repositories/auth"
+	eventRepository "vozkot/infra/repositories/event"
 	idempotencyRepository "vozkot/infra/repositories/idempotency"
 	mediaRepository "vozkot/infra/repositories/media"
 	orderRepository "vozkot/infra/repositories/order"
@@ -41,6 +49,7 @@ import (
 	"vozkot/infra/uow"
 	authUsecase "vozkot/usecases/auth"
 	checkoutUsecase "vozkot/usecases/checkout"
+	eventUsecase "vozkot/usecases/event"
 	mediaUsecase "vozkot/usecases/media"
 	notificationUsecase "vozkot/usecases/notification"
 	paymentUsecase "vozkot/usecases/payment"
@@ -58,6 +67,9 @@ type Container struct {
 	// process exits rather than being reclaimed minutes later by another node.
 	stopWorkers context.CancelFunc
 	workersDone sync.WaitGroup
+	// challenges sweeps spent sign-in codes. Nil when passwordless sign-in is
+	// not configured, and the sweep is simply not scheduled.
+	challenges *authUsecase.Verification
 }
 
 func New(cfg config.Config) (*Container, error) {
@@ -124,7 +136,7 @@ func New(cfg config.Config) (*Container, error) {
 		log.Printf("cache: REDIS_URL is not set; reads go straight to PostgreSQL and the checkout rate limit is off")
 	}
 
-	mediaLibrary := mediaUsecase.NewService(mediaRepository.NewMediaRepository(db), fileStorage)
+	mediaLibrary := mediaUsecase.NewService(mediaRepository.NewMediaRepository(db), fileStorage, imaging.NewLibrary(cfg.MediaProcessors))
 
 	// Reads go through the cache; the transactional writes inside a unit of
 	// work use the undecorated repositories the runner builds.
@@ -132,8 +144,15 @@ func New(cfg config.Config) (*Container, error) {
 	if readCache != nil {
 		tickets = ticketRepository.NewCachedTicketRepository(tickets, readCache, ticketRepository.TicketTTL)
 	}
-	ticketService := ticketUsecase.NewService(tickets, mediaLibrary)
+	ticketService := ticketUsecase.NewService(tickets)
 	ticketHandler := ticketHTTP.NewHandler(ticketService)
+
+	// The catalogue. Artwork hangs off the event because that is what it
+	// depicts, and geocoding is best-effort: no key, no account, and an address
+	// nobody can place still publishes.
+	events := eventRepository.NewEventRepository(db)
+	eventService := eventUsecase.NewService(events, tickets, mediaLibrary, geocoding.New())
+	eventHandler := eventHTTP.NewHandler(eventService)
 
 	users := userRepository.NewUserRepository(db)
 	// One decorator instance serves both the use case and the guard, which is
@@ -155,6 +174,23 @@ func New(cfg config.Config) (*Container, error) {
 	var loginLimit *authMiddleware.RateLimit
 	if limiter != nil {
 		loginLimit = authMiddleware.NewRateLimit(limiter, "login", cfg.Cache.LoginEmailRateLimit, cfg.Cache.AuthRateWindow, clients)
+	}
+
+	// The encryption keyring, installed before any repository that touches a
+	// sealed column. Optional: a clone with no keys runs with the passwordless
+	// routes unmounted rather than writing documents in the clear.
+	piiService, err := pii.LoadFromEnv()
+	if err != nil {
+		if os.Getenv("APP_ENV") == "production" {
+			// Not a preference. Holding documents, legal names and dates of
+			// birth without keys is the shape of a breach, and a box office
+			// that cannot encrypt them must not be the one taking them.
+			return nil, fmt.Errorf("PII encryption keys are required in production: %w", err)
+		}
+		log.Printf("auth: PII encryption is not configured (%v); passwordless sign-in is disabled", err)
+	} else {
+		piigorm.SetService(piiService)
+		log.Printf("auth: PII encryption active, key version %d", piiService.ActiveKEKVersion())
 	}
 
 	authService := authUsecase.NewService(users, sessions, passwords, tokens, cfg.RefreshTokenTTL)
@@ -206,14 +242,37 @@ func New(cfg config.Config) (*Container, error) {
 	// what raises a receipt, and built as ONE stack — renderer, channel
 	// senders, notifier — so the channels the notifier will accept are exactly
 	// the channels something can deliver.
-	messenger, purchases, err := buildNotifications(cfg.Notifications, jobs, dispatcher)
+	messenger, purchases, notifier, err := buildNotifications(cfg.Notifications, jobs, dispatcher)
 	if err != nil {
 		return nil, err
 	}
 
-	checkoutService := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, cfg.Payments.HoldFor, holdLimits)
+	// Passwordless sign-in, and the identity block it later asks for.
+	//
+	// Both depend on the encryption keyring: the challenge table seals its
+	// destinations and the user table seals its documents, so without keys
+	// there is nowhere safe to put either. Rather than fall back to plaintext —
+	// which is how a "temporary" unencrypted column becomes permanent — the
+	// routes are simply not mounted, and the password sign-in that predates
+	// them keeps working.
+	if piiService != nil {
+		codes := notificationUsecase.NewCodeSender(notifier, dispatcher)
+		challenges := authRepository.NewChallengeRepository(db)
+		verification := authUsecase.NewVerification(
+			users, challenges, passwords,
+			piiService.BlindIndex,
+			codes, notificationUsecase.NewMockPhoneSender(),
+			authService,
+		)
+		authHandler = authHandler.WithVerification(verification, authUsecase.NewProfiles(users))
+		container.challenges = verification
+		log.Printf("auth: passwordless sign-in enabled; codes are %d digits and last %s",
+			authdomain.CodeLength, authdomain.CodeTTL)
+	}
+
+	checkoutService := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, cfg.Payments.HoldFor, cfg.Payments.CartHoldFor, holdLimits)
 	paymentService := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, purchases)
-	checkoutHandler := checkoutHTTP.NewHandler(checkoutService, paymentService, keys, cfg.Queue.IdempotencyLease)
+	checkoutHandler := checkoutHTTP.NewHandler(checkoutService, paymentService, eventService, keys, cfg.Queue.IdempotencyLease)
 
 	var webhookHandler *webhooksHTTP.MercadoPagoHandler
 	if cfg.Payments.Enabled() {
@@ -233,6 +292,7 @@ func New(cfg config.Config) (*Container, error) {
 	router := delivery.NewRouter(delivery.Dependencies{
 		Auth:              authHandler,
 		Tickets:           ticketHandler,
+		Events:            eventHandler,
 		Checkout:          checkoutHandler,
 		Webhooks:          webhookHandler,
 		AuthMiddleware:    authGuard,
@@ -269,18 +329,18 @@ func buildNotifications(
 	cfg config.NotificationsConfig,
 	jobs queuedomain.Queue,
 	dispatcher *queueUsecase.Dispatcher,
-) (*notificationUsecase.Service, *notificationUsecase.Purchases, error) {
+) (*notificationUsecase.Service, *notificationUsecase.Purchases, *notificationUsecase.Notifier, error) {
 	email := notifications.NewEmailSender(cfg)
 	if email == nil {
 		log.Printf("notifications: RESEND_API_KEY is not set; buyers receive no order emails")
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	// Parsed once, at boot. A template with a syntax error or a missing
 	// component fails the deploy here rather than one buyer's receipt later.
 	renderer, err := notifications.NewRenderer(cfg.Brand)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	messenger := notificationUsecase.NewService(renderer, email)
@@ -289,7 +349,7 @@ func buildNotifications(
 
 	log.Printf("notifications: Resend enabled, %d template(s), from %q, up to %d/s per replica",
 		renderer.Templates(), cfg.FromEmail, cfg.MaxRPS)
-	return messenger, purchases, nil
+	return messenger, purchases, notifier, nil
 }
 
 // buildGateway returns the payment adapter, or nil when the provider is not
@@ -374,6 +434,16 @@ func (c *Container) startWorkers(
 			released, err := checkout.ExpireHolds(ctx, 200)
 			if err == nil && released > 0 {
 				log.Printf("queue: released %d expired hold(s)", released)
+			}
+			// Spent sign-in codes ride the same sweep rather than getting a
+			// timer of their own. They expire on the same order of minutes as a
+			// hold, and keeping them afterwards would be retaining a record of
+			// who signed in and when — which is exactly what that table's shape
+			// avoids holding.
+			if c.challenges != nil {
+				if _, sweepErr := c.challenges.SweepExpiredChallenges(ctx, 500); sweepErr != nil {
+					log.Printf("auth: sweeping expired challenges: %v", sweepErr)
+				}
 			}
 			return err
 		})

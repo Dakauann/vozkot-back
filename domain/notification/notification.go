@@ -55,11 +55,16 @@ const (
 	// TemplateOrderConfirmed is the receipt: the money arrived and the
 	// ingressos belong to the buyer.
 	TemplateOrderConfirmed Template = "order_confirmed"
+	// TemplateSignInCode carries a one-time code. It is the only message in
+	// the system whose CONTENTS are a live credential, which is why it is
+	// never deduplicated by content and never retained: the job that sends it
+	// is keyed on the challenge, and the challenge is swept once it lapses.
+	TemplateSignInCode Template = "sign_in_code"
 )
 
 func (t Template) Valid() bool {
 	switch t {
-	case TemplateOrderPending, TemplateOrderConfirmed:
+	case TemplateOrderPending, TemplateOrderConfirmed, TemplateSignInCode:
 		return true
 	default:
 		return false

@@ -2,8 +2,10 @@ package notification
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
+	eventdomain "vozkot/domain/event"
 	domain "vozkot/domain/notification"
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
@@ -40,11 +42,11 @@ func NewPurchases(notifier *Notifier, siteURL string) *Purchases {
 //
 // jobs is the queue handle bound to the caller's transaction; the returned job
 // is announced to the broker after that transaction commits.
-func (p *Purchases) ChargeIssued(ctx context.Context, jobs queue.Queue, item *orderdomain.Order, tier *ticketdomain.Ticket) (*queue.Job, error) {
+func (p *Purchases) ChargeIssued(ctx context.Context, jobs queue.Queue, item *orderdomain.Order, tier *ticketdomain.Ticket, happening *eventdomain.Event) (*queue.Job, error) {
 	if p == nil || item == nil {
 		return nil, nil
 	}
-	data := p.orderData(item, tier)
+	data := p.orderData(item, tier, happening)
 	data["PaymentDeadline"] = longDate(item.HoldExpiresAt)
 	data["PixCopyPaste"] = item.PixCopyPaste
 	data["HasPix"] = item.PixCopyPaste != ""
@@ -64,11 +66,11 @@ func (p *Purchases) ChargeIssued(ctx context.Context, jobs queue.Queue, item *or
 // OrderPaid is the receipt: the money arrived and the ingressos are the
 // buyer's. It is raised from inside the settlement transaction, so it commits
 // with the sale or not at all.
-func (p *Purchases) OrderPaid(ctx context.Context, jobs queue.Queue, item *orderdomain.Order, tier *ticketdomain.Ticket) (*queue.Job, error) {
+func (p *Purchases) OrderPaid(ctx context.Context, jobs queue.Queue, item *orderdomain.Order, tier *ticketdomain.Ticket, happening *eventdomain.Event) (*queue.Job, error) {
 	if p == nil || item == nil {
 		return nil, nil
 	}
-	data := p.orderData(item, tier)
+	data := p.orderData(item, tier, happening)
 	data["PaidAt"] = ""
 	if item.PaidAt != nil {
 		data["PaidAt"] = shortDateTime(*item.PaidAt)
@@ -91,7 +93,7 @@ func (p *Purchases) OrderPaid(ctx context.Context, jobs queue.Queue, item *order
 // Money is formatted once, by the code that knows it is int64 centavos; a
 // template that divides by a hundred is a template that eventually rounds
 // somebody's total.
-func (p *Purchases) orderData(item *orderdomain.Order, tier *ticketdomain.Ticket) map[string]any {
+func (p *Purchases) orderData(item *orderdomain.Order, tier *ticketdomain.Ticket, happening *eventdomain.Event) map[string]any {
 	// Every key is set, always, even when there is nothing to put in it.
 	//
 	// The data reaches the renderer as a map decoded from JSON, and a Go
@@ -105,26 +107,37 @@ func (p *Purchases) orderData(item *orderdomain.Order, tier *ticketdomain.Ticket
 		"BuyerName":      firstName(item.BuyerName),
 		"BuyerFullName":  item.BuyerName,
 		"BuyerEmail":     item.BuyerEmail,
-		"Quantity":       item.Quantity,
-		"UnitPrice":      money(item.UnitPriceCents, item.Currency),
+		"Quantity":       item.TotalQuantity(),
+		"UnitPrice":      unitPrice(item),
 		"Total":          money(item.TotalCents, item.Currency),
-		"PaymentMethod":  methodLabel(item.PaymentMethod),
-		"OrderURL":       p.orderURL(item.ID),
+		// The lines, so a receipt for two Pista and one Camarote says so
+		// instead of flattening into "3 ingressos". Pre-formatted here for the
+		// same reason the totals are: a template that formats money is a
+		// template that eventually rounds it.
+		"Items":         lineItems(item),
+		"PaymentMethod": methodLabel(item.PaymentMethod),
+		"OrderURL":      p.orderURL(item.ID),
 
 		"EventName":   "",
 		"TicketTitle": "",
+		"ItemSummary": summary(item),
 		"Venue":       "",
 		"City":        "",
 		"StartsAt":    "",
 		"Place":       "",
 	}
+	// The tier names the seat; the event names the night. Both are read
+	// defensively, because a receipt that is missing a line is better than a
+	// receipt that never went out.
 	if tier != nil {
-		data["EventName"] = tier.EventName
 		data["TicketTitle"] = tier.Title
-		data["Venue"] = tier.Venue
-		data["City"] = tier.City
-		data["StartsAt"] = longDate(tier.StartsAt)
-		data["Place"] = place(tier)
+	}
+	if happening != nil {
+		data["EventName"] = happening.Name
+		data["Venue"] = happening.Location.Venue
+		data["City"] = happening.Location.City
+		data["StartsAt"] = longDate(happening.StartsAt)
+		data["Place"] = place(happening)
 	}
 	return data
 }
@@ -166,11 +179,11 @@ func firstName(name string) string {
 	return fields[0]
 }
 
-func place(tier *ticketdomain.Ticket) string {
-	if tier.City == "" {
-		return tier.Venue
+func place(happening *eventdomain.Event) string {
+	if happening.Location.City == "" {
+		return happening.Location.Venue
 	}
-	return tier.Venue + " · " + tier.City
+	return happening.Location.Venue + " · " + happening.Location.City
 }
 
 func methodLabel(method paymentdomain.Method) string {
@@ -184,4 +197,48 @@ func methodLabel(method paymentdomain.Method) string {
 	default:
 		return string(method)
 	}
+}
+
+// unitPrice is the per-ticket price, when there is one to state.
+//
+// A single-tier order has one; an order spanning Pista at R$ 90 and Camarote at
+// R$ 240 does not, and inventing an average would print a number the buyer was
+// never charged. Empty is the honest answer, and the receipt shows the lines
+// instead.
+func unitPrice(item *orderdomain.Order) string {
+	if len(item.Items) != 1 {
+		return ""
+	}
+	return money(item.Items[0].UnitPriceCents, item.Currency)
+}
+
+// lineItems renders each line for the receipt's table.
+func lineItems(item *orderdomain.Order) []map[string]any {
+	lines := make([]map[string]any, 0, len(item.Items))
+	for _, line := range item.Items {
+		lines = append(lines, map[string]any{
+			"Title":     line.TicketTitle,
+			"Quantity":  line.Quantity,
+			"UnitPrice": money(line.UnitPriceCents, item.Currency),
+			"Total":     money(line.TotalCents, item.Currency),
+		})
+	}
+	return lines
+}
+
+// summary is the one-line version, for a subject or a preview: "2x Pista, 1x
+// Camarote".
+func summary(item *orderdomain.Order) string {
+	if len(item.Items) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(item.Items))
+	for _, line := range item.Items {
+		title := line.TicketTitle
+		if title == "" {
+			continue
+		}
+		parts = append(parts, strconv.Itoa(line.Quantity)+"x "+title)
+	}
+	return strings.Join(parts, ", ")
 }

@@ -44,6 +44,9 @@ type Idempotency struct {
 	// rather than global so the delivery package that owns those errors owns
 	// their mapping too.
 	status StatusMapper
+	// code names the failure for a client, when the endpoint can. Optional: a
+	// nil mapper simply means no codes, and the messages still go out.
+	code CodeMapper
 	// recovery finds work a previous attempt committed but never recorded.
 	// Optional: an endpoint whose work leaves no findable trace has none.
 	recovery Recovery
@@ -53,6 +56,9 @@ type Idempotency struct {
 
 // StatusMapper translates an error from the handler into an HTTP status.
 type StatusMapper func(err error) int
+
+// CodeMapper names an error for a client that has to branch on it.
+type CodeMapper func(err error) string
 
 // Recovery answers "did an earlier attempt at this key already commit?".
 //
@@ -73,6 +79,11 @@ type Option func(*Idempotency)
 // instead of a second checkout.
 func WithRecovery(recovery Recovery) Option {
 	return func(i *Idempotency) { i.recovery = recovery }
+}
+
+// WithCodes names failures for a client that has to branch on them.
+func WithCodes(code CodeMapper) Option {
+	return func(i *Idempotency) { i.code = code }
 }
 
 // WithLease sets how long a claimed request may stay unfinished before a retry
@@ -167,7 +178,7 @@ func (i *Idempotency) Execute(response http.ResponseWriter, request *http.Reques
 		recovered, found, err := i.recovery(request.Context(), key)
 		if err != nil {
 			i.release(request.Context(), key, scope)
-			WriteError(response, i.status(err), err)
+			WriteCodedError(response, i.status(err), i.codeFor(err), err)
 			return
 		}
 		if found {
@@ -193,7 +204,7 @@ func (i *Idempotency) Execute(response http.ResponseWriter, request *http.Reques
 		// would answer every retry for the next day with "still in progress"
 		// for work that already failed.
 		i.release(request.Context(), key, scope)
-		WriteError(response, i.status(err), err)
+		WriteCodedError(response, i.status(err), i.codeFor(err), err)
 		return
 	}
 
@@ -234,4 +245,13 @@ func (i *Idempotency) release(ctx context.Context, key, scope string) {
 	if err := i.store.Release(ctx, key, scope); err != nil {
 		_ = err
 	}
+}
+
+// codeFor names an error when a mapper was supplied, and says nothing when one
+// was not.
+func (i *Idempotency) codeFor(err error) string {
+	if i.code == nil {
+		return ""
+	}
+	return i.code(err)
 }

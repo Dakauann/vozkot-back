@@ -49,6 +49,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	webhooksHTTP "vozkot/delivery/http/webhooks"
+	eventdomain "vozkot/domain/event"
 	orderdomain "vozkot/domain/order"
 	queuedomain "vozkot/domain/queue"
 	ticketdomain "vozkot/domain/ticket"
@@ -57,6 +58,7 @@ import (
 	"vozkot/infra/mercadopago"
 	"vozkot/infra/rabbitmq"
 	redisCache "vozkot/infra/redis"
+	eventRepository "vozkot/infra/repositories/event"
 	orderRepository "vozkot/infra/repositories/order"
 	queueRepository "vozkot/infra/repositories/queue"
 	ticketRepository "vozkot/infra/repositories/ticket"
@@ -448,7 +450,7 @@ func run(cfg config.Config, opts options) error {
 	// measuring — the limit's own behaviour is tested where it lives.
 	perBuyer := opts.orders/max(opts.buyers, 1) + 1
 	holdLimits := orderdomain.HoldLimits{Orders: perBuyer * 2}
-	checkout := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, 30*time.Minute, holdLimits)
+	checkout := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, 30*time.Minute, 30*time.Minute, holdLimits)
 	// nil notifications: the harness measures the purchase path, and mailing a
 	// hundred thousand synthetic buyers is neither wanted nor free.
 	payments := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, nil)
@@ -512,13 +514,27 @@ func run(cfg config.Config, opts options) error {
 		VALUES (?, 'Load Test', ?, 'x', 'user', 0, NOW(), NOW())`, ownerID, ownerID+"@vozkot.test").Error; err != nil {
 		return err
 	}
+	// One event, many tiers — the shape a real on-sale has, and the one the
+	// inventory contention this harness measures actually happens in.
+	happening, err := eventdomain.New("evt_load_"+runID, ownerID, eventdomain.Draft{
+		Name:     "Load Test " + runID,
+		Category: eventdomain.CategoryFestasShows,
+		Location: eventdomain.Location{Venue: "Arena", City: "Fortaleza", UF: "CE"},
+		StartsAt: time.Now().Add(720 * time.Hour),
+		Status:   eventdomain.StatusPublished,
+	}, time.Now())
+	if err != nil {
+		return err
+	}
+	if err := eventRepository.NewEventRepository(db).Create(ctx, happening); err != nil {
+		return err
+	}
+
 	tierIDs := make([]string, 0, opts.tiers)
 	for index := 0; index < opts.tiers; index++ {
 		ticket, err := ticketdomain.New(fmt.Sprintf("tkt_load_%s_%d", runID, index), ownerID, ticketdomain.Draft{
-			EventName:  "Load Test " + runID,
+			EventID:    happening.ID,
 			Title:      fmt.Sprintf("Tier %d", index),
-			Venue:      "Arena",
-			StartsAt:   time.Now().Add(720 * time.Hour),
 			PriceCents: 12000,
 			Quantity:   opts.capacity,
 			Status:     ticketdomain.StatusOnSale,
@@ -596,7 +612,14 @@ func run(cfg config.Config, opts options) error {
 
 				started := time.Now()
 				orderID, result, err := storm.checkout(ctx, buyer, key, ticketID, quantity)
-				checkoutLatency.add(time.Since(started))
+				elapsed := time.Since(started)
+				if result != outcomeShed && result != outcomeThrottled {
+					// A shed request is refused before it does any work, in
+					// microseconds. Mixing those into the percentiles would
+					// drag p50 toward zero and report the speed of saying no as
+					// if it were the speed of selling a ticket.
+					checkoutLatency.add(elapsed)
+				}
 
 				switch result {
 				case outcomeCreated:
@@ -637,9 +660,19 @@ func run(cfg config.Config, opts options) error {
 	log.Printf("storm: %d order(s) opened, %d refused (sold out or limited), %d retried key(s) replayed, %d error(s) in %s",
 		created.Load(), soldOut.Load(), replayed.Load(), failed.Load(), stormTook.Round(time.Millisecond))
 	if opts.overHTTP {
-		// The number a capacity plan may quote, and the two that explain it.
-		log.Printf("per-replica HTTP throughput: %.0f request(s)/s at a bulkhead of %d, %d shed with 503, %d throttled with 429",
-			float64(opts.orders)/stormTook.Seconds(), opts.maxInFlight, shed.Load(), throttled.Load())
+		// The number a capacity plan may quote is what the replica ADMITTED,
+		// not what was thrown at it. A shed request never reached a database
+		// connection, so counting it as throughput measures how fast the
+		// bulkhead can decline — which is fast, and meaningless.
+		offered := float64(opts.orders)
+		admitted := offered - float64(shed.Load()) - float64(throttled.Load())
+		log.Printf("per-replica HTTP capacity: %.0f admitted request(s)/s at a bulkhead of %d (%.0f offered/s, %d shed with 503, %d throttled with 429)",
+			admitted/stormTook.Seconds(), opts.maxInFlight,
+			offered/stormTook.Seconds(), shed.Load(), throttled.Load())
+		if shedShare := float64(shed.Load()) / offered; shedShare > 0.05 {
+			log.Printf("NOTE: %.0f%% of requests were shed, so the offered load was above this replica's capacity — "+
+				"the admitted figure is the ceiling, and the edge admission rate belongs below it", shedShare*100)
+		}
 	} else {
 		log.Printf("use-case throughput: %.0f attempt(s)/s — inventory arbitration only, NOT a per-replica HTTP ceiling",
 			float64(opts.orders)/stormTook.Seconds())
@@ -833,8 +866,17 @@ func audit(db *gorm.DB, runID string, tierIDs []string, provider *stubProvider, 
 			fail("tier %s oversold: sold %d + reserved %d > capacity %d", tier.ID, tier.Sold, tier.Reserved, tier.Quantity)
 		}
 		var paidQuantity, pendingQuantity int
-		db.Raw("SELECT COALESCE(SUM(quantity),0) FROM orders WHERE ticket_id = ? AND status = ?", tier.ID, string(orderdomain.StatusPaid)).Scan(&paidQuantity)
-		db.Raw("SELECT COALESCE(SUM(quantity),0) FROM orders WHERE ticket_id = ? AND status = ?", tier.ID, string(orderdomain.StatusPendingPayment)).Scan(&pendingQuantity)
+		// Through the lines, because a tier is no longer a column on the order.
+		// This is the audit that would silently keep passing against a stale
+		// denormalised column, which is why those columns were dropped rather
+		// than left behind.
+		const sumHeld = `
+			SELECT COALESCE(SUM(i.quantity), 0)
+			FROM order_items i
+			JOIN orders o ON o.id = i.order_id
+			WHERE i.ticket_id = ? AND o.status = ?`
+		db.Raw(sumHeld, tier.ID, string(orderdomain.StatusPaid)).Scan(&paidQuantity)
+		db.Raw(sumHeld, tier.ID, string(orderdomain.StatusPendingPayment)).Scan(&pendingQuantity)
 		if tier.Sold != paidQuantity {
 			fail("tier %s: sold counter %d != %d tickets across paid orders", tier.ID, tier.Sold, paidQuantity)
 		}
@@ -934,6 +976,7 @@ func cleanup(db *gorm.DB, runID, ownerID string) {
 	db.Exec(`DELETE FROM jobs j WHERE `+ownJobs, map[string]any{"run": "load-" + runID + "-%"})
 	db.Exec("DELETE FROM orders WHERE idempotency_key LIKE ?", "load-"+runID+"-%")
 	db.Exec("DELETE FROM tickets WHERE id LIKE ?", "tkt_load_"+runID+"_%")
+	db.Exec("DELETE FROM events WHERE id = ?", "evt_load_"+runID)
 	db.Exec("DELETE FROM users WHERE id = ?", ownerID)
 }
 

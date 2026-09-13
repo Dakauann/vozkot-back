@@ -146,16 +146,6 @@ func (n *Notifier) Notify(ctx context.Context, request domain.Request) error {
 	return nil
 }
 
-// Dispatch announces committed notification jobs to the broker. It exists so a
-// caller that enqueued inside a transaction has one obvious thing to do after
-// it commits.
-func (n *Notifier) Dispatch(ctx context.Context, jobs ...*queue.Job) {
-	if n == nil {
-		return
-	}
-	n.dispatcher.Dispatch(ctx, jobs...)
-}
-
 func randomID() string {
 	buffer := make([]byte, 8)
 	if _, err := rand.Read(buffer); err != nil {

@@ -25,6 +25,7 @@ import (
 
 type sessionHarness struct {
 	db     *gorm.DB
+	cache  cachedomain.Cache
 	cached *CachedSessionRepository
 	inner  *SessionRepository
 	userID string
@@ -51,6 +52,7 @@ func newSessionHarness(t *testing.T, ttl time.Duration) *sessionHarness {
 	inner := NewSessionRepository(db)
 	return &sessionHarness{
 		db:     db,
+		cache:  cache,
 		inner:  inner,
 		cached: NewCachedSessionRepository(inner, cache, ttl),
 		userID: userID,
@@ -90,12 +92,21 @@ func TestSecondLookupSkipsPostgreSQL(t *testing.T) {
 	if _, err := h.cached.FindByAccessJTI(ctx, h.userID, session.AccessJTI); err != nil {
 		t.Fatalf("first lookup: %v", err)
 	}
+
+	// Checked separately from the hit below, so a failure says WHICH half broke:
+	// a lookup that never populated the cache, or a cache that did not answer.
+	// Redis is best-effort by design — the repository logs and carries on when a
+	// write fails — so a bare "it went to PostgreSQL" would be ambiguous.
+	if _, err := h.cache.Get(ctx, cachedomain.SessionKey(h.userID, session.AccessJTI)); err != nil {
+		t.Fatalf("the first lookup did not populate the cache (%v); every request would keep hitting PostgreSQL", err)
+	}
+
 	h.db.Exec("DELETE FROM sessions WHERE id = ?", session.ID)
 
 	found, err := h.cached.FindByAccessJTI(ctx, h.userID, session.AccessJTI)
 
 	if err != nil {
-		t.Fatalf("second lookup went to PostgreSQL: %v", err)
+		t.Fatalf("the cache was populated but did not answer; the lookup went to PostgreSQL: %v", err)
 	}
 	if found.ID != session.ID || found.UserID != h.userID {
 		t.Fatalf("cached session = %+v, want %s for %s", found, session.ID, h.userID)

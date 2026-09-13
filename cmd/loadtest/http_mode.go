@@ -40,14 +40,11 @@ import (
 	authMiddleware "vozkot/infra/http/middleware"
 	authRepository "vozkot/infra/repositories/auth"
 	idempotencyRepository "vozkot/infra/repositories/idempotency"
-	mediaRepository "vozkot/infra/repositories/media"
 	ticketRepository "vozkot/infra/repositories/ticket"
 	userRepository "vozkot/infra/repositories/user"
 	"vozkot/infra/security"
-	"vozkot/infra/storage"
 	authUsecase "vozkot/usecases/auth"
 	checkoutUsecase "vozkot/usecases/checkout"
-	mediaUsecase "vozkot/usecases/media"
 	paymentUsecase "vozkot/usecases/payment"
 	ticketUsecase "vozkot/usecases/ticket"
 )
@@ -89,8 +86,10 @@ type useCaseFleet struct {
 
 func (f *useCaseFleet) checkout(ctx context.Context, _ int, key, ticketID string, quantity int) (string, outcome, error) {
 	item, err := f.service.Start(ctx, checkoutUsecase.StartInput{
-		TicketID:       ticketID,
-		Quantity:       quantity,
+		Items: []orderdomain.DraftItem{{TicketID: ticketID, Quantity: quantity}},
+		// The harness measures the money path end to end, so it reserves and
+		// confirms in one call rather than simulating a buyer typing.
+		Confirm:        true,
 		BuyerID:        f.buyerID,
 		BuyerName:      "Buyer " + key,
 		BuyerEmail:     "buyer-" + key + "@vozkot.test",
@@ -220,14 +219,7 @@ func newHTTPFleet(
 	sessions := authRepository.NewSessionRepository(db)
 	keys := idempotencyRepository.NewIdempotencyRepository(db)
 
-	fileStorage, err := storage.New(ctx, cfg.Media)
-	if err != nil {
-		return nil, err
-	}
-	ticketService := ticketUsecase.NewService(
-		ticketRepository.NewTicketRepository(db),
-		mediaUsecase.NewService(mediaRepository.NewMediaRepository(db), fileStorage),
-	)
+	ticketService := ticketUsecase.NewService(ticketRepository.NewTicketRepository(db))
 
 	clients, err := authMiddleware.NewClientIP(config.DefaultTrustedProxyCIDRs)
 	if err != nil {
@@ -238,7 +230,7 @@ func newHTTPFleet(
 	router := delivery.NewRouter(delivery.Dependencies{
 		Auth:           authHTTP.NewHandler(authService, authHTTP.CookieConfig{}, nil, clients.From),
 		Tickets:        ticketHTTP.NewHandler(ticketService),
-		Checkout:       checkoutHTTP.NewHandler(checkout, payments, keys, idempotencydomain.DefaultLease),
+		Checkout:       checkoutHTTP.NewHandler(checkout, payments, nil, keys, idempotencydomain.DefaultLease),
 		AuthMiddleware: authMiddleware.NewAuth(tokens, sessions),
 		// The bulkhead is the point of this mode; the per-account limiter is
 		// not, and would refuse the storm before the bulkhead ever saw it.

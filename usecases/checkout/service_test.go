@@ -56,10 +56,8 @@ func newHarnessWithLimits(t *testing.T, capacity int, limits orderdomain.HoldLim
 
 	ownerID := seedUser(t, db)
 	item, err := ticketdomain.New(testsupport.Unique("tkt"), ownerID, ticketdomain.Draft{
-		EventName:  "Festival Aurora",
+		EventID:    testsupport.SeedEvent(t, db, ownerID),
 		Title:      "Pista",
-		Venue:      "Arena Castelao",
-		StartsAt:   time.Now().Add(720 * time.Hour),
 		PriceCents: 24000,
 		Quantity:   capacity,
 		Status:     ticketdomain.StatusOnSale,
@@ -71,15 +69,15 @@ func newHarnessWithLimits(t *testing.T, capacity int, limits orderdomain.HoldLim
 		t.Fatalf("create ticket: %v", err)
 	}
 	t.Cleanup(func() {
-		db.Exec("DELETE FROM jobs WHERE payload->>'orderId' IN (SELECT id FROM orders WHERE ticket_id = ?)", item.ID)
-		db.Exec("DELETE FROM orders WHERE ticket_id = ?", item.ID)
+		db.Exec("DELETE FROM jobs WHERE payload->>'orderId' IN (SELECT order_id FROM order_items WHERE ticket_id = ?)", item.ID)
+		db.Exec("DELETE FROM orders WHERE id IN (SELECT order_id FROM order_items WHERE ticket_id = ?)", item.ID)
 		db.Exec("DELETE FROM tickets WHERE id = ?", item.ID)
 		db.Exec("DELETE FROM users WHERE id = ?", ownerID)
 	})
 
 	return &harness{
 		db:       db,
-		service:  NewService(uow.NewRunner(db), orders, tickets, queueUsecase.NewDispatcher(nil), 30*time.Minute, limits),
+		service:  NewService(uow.NewRunner(db), orders, tickets, queueUsecase.NewDispatcher(nil), 30*time.Minute, 10*time.Minute, limits),
 		orders:   orders,
 		tickets:  tickets,
 		jobs:     jobs,
@@ -104,8 +102,8 @@ func seedUser(t *testing.T, db *gorm.DB) string {
 
 func (h *harness) start(quantity int, key string) (*orderdomain.Order, error) {
 	return h.service.Start(context.Background(), StartInput{
-		TicketID:       h.ticketID,
-		Quantity:       quantity,
+		Items:          []orderdomain.DraftItem{{TicketID: h.ticketID, Quantity: quantity}},
+		Confirm:        true,
 		BuyerID:        h.ownerID,
 		BuyerName:      "Maria Souza",
 		BuyerEmail:     "maria@exemplo.com.br",
@@ -347,8 +345,10 @@ func TestExpireHoldIgnoresAnOrderPaidInTime(t *testing.T) {
 	if err := h.orders.Update(ctx, item); err != nil {
 		t.Fatalf("update order: %v", err)
 	}
-	if err := h.tickets.Commit(ctx, item.TicketID, item.Quantity); err != nil {
-		t.Fatalf("commit stock: %v", err)
+	for _, line := range item.Items {
+		if err := h.tickets.Commit(ctx, line.TicketID, line.Quantity); err != nil {
+			t.Fatalf("commit stock: %v", err)
+		}
 	}
 
 	// The expiry job still fires: it was scheduled when the order was created.

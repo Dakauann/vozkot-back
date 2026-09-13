@@ -117,15 +117,26 @@ func TestPostgresRepositories(t *testing.T) {
 		t.Fatalf("revoked session remained active: %v", err)
 	}
 
+	// Seeded on the TRANSACTION, not the pool: the user above exists only
+	// inside it, and the whole test rolls back at the end.
+	eventID := "evt_" + suffix
+	err = tx.Exec(`
+		INSERT INTO events
+			(id, owner_id, slug, name, description, category, venue, address,
+			 neighborhood, city, uf, postal_code, starts_at, status, created_at, updated_at)
+		VALUES (?, ?, ?, 'Festival Aurora', '', 'festas_shows', 'Arena Castelao', '',
+		        '', 'Fortaleza', 'CE', '', ?, 'published', NOW(), NOW())`,
+		eventID, createdUser.ID, eventID, now.Add(720*time.Hour)).Error
+	if err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+
 	createdTicket := &ticketDomain.Ticket{
 		ID:          "tkt_" + suffix,
 		OwnerID:     createdUser.ID,
-		EventName:   "Festival Aurora " + suffix,
+		EventID:     eventID,
 		Title:       "Pista Premium",
 		Description: "Repository integration test",
-		Venue:       "Arena Castelao",
-		City:        "Fortaleza, CE",
-		StartsAt:    now.Add(720 * time.Hour),
 		PriceCents:  24000,
 		Currency:    ticketDomain.DefaultCurrency,
 		Quantity:    500,
@@ -146,48 +157,67 @@ func TestPostgresRepositories(t *testing.T) {
 	if err != nil || loadedTicket.Status != ticketDomain.StatusOnSale || loadedTicket.PriceCents != 26000 {
 		t.Fatalf("get updated ticket: ticket=%v err=%v", loadedTicket, err)
 	}
-	filtered, err := tickets.List(ctx, ticketDomain.Filter{Status: ticketDomain.StatusOnSale, Query: "aurora " + suffix})
+	filtered, err := tickets.List(ctx, ticketDomain.Filter{Status: ticketDomain.StatusOnSale, Query: "pista premium"})
 	if err != nil || len(filtered) != 1 {
 		t.Fatalf("filter tickets: count=%d err=%v", len(filtered), err)
 	}
-	total, err := tickets.Count(ctx, ticketDomain.Filter{Query: "aurora " + suffix})
+	total, err := tickets.Count(ctx, ticketDomain.Filter{OwnerID: createdUser.ID, Query: "pista premium"})
 	if err != nil || total != 1 {
 		t.Fatalf("count tickets: total=%d err=%v", total, err)
 	}
 
-	position, err := gallery.NextPosition(ctx, createdTicket.ID)
+	position, err := gallery.NextPosition(ctx, eventID)
 	if err != nil || position != 0 {
 		t.Fatalf("first gallery position: position=%d err=%v", position, err)
 	}
+	// Artwork hangs off the EVENT, not the tier: one evening has one poster,
+	// however many prices it sells at.
 	createdMedia := &mediaDomain.Media{
-		ID:          "med_" + suffix,
-		TicketID:    createdTicket.ID,
-		Kind:        mediaDomain.KindImage,
-		StorageKey:  "tickets/" + createdTicket.ID + "/med_" + suffix + ".jpg",
-		URL:         "https://cdn.vozkot.local/tickets/" + createdTicket.ID + "/med_" + suffix + ".jpg",
-		ContentType: "image/jpeg",
-		SizeBytes:   284133,
-		Position:    position,
-		CreatedAt:   now,
+		ID:            "med_" + suffix,
+		EventID:       eventID,
+		Kind:          mediaDomain.KindImage,
+		StorageKey:    "events/" + eventID + "/med_" + suffix + ".jpg",
+		URL:           "https://cdn.vozkot.local/events/" + eventID + "/med_" + suffix + ".jpg",
+		ContentType:   "image/jpeg",
+		SizeBytes:     284133,
+		Position:      position,
+		Width:         1400,
+		Height:        733,
+		BlurDataURL:   "data:image/jpeg;base64,/9j/placeholder",
+		DominantColor: "#1b2a3a",
+		CreatedAt:     now,
 	}
 	if err := gallery.Create(ctx, createdMedia); err != nil {
 		t.Fatalf("create media: %v", err)
 	}
-	galleries, err := gallery.ListByTicketIDs(ctx, []string{createdTicket.ID})
-	if err != nil || len(galleries[createdTicket.ID]) != 1 {
+	galleries, err := gallery.ListByEventIDs(ctx, []string{eventID})
+	if err != nil || len(galleries[eventID]) != 1 {
 		t.Fatalf("list galleries: galleries=%v err=%v", galleries, err)
 	}
-	if next, err := gallery.NextPosition(ctx, createdTicket.ID); err != nil || next != 1 {
+	// The placeholder survives the round trip. Without it every card in a grid
+	// resizes the page as it loads.
+	if stored := galleries[eventID][0]; stored.Width != 1400 || stored.BlurDataURL == "" {
+		t.Fatalf("image metadata did not round-trip: %+v", stored)
+	}
+	if next, err := gallery.NextPosition(ctx, eventID); err != nil || next != 1 {
 		t.Fatalf("next gallery position: position=%d err=%v", next, err)
 	}
 
-	// Deleting the ticket must take its media with it: the foreign key, not the
-	// application, is what guarantees no gallery outlives its listing.
+	// Deleting the tier leaves the artwork alone: it belongs to the event.
 	if err := tickets.Delete(ctx, createdTicket.ID); err != nil {
 		t.Fatalf("delete ticket: %v", err)
 	}
+	if _, err := gallery.GetByID(ctx, createdMedia.ID); err != nil {
+		t.Fatalf("deleting a tier took its event's artwork with it: %v", err)
+	}
+
+	// Deleting the EVENT must take its media with it: the foreign key, not the
+	// application, is what guarantees no gallery outlives its listing.
+	if err := tx.Exec("DELETE FROM events WHERE id = ?", eventID).Error; err != nil {
+		t.Fatalf("delete event: %v", err)
+	}
 	if _, err := gallery.GetByID(ctx, createdMedia.ID); !errors.Is(err, mediaDomain.ErrNotFound) {
-		t.Fatalf("media outlived its ticket: %v", err)
+		t.Fatalf("media outlived its event: %v", err)
 	}
 
 	duplicate := *createdUser

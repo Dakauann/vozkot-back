@@ -15,6 +15,9 @@ const (
 
 // Filter is the query a listing is built from. The zero value lists everything.
 type Filter struct {
+	// EventID restricts to one event's tiers, which is what an event page asks
+	// for.
+	EventID string
 	Status  Status
 	Query   string
 	OwnerID string

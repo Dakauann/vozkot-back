@@ -1,6 +1,6 @@
-// Command seed creates the baseline accounts a fresh installation needs: one
-// administrator and one regular user. It is idempotent, so existing accounts
-// are reported and left untouched instead of being overwritten.
+// Command seed creates the baseline accounts and the development catalogue a
+// fresh installation needs. It is idempotent, so existing records are reported
+// and left untouched instead of being overwritten.
 package main
 
 import (
@@ -38,7 +38,11 @@ func main() {
 		log.Fatalf("load configuration: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// The catalogue sends its covers through the same image pipeline and object
+	// storage as the dashboard. Local disk is quick, while a remote R2 bucket can
+	// take a few minutes for all 160 uploads, so this command needs a wider bound
+	// than API startup.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	migrationDB, err := database.NewMigrationDatabase(ctx, cfg.Database)
@@ -68,7 +72,8 @@ func main() {
 	users := userRepository.NewUserRepository(db)
 	passwords := security.NewPasswordService(security.MinPasswordHashCost)
 
-	for _, item := range accounts() {
+	seedAccounts := accounts()
+	for _, item := range seedAccounts {
 		created, err := seed(ctx, users, passwords, item)
 		if err != nil {
 			log.Fatalf("seed %s: %v", item.Email, err)
@@ -79,6 +84,26 @@ func main() {
 		}
 		log.Printf("skipped %s account: %s already exists", item.Role, item.Email)
 	}
+
+	ownerEmail := strings.ToLower(strings.TrimSpace(seedAccounts[1].Email))
+	owner, err := users.FindByEmail(ctx, ownerEmail)
+	if err != nil {
+		log.Fatalf("load mock event owner %s: %v", ownerEmail, err)
+	}
+	summary, err := seedMockEvents(ctx, db, cfg, owner.ID, time.Now())
+	if err != nil {
+		log.Fatalf("seed mock events: %v", err)
+	}
+	log.Printf(
+		"mock catalogue ready: %d events created, %d already present, %d covers attached, %d already present, %d ticket tiers created, %d updated, %d already present",
+		summary.EventsCreated,
+		summary.EventsSkipped,
+		summary.CoversAttached,
+		summary.CoversSkipped,
+		summary.TiersCreated,
+		summary.TiersUpdated,
+		summary.TiersSkipped,
+	)
 }
 
 func accounts() []account {

@@ -39,13 +39,18 @@ type Config struct {
 	// believed. Everything else is rate limited by the address it connected
 	// from, because the header is otherwise client-controlled text.
 	TrustedProxyCIDRs []string
-	Database          DatabaseConfig
-	Media             MediaConfig
-	Payments          PaymentsConfig
-	Queue             QueueConfig
-	Broker            BrokerConfig
-	Cache             CacheConfig
-	Notifications     NotificationsConfig
+	// MediaProcessors bounds concurrent image resizing. A pure-Go resample of a
+	// large photo is hundreds of milliseconds and tens of megabytes, so this is
+	// what turns a burst of uploads into a queue rather than an out-of-memory
+	// kill.
+	MediaProcessors int
+	Database        DatabaseConfig
+	Media           MediaConfig
+	Payments        PaymentsConfig
+	Queue           QueueConfig
+	Broker          BrokerConfig
+	Cache           CacheConfig
+	Notifications   NotificationsConfig
 }
 
 // BrokerConfig points the job transport at RabbitMQ.
@@ -156,8 +161,12 @@ type PaymentsConfig struct {
 	// honoured only in development, because in production it would put someone
 	// else's address on a real charge.
 	SandboxPayerEmail string
-	// HoldFor is how long a reservation survives without payment.
+	// HoldFor is how long a reservation survives without payment, once the
+	// buyer has confirmed their details.
 	HoldFor time.Duration
+	// CartHoldFor is the shorter window a basket gets between reaching the
+	// details form and submitting it.
+	CartHoldFor time.Duration
 }
 
 // Enabled reports whether charges can be issued at all. Without a token the
@@ -265,6 +274,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	mediaProcessors, err := integer("MEDIA_PROCESSORS", 2)
+	if err != nil {
+		return Config{}, err
+	}
 	checkoutMaxInFlight, err := integer("CHECKOUT_MAX_IN_FLIGHT", 20)
 	if err != nil {
 		return Config{}, err
@@ -327,6 +340,7 @@ func Load() (Config, error) {
 		CheckoutMaxOpenOrders:  maxOpenOrders,
 		CheckoutMaxHeldPerTier: maxHeldPerTier,
 		TrustedProxyCIDRs:      trustedProxies(),
+		MediaProcessors:        mediaProcessors,
 		Database:               database,
 		Media:                  mediaConfig,
 		Payments:               payments,
@@ -498,6 +512,14 @@ func loadPayments() (PaymentsConfig, error) {
 	if err != nil {
 		return PaymentsConfig{}, err
 	}
+	// The window a basket gets before the buyer has told us anything. It is
+	// deliberately far shorter than the payment window: nothing has been asked
+	// of the buyer yet, so stock held on the strength of a page view should
+	// cost the event as little as possible.
+	cartHoldFor, err := duration("CHECKOUT_CART_TTL", 10*time.Minute)
+	if err != nil {
+		return PaymentsConfig{}, err
+	}
 
 	payments := PaymentsConfig{
 		AccessToken:        strings.TrimSpace(os.Getenv("MERCADOPAGO_ACCESS_TOKEN")),
@@ -506,6 +528,7 @@ func loadPayments() (PaymentsConfig, error) {
 		NotificationURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("MERCADOPAGO_NOTIFICATION_URL")), "/"),
 		SignatureTolerance: tolerance,
 		HoldFor:            holdFor,
+		CartHoldFor:        cartHoldFor,
 	}
 
 	// A configured provider without a webhook secret is the dangerous shape:

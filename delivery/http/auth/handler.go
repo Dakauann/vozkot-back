@@ -48,6 +48,22 @@ type Handler struct {
 	// believed covers the whole application; nil falls back to the connecting
 	// address, which trusts nothing.
 	callerIP func(*http.Request) string
+	// verification and profiles drive the passwordless routes. Both nil means
+	// those routes are simply not mounted, which is what a deployment with no
+	// mail provider and no encryption keys gets.
+	verification *usecase.Verification
+	profiles     *usecase.Profiles
+}
+
+// WithVerification adds the passwordless and profile routes.
+//
+// A setter rather than two more constructor parameters, because every existing
+// caller — the tests, the load harness — wants the handler without them, and
+// widening the constructor would make each of those state that it does not.
+func (h *Handler) WithVerification(verification *usecase.Verification, profiles *usecase.Profiles) *Handler {
+	h.verification = verification
+	h.profiles = profiles
+	return h
 }
 
 func NewHandler(

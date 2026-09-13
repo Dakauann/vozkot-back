@@ -110,6 +110,9 @@ func (r *TicketRepository) Delete(ctx context.Context, id string) error {
 }
 
 func applyFilter(query *gorm.DB, filter domain.Filter) *gorm.DB {
+	if filter.EventID != "" {
+		query = query.Where("event_id = ?", filter.EventID)
+	}
 	if filter.Status != "" {
 		query = query.Where("status = ?", string(filter.Status))
 	}
@@ -117,13 +120,16 @@ func applyFilter(query *gorm.DB, filter domain.Filter) *gorm.DB {
 		query = query.Where("owner_id = ?", filter.OwnerID)
 	}
 	if search := strings.TrimSpace(filter.Query); search != "" {
-		// Lowercased on both sides so an operator typing "arena" finds "Arena",
-		// which is how the venue was actually entered.
+		// A tier's own words only: its title and its description. Searching for
+		// the event — its name, venue or city — is the EVENT repository's job,
+		// and it does it with a real full-text index rather than a LIKE.
+		//
+		// This one stays a LIKE deliberately. It is an operator scanning their
+		// own tiers inside one event, which is a handful of rows behind an
+		// owner filter, and a second search configuration to maintain would buy
+		// nothing.
 		pattern := "%" + strings.ToLower(search) + "%"
-		query = query.Where(
-			"(LOWER(event_name) LIKE ? OR LOWER(title) LIKE ? OR LOWER(venue) LIKE ? OR LOWER(city) LIKE ?)",
-			pattern, pattern, pattern, pattern,
-		)
+		query = query.Where("(LOWER(title) LIKE ? OR LOWER(description) LIKE ?)", pattern, pattern)
 	}
 	return query
 }
@@ -135,8 +141,11 @@ func orderFor(sort domain.Sort) string {
 	case domain.SortPrice:
 		return "price_cents ASC"
 	default:
-		// A box office reads its catalogue by door date: the next event first.
-		return "starts_at ASC"
+		// Cheapest first, then a stable tiebreak. A tier no longer carries a
+		// date — the event does — so the old "next event first" order has no
+		// column to sort on, and price is what a buyer scans an event page for
+		// anyway.
+		return "price_cents ASC, id ASC"
 	}
 }
 
@@ -151,12 +160,9 @@ func toSchema(item *domain.Ticket) schema.Ticket {
 	return schema.Ticket{
 		ID:          item.ID,
 		OwnerID:     item.OwnerID,
-		EventName:   item.EventName,
+		EventID:     item.EventID,
 		Title:       item.Title,
 		Description: item.Description,
-		Venue:       item.Venue,
-		City:        item.City,
-		StartsAt:    item.StartsAt,
 		PriceCents:  item.PriceCents,
 		Currency:    item.Currency,
 		Quantity:    item.Quantity,
@@ -172,12 +178,9 @@ func toDomain(record *schema.Ticket) *domain.Ticket {
 	return &domain.Ticket{
 		ID:          record.ID,
 		OwnerID:     record.OwnerID,
-		EventName:   record.EventName,
+		EventID:     record.EventID,
 		Title:       record.Title,
 		Description: record.Description,
-		Venue:       record.Venue,
-		City:        record.City,
-		StartsAt:    record.StartsAt,
 		PriceCents:  record.PriceCents,
 		Currency:    record.Currency,
 		Quantity:    record.Quantity,
