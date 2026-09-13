@@ -90,6 +90,76 @@ func (h *Handler) RegisterVerification(
 	router.Handle("POST /auth/phone/verify", require(http.HandlerFunc(h.verifyPhone)))
 	router.Handle("GET /user/profile", require(http.HandlerFunc(h.getProfile)))
 	router.Handle("PUT /user/profile", require(http.HandlerFunc(h.saveProfile)))
+	router.Handle("PUT /user/password", require(http.HandlerFunc(h.setPassword)))
+}
+
+// SetPasswordRequest adds a password to an account, or changes it.
+type SetPasswordRequest struct {
+	// Current is required only when the account already has a password.
+	Current string `json:"current,omitempty"`
+	New     string `json:"new" example:"UmaSenhaForte1"`
+}
+
+// @Summary		Definir ou trocar a senha
+// @Description	Adiciona uma senha à conta, como SEGUNDA forma de entrar — a primeira continua sendo o código por e-mail, e a conta funciona sem senha. Definir a primeira senha exige apenas a sessão; trocar uma senha existente exige a senha atual, porque uma sessão emprestada não deve bastar para trancar o dono fora da própria conta.
+// @Tags			Autenticação
+// @Accept		json
+// @Produce		json
+// @Security		BearerAuth
+// @Param		request body SetPasswordRequest true "Senha"
+// @Success		204
+// @Failure		401 {object} ErrorResponse
+// @Failure		422 {object} ErrorResponse "Senha fraca, ou senha atual ausente"
+// @Router		/user/password [put]
+func (h *Handler) setPassword(response http.ResponseWriter, request *http.Request) {
+	claims, _ := domain.ClaimsFromContext(request.Context())
+	if claims == nil {
+		httpx.WriteError(response, http.StatusUnauthorized, domain.ErrUnauthorized)
+		return
+	}
+	var body SetPasswordRequest
+	if err := httpx.ReadJSON(response, request, &body); err != nil {
+		httpx.WriteError(response, http.StatusBadRequest, err)
+		return
+	}
+	err := h.service.SetPassword(request.Context(), usecase.SetPasswordInput{
+		UserID:  claims.UserID,
+		Current: body.Current,
+		New:     body.New,
+	})
+	if err != nil {
+		httpx.WriteCodedError(response, passwordStatus(err), passwordCode(err), err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func passwordStatus(err error) int {
+	switch {
+	case err == nil:
+		return http.StatusNoContent
+	case errors.Is(err, domain.ErrInvalidCredentials):
+		return http.StatusUnauthorized
+	case errors.Is(err, domain.ErrWeakPassword),
+		errors.Is(err, usecase.ErrPasswordRequired),
+		errors.Is(err, usecase.ErrCurrentPasswordRequired):
+		return http.StatusUnprocessableEntity
+	case errors.Is(err, user.ErrNotFound):
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func passwordCode(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrWeakPassword):
+		return CodeWeakPassword
+	case errors.Is(err, usecase.ErrCurrentPasswordRequired):
+		return CodeCurrentPasswordRequired
+	default:
+		return ""
+	}
 }
 
 // @Summary		Pedir um código de acesso por e-mail
@@ -152,7 +222,7 @@ func (h *Handler) verifyEmailSignIn(response http.ResponseWriter, request *http.
 }
 
 // @Summary		Pedir um código para confirmar o celular
-// @Description	Envia um código para o número informado. O provedor de SMS ainda é um stub: o código aparece no log do servidor. Todo o resto do fluxo — limite de envios, limite de tentativas, expiração — é real.
+// @Description	Envia um código para o número informado. Responde 503 enquanto não houver provedor de SMS configurado: o código nunca é registrado em log nem devolvido na resposta. O restante do fluxo — limite de envios, limite de tentativas, expiração — é real.
 // @Tags			Autenticação
 // @Accept		json
 // @Produce		json
@@ -336,6 +406,8 @@ func verificationStatus(err error) int {
 		return http.StatusUnauthorized
 	case errors.Is(err, domain.ErrUnauthorized):
 		return http.StatusUnauthorized
+	case errors.Is(err, domain.ErrDeliveryUnavailable):
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}
@@ -357,6 +429,14 @@ const (
 	CodeDocumentInUse    = "document_in_use"
 	CodeProfileInvalid   = "profile_invalid"
 	CodeUnderage         = "underage"
+	// CodeWeakPassword and CodeCurrentPasswordRequired let the password form
+	// point at the field that is wrong rather than showing one message above
+	// both of them.
+	// CodeDeliveryUnavailable means the channel is not configured. The screen
+	// offers the other way in rather than a retry that cannot succeed.
+	CodeDeliveryUnavailable     = "delivery_unavailable"
+	CodeWeakPassword            = "weak_password"
+	CodeCurrentPasswordRequired = "current_password_required"
 )
 
 func verificationCode(err error) string {
@@ -377,6 +457,8 @@ func verificationCode(err error) string {
 		return CodeChallengeUnknown
 	case errors.Is(err, domain.ErrInvalidContact), errors.Is(err, user.ErrInvalidPhone):
 		return CodeContactInvalid
+	case errors.Is(err, domain.ErrDeliveryUnavailable):
+		return CodeDeliveryUnavailable
 	default:
 		return ""
 	}

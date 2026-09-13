@@ -79,6 +79,16 @@ var (
 	ErrTooManyRequests = errors.New("too many codes requested for this address; try again later")
 	ErrInvalidPurpose  = errors.New("verification purpose is invalid")
 	ErrInvalidContact  = errors.New("destination is invalid")
+	// ErrDeliveryUnavailable means there is no configured way to get a code to
+	// this destination. It is a 503, not a 500: nothing is broken, the channel
+	// simply is not wired, and the caller should be told to try another way in
+	// rather than shown a stack trace.
+	//
+	// This is what the system does INSTEAD of logging the code. A one-time code
+	// is a live credential; printing one to stdout puts it in whatever collects
+	// stdout, for as long as that retains logs, readable by everyone who can
+	// read them.
+	ErrDeliveryUnavailable = errors.New("no configured way to deliver a verification code")
 )
 
 // Challenge is one outstanding code.

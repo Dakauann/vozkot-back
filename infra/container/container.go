@@ -258,16 +258,27 @@ func New(cfg config.Config) (*Container, error) {
 	if piiService != nil {
 		codes := notificationUsecase.NewCodeSender(notifier, dispatcher)
 		challenges := authRepository.NewChallengeRepository(db)
+		// No phone sender. There is no SMS or WhatsApp provider wired, so the
+		// phone routes answer 503 rather than pretending — a nil sender is the
+		// honest representation of "this channel does not exist yet", and the
+		// alternative was a stub that logged the code, which puts a live
+		// credential in whatever collects stdout.
 		verification := authUsecase.NewVerification(
 			users, challenges, passwords,
 			piiService.BlindIndex,
-			codes, notificationUsecase.NewMockPhoneSender(),
+			codes, nil,
 			authService,
 		)
 		authHandler = authHandler.WithVerification(verification, authUsecase.NewProfiles(users))
 		container.challenges = verification
 		log.Printf("auth: passwordless sign-in enabled; codes are %d digits and last %s",
 			authdomain.CodeLength, authdomain.CodeTTL)
+		if notifier == nil {
+			// Said plainly at boot, because the symptom otherwise is a sign-in
+			// screen that answers 503 and nobody knowing why.
+			log.Printf("auth: WARNING no mail provider; sign-in codes cannot be sent and /auth/email/start will answer 503. Set RESEND_API_KEY and RESEND_FROM_EMAIL.")
+		}
+		log.Printf("auth: no SMS provider configured; phone confirmation answers 503")
 	}
 
 	checkoutService := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, cfg.Payments.HoldFor, cfg.Payments.CartHoldFor, holdLimits)

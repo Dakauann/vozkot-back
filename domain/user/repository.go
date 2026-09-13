@@ -27,4 +27,8 @@ type Repository interface {
 	// FindByDocument resolves an account by its document, through the blind
 	// index. Used to recognise a returning buyer, never to list anybody.
 	FindByDocument(ctx context.Context, document string) (*User, error)
+	// SavePassword writes the hash and nothing else. Narrow for the same
+	// reason SaveProfile is: a general Update reachable from a
+	// "change my password" screen is a path that can also change a role.
+	SavePassword(ctx context.Context, id, hash string) error
 }

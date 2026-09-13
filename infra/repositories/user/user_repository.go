@@ -91,6 +91,18 @@ func (r *UserRepository) SaveProfile(ctx context.Context, id string, profile dom
 	return nil
 }
 
+func (r *UserRepository) SavePassword(ctx context.Context, id, hash string) error {
+	result := r.db.WithContext(ctx).Model(&schema.User{}).Where("id = ?", id).
+		Updates(map[string]any{"password_hash": hash, "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (r *UserRepository) FindByDocument(ctx context.Context, document string) (*domain.User, error) {
 	blind, err := piigorm.NewBlindIndex(schema.UserDocumentBlindScope, document)
 	if err != nil {

@@ -28,8 +28,12 @@ import (
 // ask "does this person have an account here", which for a ticketing site is a
 // question about who went to which events.
 
-// Sender delivers a code to a destination. Email is the only implementation
-// that reaches a real person today; the phone one is deliberately a stub.
+// Sender delivers a code to a destination.
+//
+// A nil Sender is a channel that is not configured, and every path that would
+// have used one refuses with ErrDeliveryUnavailable. There is deliberately no
+// no-op implementation: a sender that "succeeds" without sending is a screen
+// waiting forever for a code, and one that logs the code instead is worse.
 type Sender interface {
 	Send(ctx context.Context, destination, code string, purpose domain.Purpose) error
 }
@@ -113,6 +117,12 @@ func (v *Verification) start(
 	destination, userID string,
 	sender Sender,
 ) (Started, error) {
+	if sender == nil {
+		// Checked FIRST, before a code is generated or a row is written. A
+		// challenge created for a message that cannot be sent is a row that
+		// counts against the rate limit and can never be answered.
+		return Started{}, domain.ErrDeliveryUnavailable
+	}
 	now := v.now().UTC()
 	index := v.blindIndex(destinationScope, destination)
 

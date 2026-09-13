@@ -167,10 +167,10 @@ func (h *harness) order(t *testing.T) (*orderdomain.Order, *ticketdomain.Ticket,
 
 	paidAt := time.Date(2026, time.September, 14, 1, 4, 0, 0, time.UTC)
 	item := &orderdomain.Order{
-		ID:              orderID,
-		EventID:         "evt_1",
-		BuyerName:       "Maria Souza",
-		BuyerEmail:      "maria@exemplo.com.br",
+		ID:         orderID,
+		EventID:    "evt_1",
+		BuyerName:  "Maria Souza",
+		BuyerEmail: "maria@exemplo.com.br",
 		Items: []orderdomain.Item{
 			{TicketID: "tkt_1", TicketTitle: "Pista", Quantity: 2, UnitPriceCents: 24000, TotalCents: 48000},
 		},
