@@ -80,7 +80,7 @@ func (p *Purchases) OrderPaid(ctx context.Context, jobs queue.Queue, item *order
 		Channel:   domain.ChannelEmail,
 		Template:  domain.TemplateOrderConfirmed,
 		Recipient: recipient(item),
-		Subject:   "Pagamento confirmado, pedido " + reference(item.ID),
+		Subject:   "Pagamento confirmado: pedido " + reference(item.ID),
 		Data:      data,
 		DedupeKey: dedupeKey(domain.TemplateOrderConfirmed, item.ID),
 	})

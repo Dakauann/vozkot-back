@@ -3,7 +3,7 @@
 // Everything Asaas-shaped lives in here: the `access_token` header it uses
 // instead of a bearer, the get-or-create customer record every charge needs, the
 // separate call that produces a PIX payload, the wallet ids a split is addressed
-// to, and, the one that matters most, the fact that Asaas speaks REAIS AS
+// to, and the one that matters most: the fact that Asaas speaks REAIS AS
 // FLOATS while the rest of this system speaks integer centavos.
 //
 // The conversion happens at this boundary and nowhere else. See money.go.

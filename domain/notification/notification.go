@@ -29,13 +29,34 @@ type Channel string
 
 const (
 	ChannelEmail Channel = "email"
-	// The next channels land here, whatsapp, sms, each one a Sender in infra
-	// and no change above it.
+	// ChannelWhatsApp and ChannelSMS both reach a phone, and they are separate
+	// channels rather than one "phone" channel because the buyer can tell them
+	// apart: a screen that says "check your WhatsApp" is wrong if the code
+	// arrived by text. A use case that does not care picks whichever the
+	// container registered first.
+	//
+	// Both are carried by the same Sender today. That is an infra detail and
+	// not a reason to merge them here.
+	ChannelWhatsApp Channel = "whatsapp"
+	ChannelSMS      Channel = "sms"
 )
 
 func (c Channel) Valid() bool {
 	switch c {
-	case ChannelEmail:
+	case ChannelEmail, ChannelWhatsApp, ChannelSMS:
+		return true
+	default:
+		return false
+	}
+}
+
+// Phone reports whether a channel delivers to a phone number rather than an
+// inbox. Used where the distinction is genuinely about the ADDRESS — which
+// field of a Recipient applies, which renderer produces the body — and nowhere
+// else: anything that needs to know more than that wants a Channel.
+func (c Channel) Phone() bool {
+	switch c {
+	case ChannelWhatsApp, ChannelSMS:
 		return true
 	default:
 		return false
@@ -79,18 +100,21 @@ func (t Template) Valid() bool {
 type Recipient struct {
 	Name  string
 	Email string
-	// Phone is E.164 and unused until a messaging channel exists. It is named
-	// now so that adding one is a Sender and a template, not a migration of
-	// every call site that ever raised a notification.
+	// Phone is digits with a country code, as domain/user.NormalizePhone
+	// produces. Provider-specific re-addressing — the ninth digit a Brazilian
+	// mobile carries on WhatsApp, say — belongs to whoever is sending, not to
+	// the recipient.
 	Phone string
 }
 
 // Address is where a channel delivers to, or "" when this recipient cannot be
 // reached on it.
 func (r Recipient) Address(channel Channel) string {
-	switch channel {
-	case ChannelEmail:
+	switch {
+	case channel == ChannelEmail:
 		return strings.ToLower(strings.TrimSpace(r.Email))
+	case channel.Phone():
+		return strings.TrimSpace(r.Phone)
 	default:
 		return ""
 	}
@@ -100,8 +124,8 @@ func (r Recipient) Address(channel Channel) string {
 //
 // Data is a SNAPSHOT, not a set of ids, and that is the one place this package
 // departs from the queue's "carry ids, read current state" rule. A receipt
-// states what was true when the buyer paid. Re-reading the order an hour later
-//, after an operator renamed the event, or corrected a venue, would email a
+// states what was true when the buyer paid. Re-reading the order an hour later,
+// after an operator renamed the event, or corrected a venue, would email a
 // different receipt than the one the money was taken for.
 type Request struct {
 	Channel   Channel

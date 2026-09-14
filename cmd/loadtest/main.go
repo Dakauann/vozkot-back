@@ -568,7 +568,7 @@ func run(cfg config.Config, opts options) error {
 		if !opts.keep {
 			defer cleanupHTTPAccounts(db, runID)
 		}
-		log.Printf("driving: the real HTTP router over TLS: bulkhead %d in flight per replica, %d account(s) with sessions",
+		log.Printf("driving: the real HTTP router over TLS; bulkhead %d in flight per replica, %d account(s) with sessions",
 			opts.maxInFlight, opts.buyers)
 		log.Printf("NOTE: the per-account checkout rate limit is off in this mode; it would refuse a storm this dense before the bulkhead saw it")
 	} else {
@@ -674,7 +674,7 @@ func run(cfg config.Config, opts options) error {
 				"the admitted figure is the ceiling, and the edge admission rate belongs below it", shedShare*100)
 		}
 	} else {
-		log.Printf("use-case throughput: %.0f attempt(s)/s: inventory arbitration only, NOT a per-replica HTTP ceiling",
+		log.Printf("use-case throughput: %.0f attempt(s)/s; inventory arbitration only, NOT a per-replica HTTP ceiling",
 			float64(opts.orders)/stormTook.Seconds())
 	}
 	log.Printf("checkout latency: p50 %s  p95 %s  p99 %s",

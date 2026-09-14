@@ -96,7 +96,7 @@ func TestSendPostsWhatTheProviderExpects(t *testing.T) {
 	if got := captured.body["reply_to"]; got != "suporte@tickets.example" {
 		t.Errorf("reply_to = %v", got)
 	}
-	if got := captured.body["subject"]; got != "Pagamento confirmado, pedido A1B2C3D4" {
+	if got := captured.body["subject"]; got != "Pagamento confirmado: pedido A1B2C3D4" {
 		t.Errorf("subject = %v", got)
 	}
 	if got := captured.body["html"]; got != "<html><body>ok</body></html>" {

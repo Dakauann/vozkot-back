@@ -259,27 +259,47 @@ func New(cfg config.Config) (*Container, error) {
 	if piiService != nil {
 		codes := notificationUsecase.NewCodeSender(notifier, dispatcher)
 		challenges := authRepository.NewChallengeRepository(db)
-		// No phone sender. There is no SMS or WhatsApp provider wired, so the
-		// phone routes answer 503 rather than pretending; a nil sender is the
-		// honest representation of "this channel does not exist yet", and the
-		// alternative was a stub that logged the code, which puts a live
-		// credential in whatever collects stdout.
+		// The phone sender, when a channel that reaches one is actually wired.
+		//
+		// A nil INTERFACE otherwise, never a typed nil: the use case checks
+		// `sender == nil` before it generates a code or writes a challenge row, so
+		// nil is what makes the phone routes answer 503 instead of creating a
+		// challenge nobody can answer. That is still the honest representation of
+		// "this channel does not exist yet"; the alternative once considered here
+		// was a stub that logged the code, which puts a live credential in whatever
+		// collects stdout.
+		var phoneCodes authUsecase.Sender
+		if notifier.Handles(notificationdomain.ChannelWhatsApp) {
+			phoneCodes = notificationUsecase.NewPhoneCodeSender(notifier, dispatcher, notificationdomain.ChannelWhatsApp)
+		}
 		verification := authUsecase.NewVerification(
 			users, challenges, passwords,
 			piiService.BlindIndex,
-			codes, nil,
+			codes, phoneCodes,
 			authService,
 		)
 		authHandler = authHandler.WithVerification(verification, authUsecase.NewProfiles(users))
 		container.challenges = verification
 		log.Printf("auth: passwordless sign-in enabled; codes are %d digits and last %s",
 			authdomain.CodeLength, authdomain.CodeTTL)
-		if notifier == nil {
+		// Asked per CHANNEL, not "is there a notifier at all".
+		//
+		// It used to read `notifier == nil`, which was the same question while email
+		// was the only channel. Once a phone channel could exist on its own, that
+		// test started passing on a deployment with WhatsApp and no mail provider —
+		// so the one warning that explains a 503 on the sign-in screen went silent
+		// exactly when it was still true. Handles is nil-safe, so this also covers
+		// "no notifier at all".
+		if !notifier.Handles(notificationdomain.ChannelEmail) {
 			// Said plainly at boot, because the symptom otherwise is a sign-in
 			// screen that answers 503 and nobody knowing why.
 			log.Printf("auth: WARNING no mail provider; sign-in codes cannot be sent and /auth/email/start will answer 503. Set RESEND_API_KEY and RESEND_FROM_EMAIL.")
 		}
-		log.Printf("auth: no SMS provider configured; phone confirmation answers 503")
+		if phoneCodes == nil {
+			log.Printf("auth: no phone channel configured; phone confirmation answers 503. Set the VOZKO_* block to deliver codes over WhatsApp.")
+		} else {
+			log.Printf("auth: phone confirmation delivers codes over %s", notificationdomain.ChannelWhatsApp)
+		}
 	}
 
 	checkoutService := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, cfg.Payments.HoldFor, cfg.Payments.CartHoldFor, holdLimits)
@@ -353,25 +373,52 @@ func buildNotifications(
 	jobs queuedomain.Queue,
 	dispatcher *queueUsecase.Dispatcher,
 ) (*notificationUsecase.Service, *notificationUsecase.Purchases, *notificationUsecase.Notifier, error) {
+	// One stack, assembled from whatever is configured. Each channel contributes
+	// a Sender and the Renderer that produces the body it carries, and the two are
+	// added together so a channel can never be queueable without being renderable.
+	renderers := map[notificationdomain.Channel]notificationdomain.Renderer{}
+	var senders []notificationdomain.Sender
+
 	email := notifications.NewEmailSender(cfg)
 	if email == nil {
 		log.Printf("notifications: RESEND_API_KEY is not set; buyers receive no order emails")
+	}
+
+	if email != nil {
+		// Parsed once, at boot. A template with a syntax error or a missing
+		// component fails the deploy here rather than one buyer's receipt later.
+		renderer, err := notifications.NewRenderer(cfg.Brand)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		renderers[email.Channel()] = renderer
+		senders = append(senders, email)
+		log.Printf("notifications: Resend enabled, %d template(s), from %q, up to %d/s per replica",
+			renderer.Templates(), cfg.FromEmail, cfg.MaxRPS)
+	}
+
+	// Codes to a phone, carried by Vozko. Independent of email on purpose: this
+	// was one early return on RESEND_API_KEY, which would have meant a box office
+	// with no mail provider could not confirm a phone either, for no reason beyond
+	// the order the two were wired in.
+	if codes := notifications.NewVozkoCodeSender(cfg.Phone); codes != nil {
+		// The wording of a code message is not ours: an approved WhatsApp
+		// authentication template is fixed text at Meta, so what is rendered for
+		// this channel is the code itself. See notifications.PhoneCodeRenderer.
+		renderers[codes.Channel()] = notifications.PhoneCodeRenderer{}
+		senders = append(senders, codes)
+		log.Printf("notifications: verification codes over %s via Vozko at %s (workspace %s), up to %d/s per replica",
+			codes.Channel(), cfg.Phone.BaseURL, cfg.Phone.WorkspaceID, cfg.Phone.MaxRPS)
+	}
+
+	if len(senders) == 0 {
 		return nil, nil, nil, nil
 	}
 
-	// Parsed once, at boot. A template with a syntax error or a missing
-	// component fails the deploy here rather than one buyer's receipt later.
-	renderer, err := notifications.NewRenderer(cfg.Brand)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	messenger := notificationUsecase.NewService(renderer, email)
+	messenger := notificationUsecase.NewService(notifications.NewChannels(renderers), senders...)
 	notifier := notificationUsecase.NewNotifier(jobs, dispatcher, messenger.Channels()...)
 	purchases := notificationUsecase.NewPurchases(notifier, cfg.Brand.SiteURL)
 
-	log.Printf("notifications: Resend enabled, %d template(s), from %q, up to %d/s per replica",
-		renderer.Templates(), cfg.FromEmail, cfg.MaxRPS)
 	return messenger, purchases, notifier, nil
 }
 

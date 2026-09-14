@@ -123,6 +123,68 @@ type NotificationsConfig struct {
 	// short queue rather than a wall of 429s.
 	MaxRPS int
 	Brand  BrandConfig
+	// Phone is code delivery to a phone number. Independent of Resend: a box
+	// office may have one, both or neither, and the container registers a Sender
+	// for exactly what is configured.
+	Phone PhoneConfig
+}
+
+// PhoneConfig is delivery to a phone number, carried by Vozko's platform.
+//
+// The VOZKO_* variable names say who carries it, exactly as RESEND_* does for
+// email. Nothing above this package learns either name: a use case asks for
+// ChannelWhatsApp and the container decides what that means.
+//
+// It carries a USER's credentials, and that is not a preference. Vozko
+// authenticates people, not systems: every route that can send a template sits
+// behind the same access token a person gets by signing in, and there is no API
+// key, service account or machine credential anywhere in it. So this integration
+// signs in as an operator, and the account it uses should be one created for it —
+// not a human's login — with only the workspace and the permissions template
+// sending needs.
+type PhoneConfig struct {
+	// BaseURL is the platform's root, without a trailing slash. In development
+	// this is the local Vozko backend; pointing it at production by accident is
+	// the one configuration mistake here that spends real money and messages real
+	// people, which is why it has no default.
+	BaseURL string
+	// Email and Password sign the integration in. Held like any other secret:
+	// never logged, never echoed, and ideally belonging to a dedicated account so
+	// revoking it does not lock a person out of the CRM.
+	Email    string
+	Password string
+	// WorkspaceID is which workspace pays for and owns the send. Sent as a header
+	// on every call, because the account may belong to more than one.
+	WorkspaceID string
+	// BusinessPhoneID is the connected WhatsApp number the code is sent FROM, and
+	// TemplateID the approved AUTHENTICATION template that carries it.
+	//
+	// Ids rather than names on purpose, matching what the platform's own endpoint
+	// takes: a name resolves through an unordered query that can pick a different
+	// row than the one approved.
+	BusinessPhoneID string
+	TemplateID      string
+	// Timeout bounds one call. Small: a person is watching a screen, and the job
+	// row retries better than a long wait does.
+	Timeout time.Duration
+	// MaxRPS caps the client-side rate, PER REPLICA, the same way the email
+	// sender's does.
+	MaxRPS int
+}
+
+// Enabled reports whether codes can be delivered to a phone at all. Off, phone
+// confirmation answers 503 exactly as it did before this existed.
+//
+// Every field is required because a partial configuration cannot send: without
+// the ids there is nothing to send with, without the credentials nothing to send
+// as, and without a workspace nobody to bill.
+func (p PhoneConfig) Enabled() bool {
+	return strings.TrimSpace(p.BaseURL) != "" &&
+		strings.TrimSpace(p.Email) != "" &&
+		strings.TrimSpace(p.Password) != "" &&
+		strings.TrimSpace(p.WorkspaceID) != "" &&
+		strings.TrimSpace(p.BusinessPhoneID) != "" &&
+		strings.TrimSpace(p.TemplateID) != ""
 }
 
 // Enabled reports whether messages can be delivered at all. Off, the box office
@@ -501,7 +563,13 @@ func loadNotifications(frontendOrigin string) (NotificationsConfig, error) {
 	// without configuration and still overridable when the logo moves to a CDN.
 	brand.LogoURL = value("BRAND_LOGO_URL", brand.SiteURL+"/brand/vozko-tickets-logo.png")
 
+	phone, err := loadPhoneDelivery()
+	if err != nil {
+		return NotificationsConfig{}, err
+	}
+
 	notifications := NotificationsConfig{
+		Phone:        phone,
 		ResendAPIKey: strings.TrimSpace(os.Getenv("RESEND_API_KEY")),
 		FromEmail:    strings.TrimSpace(value("RESEND_FROM_EMAIL", os.Getenv("BRAND_FROM_EMAIL"))),
 		FromName:     strings.TrimSpace(value("RESEND_FROM_NAME", brand.Name)),
@@ -540,6 +608,48 @@ func loadNotifications(frontendOrigin string) (NotificationsConfig, error) {
 		}
 	}
 	return notifications, nil
+}
+
+// loadPhoneDelivery reads the Vozko integration that carries codes to a phone.
+//
+// Entirely optional and silent when unset: phone confirmation then answers 503,
+// which is exactly what it did before this existed. Unlike RESEND_API_KEY there is
+// no production guard forcing it on, because a box office that verifies phone
+// numbers by email is a product decision, not a broken deployment.
+//
+// What IS checked is every value that would otherwise fail in a worker: a base
+// URL with a trailing slash that would produce a double slash on every request, a
+// timeout somebody wrote as "10" meaning nanoseconds, a half-filled credential
+// set. One check at boot turns each of those into a refused deploy instead of a
+// code nobody receives.
+func loadPhoneDelivery() (PhoneConfig, error) {
+	timeout, err := duration("VOZKO_TIMEOUT", 10*time.Second)
+	if err != nil {
+		return PhoneConfig{}, err
+	}
+	maxRPS, err := integer("VOZKO_MAX_REQUESTS_PER_SECOND", 10)
+	if err != nil {
+		return PhoneConfig{}, err
+	}
+
+	phone := PhoneConfig{
+		BaseURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("VOZKO_BASE_URL")), "/"),
+		Email:           strings.TrimSpace(os.Getenv("VOZKO_EMAIL")),
+		Password:        os.Getenv("VOZKO_PASSWORD"),
+		WorkspaceID:     strings.TrimSpace(os.Getenv("VOZKO_WORKSPACE_ID")),
+		BusinessPhoneID: strings.TrimSpace(os.Getenv("VOZKO_BUSINESS_PHONE_ID")),
+		TemplateID:      strings.TrimSpace(os.Getenv("VOZKO_OTP_TEMPLATE_ID")),
+		Timeout:         timeout,
+		MaxRPS:          maxRPS,
+	}
+
+	// A base URL alone is the shape of a half-finished configuration, and the
+	// symptom would be a 503 on a screen with no explanation. Say which piece is
+	// missing while somebody is still looking at the boot log.
+	if phone.BaseURL != "" && !phone.Enabled() {
+		return PhoneConfig{}, fmt.Errorf("VOZKO_BASE_URL is set, so VOZKO_EMAIL, VOZKO_PASSWORD, VOZKO_WORKSPACE_ID, VOZKO_BUSINESS_PHONE_ID and VOZKO_OTP_TEMPLATE_ID are all required")
+	}
+	return phone, nil
 }
 
 func loadPayments() (PaymentsConfig, error) {

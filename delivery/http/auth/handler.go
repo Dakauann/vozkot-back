@@ -248,8 +248,8 @@ func userResponse(item *user.User) UserResponse {
 //
 // It deliberately does NOT read X-Forwarded-For. That header is client-supplied
 // text, and believing it without knowing the request came through a trusted
-// proxy lets any caller write whatever address they like onto a session record
-//, and, where the same value keys a rate limit, choose their own bucket.
+// proxy lets any caller write whatever address they like onto a session record,
+// and, where the same value keys a rate limit, choose their own bucket.
 func peerAddress(request *http.Request) string {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err == nil {

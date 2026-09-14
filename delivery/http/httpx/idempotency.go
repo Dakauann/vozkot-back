@@ -33,11 +33,11 @@ const maxIdempotentBody = 1 << 20
 //     response would hide a client bug behind a success.
 //  4. A key whose first request is still running is refused with 409, because
 //     the honest answer is "ask again in a moment", not a second checkout.
-//  5. A key whose first request DIED; the process was killed, a deploy cut it
-//; is taken over once its lease lapses, rather than answering "still in
-//     progress" for the next day. The work may already have committed, so the
-//     endpoint gets one chance to find its own result and replay that instead
-//     of doing it twice.
+//  5. A key whose first request DIED, because the process was killed or a
+//     deploy cut it, is taken over once its lease lapses, rather than
+//     answering "still in progress" for the next day. The work may already
+//     have committed, so the endpoint gets one chance to find its own result
+//     and replay that instead of doing it twice.
 type Idempotency struct {
 	store domain.Store
 	// status translates a use-case error into a status code. It is injected

@@ -42,6 +42,18 @@ func NewCodeSender(notifier *Notifier, dispatcher *queueUsecase.Dispatcher) *Cod
 	return &CodeSender{notifier: notifier, dispatcher: dispatcher, channel: domain.ChannelEmail}
 }
 
+// NewPhoneCodeSender carries codes to a phone instead of an inbox.
+//
+// The channel is a parameter rather than a constant because this use case does
+// not care which one it is: WhatsApp today, SMS when a Sender is registered for
+// it, and the only difference either way is which adapter the container wired.
+// Everything below — the durable job, the dedupe rule, the refusal to log a code
+// — is identical, which is the reason this is a second constructor and not a
+// second type.
+func NewPhoneCodeSender(notifier *Notifier, dispatcher *queueUsecase.Dispatcher, channel domain.Channel) *CodeSender {
+	return &CodeSender{notifier: notifier, dispatcher: dispatcher, channel: channel}
+}
+
 // Send queues the code and announces the job.
 //
 // Unlike the purchase messages, this is NOT raised inside somebody else's
@@ -54,18 +66,32 @@ func (s *CodeSender) Send(ctx context.Context, destination, code string, purpose
 		return authdomain.ErrDeliveryUnavailable
 	}
 
-	job, err := s.notifier.Enqueue(ctx, nil, domain.Request{
+	request := domain.Request{
 		Channel:   s.channel,
 		Template:  domain.TemplateSignInCode,
-		Recipient: domain.Recipient{Email: destination},
-		Subject:   "Seu código de acesso: " + code,
+		Recipient: s.recipient(destination),
 		Data: map[string]any{
 			"Code":            code,
 			"ValidForMinutes": strconv.Itoa(int(authdomain.CodeTTL / time.Minute)),
 			"Purpose":         string(purpose),
 		},
-		DedupeKey: string(domain.TemplateSignInCode) + ":" + code,
-	})
+		// Keyed on the code AND the channel. Two codes for one address are two
+		// different codes and both must be sent, so the code is what makes them
+		// distinct; the channel is there because the same code deliberately sent
+		// by two routes is two messages, and a key without it would silently drop
+		// the second.
+		DedupeKey: string(domain.TemplateSignInCode) + ":" + string(s.channel) + ":" + code,
+	}
+	if s.channel == domain.ChannelEmail {
+		// Meaningful to email and ignored everywhere else. It carries the code by
+		// design — a subject line that hides it makes the reader open the message
+		// to read six digits — and that is a property of INBOXES, where the
+		// preview is the feature. It would be a leak on a channel whose wording
+		// somebody else controls.
+		request.Subject = "Seu código de acesso: " + code
+	}
+
+	job, err := s.notifier.Enqueue(ctx, nil, request)
 	if err != nil {
 		return err
 	}
@@ -77,4 +103,17 @@ func (s *CodeSender) Send(ctx context.Context, destination, code string, purpose
 	}
 	s.dispatcher.Dispatch(ctx, job)
 	return nil
+}
+
+// recipient addresses the code for whichever channel carries it.
+//
+// One place rather than a branch at each call site, so a channel added to the
+// domain is handled here or nowhere — and "nowhere" is safe: Recipient.Address
+// returns "" for a channel it cannot address, and the Service parks the job
+// instead of sending a code into the void.
+func (s *CodeSender) recipient(destination string) domain.Recipient {
+	if s.channel.Phone() {
+		return domain.Recipient{Phone: destination}
+	}
+	return domain.Recipient{Email: destination}
 }

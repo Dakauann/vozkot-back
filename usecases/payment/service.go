@@ -185,8 +185,8 @@ var ErrNotRefundable = errors.New("order has no settled charge to refund")
 // The provider call is NOT made here, and that is the point. A refund is a
 // round trip to a third party that is occasionally slow and occasionally down,
 // and running it on the request meant a provider slower than the HTTP write
-// timeout left the money refunded at Mercado Pago and the order untouched here
-//; the two facts that must never disagree, disagreeing, with nothing left to
+// timeout left the money refunded at Mercado Pago and the order untouched here:
+// the two facts that must never disagree, disagreeing, with nothing left to
 // reconcile them. The job row is durable, retried with backoff, and keyed on
 // the order, so an operator double-clicking refunds once.
 //
