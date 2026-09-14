@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
-	"net/mail"
 	"strings"
 	"time"
 	"unicode"
@@ -29,32 +27,17 @@ func NewService(users user.Repository, sessions domain.SessionRepository, passwo
 	return &Service{users: users, sessions: sessions, passwords: passwords, tokens: tokens, refreshTTL: refreshTTL, now: time.Now}
 }
 
-func (s *Service) Register(ctx context.Context, input domain.CredentialsInput) (*domain.TokenPair, error) {
-	name := strings.TrimSpace(input.Name)
-	email := strings.ToLower(strings.TrimSpace(input.Email))
-	if name == "" {
-		return nil, errors.New("name is required")
-	}
-	if _, err := mail.ParseAddress(email); err != nil {
-		return nil, errors.New("email is invalid")
-	}
-	if !strongPassword(input.Password) {
-		return nil, domain.ErrWeakPassword
-	}
-	if existing, _ := s.users.FindByEmail(ctx, email); existing != nil {
-		return nil, user.ErrEmailAlreadyExists
-	}
-	hash, err := s.passwords.Hash(input.Password)
-	if err != nil {
-		return nil, err
-	}
-	now := s.now().UTC()
-	item := &user.User{ID: newID("usr"), Name: name, Email: email, PasswordHash: hash, Role: user.RoleUser, CreatedAt: now, UpdatedAt: now}
-	if err := s.users.Create(ctx, item); err != nil {
-		return nil, err
-	}
-	return s.startSession(ctx, item, input.IPAddress, input.DeviceInfo)
-}
+// An account is NOT created here, and there is no sibling that does it with a
+// password.
+//
+// There used to be a Register that took a name, an address and a password and
+// made a working account out of them. Nothing in it ever proved the address
+// belonged to whoever typed it, which made it a way to claim somebody else's:
+// the real owner would later sign in by code, FindByEmail would find the
+// squatter's row, and they would land inside an account that already carried
+// another person's password: along with, in time, their orders and their
+// identity block. Account creation lives in VerifyEmailSignIn now, where it
+// happens only once a code sent to that address has come back.
 
 func (s *Service) Login(ctx context.Context, input domain.CredentialsInput) (*domain.TokenPair, error) {
 	item, err := s.users.FindByEmail(ctx, strings.ToLower(strings.TrimSpace(input.Email)))

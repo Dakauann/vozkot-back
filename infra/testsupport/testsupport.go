@@ -89,7 +89,7 @@ func Database(t *testing.T) *gorm.DB {
 }
 
 // DatabaseConfig is the test database's configuration, for a test that needs
-// its own pool — one sized to reproduce exhaustion, say — rather than the
+// its own pool, one sized to reproduce exhaustion, say, rather than the
 // shared connection.
 func DatabaseConfig(t *testing.T) config.DatabaseConfig {
 	t.Helper()
@@ -196,7 +196,7 @@ func SeedEvent(t *testing.T, db *gorm.DB, ownerID string) string {
 
 // CountJobs counts jobs of one type in one status. Tests give their jobs a
 // unique type, so counting by type is what keeps packages that run in parallel
-// against the same database from seeing each other's rows — the alternative,
+// against the same database from seeing each other's rows: the alternative,
 // truncating shared tables, wipes another package's test out from under it.
 func CountJobs(t *testing.T, db *gorm.DB, jobType, status string) int64 {
 	t.Helper()

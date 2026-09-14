@@ -31,7 +31,7 @@ func NewIdempotencyRepository(db *gorm.DB) *IdempotencyRepository {
 //
 // ON CONFLICT DO NOTHING is what makes losing quiet: the loser is told "zero
 // rows" rather than handed an error, so a client retrying over a bad
-// connection — the case this table exists for — costs no rolled-back
+// connection, the case this table exists for, costs no rolled-back
 // transaction and no line in the database log.
 func (s *IdempotencyRepository) Begin(ctx context.Context, key, scope, requestHash string, lease time.Duration, now time.Time) (domain.Claim, error) {
 	key = strings.TrimSpace(key)
@@ -94,7 +94,7 @@ func (s *IdempotencyRepository) Begin(ctx context.Context, key, scope, requestHa
 		if result.RowsAffected == 1 {
 			// A day-old key reused. Recovered, because the row it belonged to
 			// may still be there and the unique key on orders would refuse a
-			// second one anyway — replaying beats failing.
+			// second one anyway, replaying beats failing.
 			return domain.Claim{Mine: true, Recovered: true}, nil
 		}
 		// Someone else revived it first; fall through and treat theirs as the

@@ -16,7 +16,7 @@ import (
 // precisely because it looks like it works either way.
 //
 // http.Server.Serve returns ErrServerClosed the moment Shutdown closes the
-// listener — not when the drain is finished. A main that treated that return as
+// listener, not when the drain is finished. A main that treated that return as
 // "we are done" exited with connections still being served and workers still
 // holding jobs, which is a crash wearing a deploy's clothes. Nothing about the
 // happy path looks different; the damage only shows up as cut requests and jobs
@@ -151,7 +151,7 @@ func TestRunBoundsTheDrainWithTheConfiguredTimeout(t *testing.T) {
 // arrives.
 //
 // It is the behaviour a deploy depends on. A buyer whose checkout was mid-flight
-// must get their answer — the alternative is a request cut after its
+// must get their answer: the alternative is a request cut after its
 // transaction committed, and a client that cannot tell whether it holds tickets.
 func TestRunDrainsAnInFlightRequest(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

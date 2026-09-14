@@ -15,7 +15,7 @@ type CheckoutRequest struct {
 	// Items is the basket. Every tier must belong to the same event.
 	Items []CheckoutItem `json:"items"`
 	// TicketID and Quantity are the single-tier shorthand, kept because an
-	// operator selling one tier at the door — and the load harness — have no
+	// operator selling one tier at the door, and the load harness, have no
 	// use for a list of one. Ignored when Items is present.
 	TicketID string `json:"ticketId,omitempty" example:"tkt_a1b2c3d4"`
 	Quantity int    `json:"quantity,omitempty" example:"2"`
@@ -61,7 +61,7 @@ type ConfirmRequest struct {
 
 type Buyer struct {
 	Name string `json:"name" example:"Maria Souza"`
-	// Email receives the ingresso and identifies the payer at Mercado Pago.
+	// Email receives the ingresso, and identifies the payer to the provider.
 	Email string `json:"email" example:"maria@exemplo.com.br"`
 	// Document is the CPF or CNPJ. PIX in Brazil cannot be issued without one.
 	Document string `json:"document" example:"12345678909"`
@@ -86,7 +86,7 @@ type OrderItemResponse struct {
 // OrderEventResponse is the night an order is for.
 //
 // Present on listings, where an order that named only ids would be unreadable,
-// and absent when the event has been deleted — which costs a row its title and
+// and absent when the event has been deleted, which costs a row its title and
 // nothing else.
 type OrderEventResponse struct {
 	ID       string    `json:"id" example:"evt_7c1a"`
@@ -137,7 +137,9 @@ type OrderResponse struct {
 // client polls: `status` is "pending" and `pixCopyPaste` is blank for the first
 // moment of an order's life.
 type PaymentResponse struct {
-	Provider string `json:"provider" example:"mercadopago"`
+	// Provider is empty until a charge exists: an order that has not been
+	// charged has not been through one.
+	Provider string `json:"provider" example:"asaas"`
 	ID       string `json:"id,omitempty" example:"1234567890"`
 	Status   string `json:"status" enums:"pending,paid,rejected,cancelled,refunded,charged_back,in_analysis" example:"pending"`
 	Method   string `json:"method" example:"pix"`

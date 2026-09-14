@@ -13,7 +13,7 @@ import (
 // has committed.
 //
 // The ordering is the whole point. Publishing inside the transaction would
-// announce work for an order that might still roll back — and a consumer is
+// announce work for an order that might still roll back, and a consumer is
 // fast enough to look for that order before it exists. Publishing after the
 // commit can only lose the announcement, never invent one, and a lost
 // announcement is exactly what the poller is there for.
@@ -32,7 +32,7 @@ func NewDispatcher(publisher domain.Publisher) *Dispatcher {
 
 // Dispatch publishes the jobs that are due now.
 //
-// A job scheduled for the future — a hold expiring in thirty minutes — is not
+// A job scheduled for the future, a hold expiring in thirty minutes, is not
 // published: the broker has no notion of "deliver this later" without a plugin,
 // and the poller already wakes for exactly that. Publishing it now would only
 // produce a message that claims nothing and is thrown away.

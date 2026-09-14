@@ -8,13 +8,36 @@ package payment
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
 // Provider identifies the payment processor behind a charge.
 type Provider string
 
-const ProviderMercadoPago Provider = "mercadopago"
+const (
+	// ProviderAsaas is the default. It is the one that can divide a charge
+	// across wallet ids, which is what a box office paying organisers needs.
+	ProviderAsaas       Provider = "asaas"
+	ProviderMercadoPago Provider = "mercadopago"
+)
+
+// ParseProvider normalises an operator-supplied provider name.
+//
+// Empty means Asaas: a deployment that says nothing gets the provider this
+// system is built around, rather than failing to start over a variable nobody
+// knew to set.
+func ParseProvider(raw string) (Provider, error) {
+	switch strings.ToLower(strings.TrimSpace(strings.ReplaceAll(raw, " ", ""))) {
+	case "", string(ProviderAsaas):
+		return ProviderAsaas, nil
+	case string(ProviderMercadoPago), "mercado_pago", "mercado-pago", "mp":
+		return ProviderMercadoPago, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrUnknownProvider, raw)
+	}
+}
 
 // Method is the instrument the buyer pays with.
 //
@@ -66,6 +89,7 @@ var (
 	ErrEmailRequired     = errors.New("buyer email is required to create a charge")
 	ErrDocumentRequired  = errors.New("buyer CPF/CNPJ is required to create a charge")
 	ErrNotConfigured     = errors.New("payment provider is not configured")
+	ErrUnknownProvider   = errors.New("unknown payment provider")
 )
 
 // retryable is implemented by a provider error that knows whether repeating the
@@ -74,8 +98,8 @@ type retryable interface{ Retryable() bool }
 
 // Retryable reports whether repeating a provider call is worth doing.
 //
-// The adapter is the only thing that can answer it — a 502 deserves another
-// attempt, a rejected request does not — so the question is asked through a
+// The adapter is the only thing that can answer it, a 502 deserves another
+// attempt, a rejected request does not, so the question is asked through a
 // tiny interface rather than by reading status codes up here. The knowledge
 // stays with the provider; the use case stays free of its vocabulary.
 //

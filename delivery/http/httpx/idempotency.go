@@ -33,8 +33,8 @@ const maxIdempotentBody = 1 << 20
 //     response would hide a client bug behind a success.
 //  4. A key whose first request is still running is refused with 409, because
 //     the honest answer is "ask again in a moment", not a second checkout.
-//  5. A key whose first request DIED — the process was killed, a deploy cut it
-//     — is taken over once its lease lapses, rather than answering "still in
+//  5. A key whose first request DIED; the process was killed, a deploy cut it
+//; is taken over once its lease lapses, rather than answering "still in
 //     progress" for the next day. The work may already have committed, so the
 //     endpoint gets one chance to find its own result and replay that instead
 //     of doing it twice.
@@ -65,8 +65,8 @@ type CodeMapper func(err error) string
 // It exists because the claim and the work are two writes: the key is claimed
 // first, the work runs, the response is recorded last. A process that dies in
 // the middle leaves a committed order behind a key that looks unstarted. Only
-// the endpoint knows how to look — for checkout it is the unique idempotency
-// key on the orders table — so the contract lives here and the lookup lives
+// the endpoint knows how to look, for checkout it is the unique idempotency
+// key on the orders table, so the contract lives here and the lookup lives
 // there.
 //
 // Reporting false means "no trace of it", and the handler runs normally.

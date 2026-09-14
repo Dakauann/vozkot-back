@@ -121,7 +121,7 @@ func applyFilter(query *gorm.DB, filter domain.Filter) *gorm.DB {
 	}
 	if search := strings.TrimSpace(filter.Query); search != "" {
 		// A tier's own words only: its title and its description. Searching for
-		// the event — its name, venue or city — is the EVENT repository's job,
+		// the event, its name, venue or city, is the EVENT repository's job,
 		// and it does it with a real full-text index rather than a LIKE.
 		//
 		// This one stays a LIKE deliberately. It is an operator scanning their
@@ -142,7 +142,7 @@ func orderFor(sort domain.Sort) string {
 		return "price_cents ASC"
 	default:
 		// Cheapest first, then a stable tiebreak. A tier no longer carries a
-		// date — the event does — so the old "next event first" order has no
+		// date, the event does, so the old "next event first" order has no
 		// column to sort on, and price is what a buyer scans an event page for
 		// anyway.
 		return "price_cents ASC, id ASC"

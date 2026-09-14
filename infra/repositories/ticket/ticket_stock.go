@@ -17,7 +17,7 @@ import (
 // point. Reading a ticket, deciding in Go that three are left, and writing back
 // is the textbook oversell: two requests read the same three and both take two.
 // Expressing the condition inside the UPDATE makes the database the arbiter, and
-// the database resolves it by locking the row — so of two concurrent buyers for
+// the database resolves it by locking the row, so of two concurrent buyers for
 // the last ticket, exactly one gets a row back and the other gets none.
 
 // Reserve holds `quantity` tickets, reporting false when there were not enough.
@@ -36,7 +36,7 @@ func (r *TicketRepository) Reserve(ctx context.Context, ticketID string, quantit
 		return false, result.Error
 	}
 	// No row matched: sold out, held out, or no longer on sale. The caller
-	// cannot tell which, and does not need to — all three mean "not yours".
+	// cannot tell which, and does not need to; all three mean "not yours".
 	return result.RowsAffected == 1, nil
 }
 

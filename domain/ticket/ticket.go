@@ -132,7 +132,7 @@ func New(id, ownerID string, draft Draft, now time.Time) (*Ticket, error) {
 // Apply replaces the operator-editable fields of an existing ticket.
 //
 // Sold is not among them: it is a consequence of sales, not an editable field,
-// and quantity may not be pushed below it — that would promise refunds the box
+// and quantity may not be pushed below it, that would promise refunds the box
 // office cannot honour.
 func (t *Ticket) Apply(draft Draft, now time.Time) error {
 	normalized, err := draft.normalize()

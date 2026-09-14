@@ -40,10 +40,18 @@ import (
 
 // DefaultHoldFor is how long a buyer has to pay once they have confirmed.
 //
-// Thirty minutes, and not by taste: Mercado Pago refuses a PIX charge that
-// expires sooner, so a ten-minute hold would issue a code that outlives its own
-// reservation on every order — turning the late-payment path from an edge case
-// into the normal one. The hold and the charge expire together.
+// Thirty minutes is a judgement about people, not about a provider: long enough
+// to open a banking app, authenticate and find the PIX screen without hurrying,
+// short enough that an abandoned order returns its seats while the event is
+// still selling.
+//
+// It used to be dictated by Mercado Pago, which refuses a PIX charge expiring
+// sooner. Asaas does not have that floor: it dates a charge to a DAY, which
+// means the charge outlives this hold no matter what is chosen here. The
+// consequence is that a payment arriving after the hold lapsed is the ORDINARY
+// case rather than an edge one: settlement asks for the stock back, takes it if
+// it is still there, and owes a refund if it is not. That path is implemented
+// and tested; see infra/asaas/gateway.go for why the gap exists at all.
 const DefaultHoldFor = 30 * time.Minute
 
 // DefaultCartHoldFor is how long the tickets stay off the shelf while the buyer
@@ -121,7 +129,7 @@ type StartInput struct {
 	IdempotencyKey string
 	// Confirm collapses both phases into one call: reserve and immediately ask
 	// for the charge. It exists for callers that have the buyer's details
-	// already — an operator selling at the door, and the load harness — and not
+	// already, an operator selling at the door, and the load harness, and not
 	// for the browser flow, which always confirms as its own step.
 	Confirm bool
 }
@@ -131,7 +139,7 @@ type StartInput struct {
 // The charge itself is NOT created here, and on the browser path it is not
 // created by this call at all. Asking a payment provider for a PIX code is a
 // round trip to a third party that is occasionally slow and occasionally down,
-// and a buyer holding a reservation should not wait on it — nor should the
+// and a buyer holding a reservation should not wait on it, nor should the
 // reservation be lost because the provider timed out. The job enqueued in this
 // same transaction owns that call, which is the outbox pattern: the work cannot
 // be scheduled unless the order it refers to was committed, and cannot be lost
@@ -205,7 +213,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (*orderdomain.Ord
 			if !reserved {
 				// Someone took the last ones between the read and the update.
 				// This is the race the conditional update exists to lose
-				// safely, and losing it rolls the whole transaction back —
+				// safely, and losing it rolls the whole transaction back,
 				// including every line already reserved above, which is why a
 				// partial basket can never be committed.
 				return ticketdomain.ErrInsufficientStock
@@ -288,7 +296,7 @@ type ConfirmInput struct {
 // and asks for the charge.
 //
 // Safe to call twice. The second call saves any corrected details, does not
-// extend the window again, and does not create a second charge — the job's
+// extend the window again, and does not create a second charge, the job's
 // dedupe key sees to the last of those even if this method's own guard were
 // ever removed.
 func (s *Service) Confirm(ctx context.Context, input ConfirmInput) (*orderdomain.Order, error) {
@@ -352,7 +360,7 @@ func (s *Service) Confirm(ctx context.Context, input ConfirmInput) (*orderdomain
 // This is what closes the arithmetic the per-minute rate limit leaves open. At
 // thirty checkouts a minute, ten tickets each and a thirty-minute hold, an
 // account that merely cycles can keep nine thousand tickets off the shelf with
-// no money at risk — the rate limit bounds how fast someone reserves, never how
+// no money at risk: the rate limit bounds how fast someone reserves, never how
 // much they are sitting on, and it is the second number that empties an event.
 func (s *Service) withinHoldLimits(
 	ctx context.Context,
@@ -480,7 +488,7 @@ func (s *Service) ExpireHolds(ctx context.Context, limit int) (int, error) {
 
 // ExpireHold releases one order's hold, driven by the job scheduled at its
 // expiry. It is a no-op for an order that has since been paid, cancelled, or
-// had its window extended by a confirmation — which is the common case on a
+// had its window extended by a confirmation, which is the common case on a
 // healthy system, because every order schedules one of these at cart time and
 // most of them go on to be confirmed.
 func (s *Service) ExpireHold(ctx context.Context, orderID string) error {

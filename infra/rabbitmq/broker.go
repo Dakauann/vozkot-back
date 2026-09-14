@@ -9,11 +9,11 @@
 //
 // One work queue rather than one per type: the consumer reads the job row
 // anyway, the types share a worker pool, and per-type queues would let a burst
-// of one type starve another only if they had separate consumers — which is a
+// of one type starve another only if they had separate consumers, which is a
 // scaling decision, not a default.
 //
 // Publisher confirms are on. Without them a publish is fire-and-forget, and the
-// caller cannot know whether the broker accepted the message — which turns the
+// caller cannot know whether the broker accepted the message, which turns the
 // polling fallback from a safety net into the primary path without anyone
 // noticing.
 package rabbitmq
@@ -310,7 +310,7 @@ func (b *Broker) Publish(ctx context.Context, message queue.Message) error {
 // more than `prefetch` unacknowledged deliveries outstanding to this consumer,
 // and each is acknowledged only when its handler returns, so the handlers in
 // flight can never exceed it. A job here is mostly a round trip to a payment
-// provider — hundreds of milliseconds of waiting — and running those one after
+// provider, hundreds of milliseconds of waiting, and running those one after
 // another made prefetch a buffer instead of the throughput knob it is meant to
 // be: two workers at 300 ms were seven charges a second.
 //

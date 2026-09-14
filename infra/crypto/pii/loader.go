@@ -106,7 +106,7 @@ func collectKEKs(environ []string, getenv func(string) string) (map[byte][]byte,
 }
 
 // resolveActiveVersion honours an explicit choice, and otherwise takes the
-// highest version present — so adding a key without saying which is active
+// highest version present, so adding a key without saying which is active
 // starts using it, which is the thing an operator adding a key meant.
 func resolveActiveVersion(getenv func(string) string, keys map[byte][]byte) (byte, error) {
 	if raw := strings.TrimSpace(getenv(EnvActiveKEKVersion)); raw != "" {

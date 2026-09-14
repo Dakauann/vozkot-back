@@ -15,8 +15,8 @@ import (
 
 // Purchases turns what happened to an order into what the buyer is told.
 //
-// It is the only place that knows both halves — an order's state machine and a
-// message's shape — and it exists so neither of the two use cases either side
+// It is the only place that knows both halves, an order's state machine and a
+// message's shape, and it exists so neither of the two use cases either side
 // of it has to. usecases/payment stays about money and stock; the templates
 // stay about words; the mapping between them lives here, once, in the language
 // the buyer reads.
@@ -35,7 +35,7 @@ func NewPurchases(notifier *Notifier, siteURL string) *Purchases {
 }
 
 // ChargeIssued tells the buyer how to pay, and is sent once the provider has
-// answered with something actionable — a PIX code, a boleto — not when the
+// answered with something actionable, a PIX code, a boleto, not when the
 // order was opened. At checkout there is nothing to send: the charge is still
 // a job in a queue, and an email saying "pay now" with no code to pay against
 // is worse than no email.
@@ -80,7 +80,7 @@ func (p *Purchases) OrderPaid(ctx context.Context, jobs queue.Queue, item *order
 		Channel:   domain.ChannelEmail,
 		Template:  domain.TemplateOrderConfirmed,
 		Recipient: recipient(item),
-		Subject:   "Pagamento confirmado — pedido " + reference(item.ID),
+		Subject:   "Pagamento confirmado, pedido " + reference(item.ID),
 		Data:      data,
 		DedupeKey: dedupeKey(domain.TemplateOrderConfirmed, item.ID),
 	})
@@ -97,7 +97,7 @@ func (p *Purchases) orderData(item *orderdomain.Order, tier *ticketdomain.Ticket
 	// Every key is set, always, even when there is nothing to put in it.
 	//
 	// The data reaches the renderer as a map decoded from JSON, and a Go
-	// template asked for a key a map does not have prints "<no value>" — into
+	// template asked for a key a map does not have prints "<no value>", into
 	// a buyer's receipt, next to their money. An empty string renders as
 	// nothing and is skipped by the components that check their arguments, so
 	// a tier that vanished costs a row rather than a support ticket.

@@ -17,7 +17,7 @@ import (
 //
 // That is a lie with teeth. The browser client treats 401 as "your token is
 // stale", refreshes once, gets the same answer for the same reason, and clears
-// the cookies — so a thirty-second PostgreSQL blip logs every buyer out in the
+// the cookies, so a thirty-second PostgreSQL blip logs every buyer out in the
 // middle of a checkout, and an on-sale loses its whole queue to a failover that
 // the system was otherwise designed to survive.
 

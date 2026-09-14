@@ -10,7 +10,7 @@ import "context"
 // contentType is REQUIRED to be the asset's real media type, because the stored
 // value becomes the Content-Type the CDN serves. An object stored without one
 // is served as application/octet-stream, which a browser downloads instead of
-// rendering — the image silently turns into a file prompt.
+// rendering, the image silently turns into a file prompt.
 type FileStorage interface {
 	Upload(ctx context.Context, key string, data []byte, contentType string) error
 	Delete(ctx context.Context, key string) error

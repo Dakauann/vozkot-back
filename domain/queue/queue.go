@@ -5,7 +5,7 @@
 //
 // Durable, not in-process: a job survives a deploy, a crash and a provider
 // outage, and is retried with backoff until it succeeds or is parked. An
-// in-memory channel loses exactly the jobs that matter — the ones in flight
+// in-memory channel loses exactly the jobs that matter, the ones in flight
 // when the process died holding a buyer's money.
 package queue
 
@@ -34,7 +34,7 @@ const (
 	// Reconciliation only ever looks at orders still waiting for money, so a
 	// refund or a chargeback issued in the provider's own dashboard reaches the
 	// box office through exactly one notification. Lose it and the order stays
-	// paid and the seat stays sold forever — money returned, inventory not.
+	// paid and the seat stays sold forever: money returned, inventory not.
 	TypeAuditSettled = "payment.audit"
 	// TypeRefundCharge gives money back through the same durable ledger as
 	// every other provider call, so a refund survives a slow provider and a
@@ -152,7 +152,7 @@ type Queue interface {
 	// means an open job with the same DedupeKey already exists: one still
 	// waiting absorbs the duplicate, one already running is flagged to run once
 	// more when it finishes. Either way the work is scheduled, and either way
-	// the database decided it without an error — a duplicate is expected
+	// the database decided it without an error; a duplicate is expected
 	// traffic, not a failed statement.
 	Enqueue(ctx context.Context, job *Job) (added bool, err error)
 	// Claim locks up to `limit` due jobs for one worker. Implementations must
@@ -165,7 +165,7 @@ type Queue interface {
 	// message names a job that has already been claimed, the claim fails, and
 	// the duplicate does nothing instead of charging a buyer twice.
 	ClaimByID(ctx context.Context, workerID, jobID string, now time.Time) (*Job, bool, error)
-	// Complete marks a claimed job done — or, when a duplicate was enqueued
+	// Complete marks a claimed job done, or, when a duplicate was enqueued
 	// while it ran, returns it to the queue for one more run.
 	Complete(ctx context.Context, jobID string, now time.Time) error
 	// Retry returns a job to the queue with a later RunAt.

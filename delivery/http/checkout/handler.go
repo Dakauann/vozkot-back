@@ -52,11 +52,11 @@ func NewHandler(
 		httpx.WithLease(lease),
 		// Recovery for a claim orphaned by a crash. The order table already
 		// carries the key under a unique index, so the order a dead request
-		// committed can be found and replayed — which is the difference
+		// committed can be found and replayed, which is the difference
 		// between a buyer seeing the tickets they bought and a buyer
 		// reserving a second batch of them.
-		// Failures on this endpoint are ones a buyer can act on — holding too
-		// much already, or somebody else taking the last ones — and each wants
+		// Failures on this endpoint are ones a buyer can act on, holding too
+		// much already, or somebody else taking the last ones, and each wants
 		// a different way out on screen.
 		httpx.WithCodes(CodeFor),
 		httpx.WithRecovery(func(ctx context.Context, key string) (httpx.Result, bool, error) {
@@ -205,7 +205,7 @@ func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
 		Status:   orderdomain.Status(strings.TrimSpace(query.Get("status"))),
 		TicketID: strings.TrimSpace(query.Get("ticketId")),
 		// Every order for one night, which is what an organiser looking at
-		// their own event asks for — and what a buyer asking "what did I buy
+		// their own event asks for, and what a buyer asking "what did I buy
 		// for this show" asks for too. The buyer scoping below still applies.
 		EventID: strings.TrimSpace(query.Get("eventId")),
 		Limit:   limit,
@@ -364,7 +364,7 @@ func StatusFor(err error) int {
 		errors.Is(err, orderdomain.ErrIdempotencyMismatch),
 		// Not 429: nothing is rate limited here. The account is holding as much
 		// unpaid inventory as it is allowed to, and the way out is to pay for
-		// one of those orders or cancel it — a conflict with state the caller
+		// one of those orders or cancel it, a conflict with state the caller
 		// owns, which is exactly what 409 says.
 		errors.Is(err, orderdomain.ErrTooManyOpenOrders),
 		errors.Is(err, orderdomain.ErrTooManyHeldTickets):

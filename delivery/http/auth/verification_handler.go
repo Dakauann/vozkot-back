@@ -13,8 +13,8 @@ import (
 
 // The passwordless routes.
 //
-// Two of them are anonymous and both cost real work — one sends an email, the
-// other runs a slow hash — so both sit behind the same throttle the password
+// Two of them are anonymous and both cost real work; one sends an email, the
+// other runs a slow hash, so both sit behind the same throttle the password
 // routes use. That throttle is per address; the per-DESTINATION limits live in
 // the use case, because an address limit does nothing against a script spread
 // over a few thousand hosts all aimed at one person's inbox.
@@ -25,8 +25,8 @@ type StartRequest struct {
 }
 
 // StartResponse is what comes back, and it says nothing about whether the
-// address has an account. That symmetry is the point: any difference here —
-// a status code, a field, a response time — turns this endpoint into a way to
+// address has an account. That symmetry is the point: any difference here;
+// a status code, a field, a response time, turns this endpoint into a way to
 // ask who has an account on a ticketing site.
 type StartResponse struct {
 	ChallengeID string    `json:"challengeId" example:"vch_9f2c1d8a"`
@@ -58,7 +58,7 @@ type ProfileRequest struct {
 // ProfileResponse reports the state of the identity block.
 //
 // It carries a MASKED document and never the number. The client's only real
-// question is "is this filled in, and does it look like the right document" —
+// question is "is this filled in, and does it look like the right document";
 // showing the digits back would put them in a response body, a browser cache
 // and a screenshot for no gain.
 type ProfileResponse struct {
@@ -86,6 +86,16 @@ func (h *Handler) RegisterVerification(
 	router.Handle("POST /auth/email/start", throttle(http.HandlerFunc(h.startEmailSignIn)))
 	router.Handle("POST /auth/email/verify", throttle(http.HandlerFunc(h.verifyEmailSignIn)))
 
+	// A missing throttle mounts the anonymous routes bare, because bare is what
+	// they are without Redis and refusing to serve them would take the whole
+	// sign-in down with the cache. A missing `require` is the opposite: these
+	// routes read and write somebody's identity block, and mounting them
+	// unguarded would be worse than not mounting them at all. So they are not
+	// mounted. (It used to dereference the nil instead, which turned a wiring
+	// mistake into a panic inside a request.)
+	if require == nil {
+		return
+	}
 	router.Handle("POST /auth/phone/start", require(http.HandlerFunc(h.startPhone)))
 	router.Handle("POST /auth/phone/verify", require(http.HandlerFunc(h.verifyPhone)))
 	router.Handle("GET /user/profile", require(http.HandlerFunc(h.getProfile)))
@@ -101,7 +111,7 @@ type SetPasswordRequest struct {
 }
 
 // @Summary		Definir ou trocar a senha
-// @Description	Adiciona uma senha à conta, como SEGUNDA forma de entrar — a primeira continua sendo o código por e-mail, e a conta funciona sem senha. Definir a primeira senha exige apenas a sessão; trocar uma senha existente exige a senha atual, porque uma sessão emprestada não deve bastar para trancar o dono fora da própria conta.
+// @Description	Adiciona uma senha à conta, como SEGUNDA forma de entrar: a primeira continua sendo o código por e-mail, e a conta funciona sem senha. Definir a primeira senha exige apenas a sessão; trocar uma senha existente exige a senha atual, porque uma sessão emprestada não deve bastar para trancar o dono fora da própria conta.
 // @Tags			Autenticação
 // @Accept		json
 // @Produce		json
@@ -163,7 +173,7 @@ func passwordCode(err error) string {
 }
 
 // @Summary		Pedir um código de acesso por e-mail
-// @Description	Envia um código de seis dígitos para o e-mail informado. A resposta é idêntica quer o e-mail já tenha conta ou não — de propósito, para que este endpoint não possa ser usado para descobrir quem tem conta. O código vale 10 minutos, serve uma vez só e aceita no máximo 5 tentativas.
+// @Description	Envia um código de seis dígitos para o e-mail informado. A resposta é idêntica quer o e-mail já tenha conta ou não: de propósito, para que este endpoint não possa ser usado para descobrir quem tem conta. O código vale 10 minutos, serve uma vez só e aceita no máximo 5 tentativas.
 // @Tags			Autenticação
 // @Accept		json
 // @Produce		json
@@ -188,7 +198,7 @@ func (h *Handler) startEmailSignIn(response http.ResponseWriter, request *http.R
 }
 
 // @Summary		Entrar com o código recebido por e-mail
-// @Description	Confere o código e abre uma sessão. Se o e-mail ainda não tinha conta, ela é criada agora — entrar e cadastrar são a mesma chamada, porque separá-las exigiria revelar antes se o e-mail já existe.
+// @Description	Confere o código e abre uma sessão. Se o e-mail ainda não tinha conta, ela é criada agora: entrar e cadastrar são a mesma chamada, porque separá-las exigiria revelar antes se o e-mail já existe.
 // @Tags			Autenticação
 // @Accept		json
 // @Produce		json
@@ -222,7 +232,7 @@ func (h *Handler) verifyEmailSignIn(response http.ResponseWriter, request *http.
 }
 
 // @Summary		Pedir um código para confirmar o celular
-// @Description	Envia um código para o número informado. Responde 503 enquanto não houver provedor de SMS configurado: o código nunca é registrado em log nem devolvido na resposta. O restante do fluxo — limite de envios, limite de tentativas, expiração — é real.
+// @Description	Envia um código para o número informado. Responde 503 enquanto não houver provedor de SMS configurado: o código nunca é registrado em log nem devolvido na resposta. O restante do fluxo, limite de envios, limite de tentativas, expiração, é real.
 // @Tags			Autenticação
 // @Accept		json
 // @Produce		json
@@ -306,7 +316,7 @@ func (h *Handler) getProfile(response http.ResponseWriter, request *http.Request
 }
 
 // @Summary		Salvar os dados cadastrais
-// @Description	Grava documento, nome completo e data de nascimento. Exigidos por lei para vender ingresso no Brasil — meia-entrada é limitada por CPF e a cobrança PIX não é emitida sem documento. Todos os campos são armazenados criptografados.
+// @Description	Grava documento, nome completo e data de nascimento. Exigidos por lei para vender ingresso no Brasil, meia-entrada é limitada por CPF e a cobrança PIX não é emitida sem documento. Todos os campos são armazenados criptografados.
 // @Tags			Autenticação
 // @Accept		json
 // @Produce		json

@@ -14,8 +14,8 @@
 // what makes the whole thing exactly-once in effect: a redelivered message
 // claims nothing and does nothing.
 //
-// Jobs run concurrently on both paths. The work is I/O — a round trip to a
-// payment provider — so one job at a time per worker would leave a process
+// Jobs run concurrently on both paths. The work is I/O, a round trip to a
+// payment provider, so one job at a time per worker would leave a process
 // idle for hundreds of milliseconds per job. The broker's prefetch bounds the
 // broker path; the batch size bounds the poller's. Size the database pool to
 // cover both (docs/SCALE.md).
@@ -249,8 +249,8 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 // responsibility: cancelling it because a deploy started would abandon a
 // buyer's charge halfway AND abandon the bookkeeping that says it was done,
 // leaving a finished job marked processing until the stale sweep ran it a
-// second time. So a shutdown stops the worker from claiming ANYTHING NEW —
-// the claim calls still use the cancellable context — while whatever is
+// second time. So a shutdown stops the worker from claiming ANYTHING NEW;
+// the claim calls still use the cancellable context, while whatever is
 // already in hand runs to its end, which is what both ProcessBatch and the
 // broker consumer wait for before returning.
 func (w *Worker) run(ctx context.Context, job domain.Job) {

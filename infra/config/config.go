@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	paymentdomain "vozkot/domain/payment"
 )
 
 type Config struct {
@@ -93,7 +95,7 @@ type CacheConfig struct {
 	// makes it, and a checkout screen polls for its PIX code for the length of a
 	// thirty-minute hold. Thirty seconds collapses fifteen polls into one read
 	// while keeping a logout's effect bounded by half a minute in the worst
-	// case — and a logout invalidates the entry outright, so the bound only
+	// case, and a logout invalidates the entry outright, so the bound only
 	// applies if the cache dropped the key some other way. Zero disables it.
 	SessionCacheTTL time.Duration
 }
@@ -105,7 +107,7 @@ func (c CacheConfig) Enabled() bool { return strings.TrimSpace(c.URL) != "" }
 // shape beyond one more block.
 //
 // Unlike the cache and the broker, this one is NOT optional in production. A
-// missing RESEND_API_KEY does not degrade the product — it silently stops
+// missing RESEND_API_KEY does not degrade the product, it silently stops
 // telling buyers that their money arrived, and the first person to notice is a
 // customer who believes the box office took their money and vanished. Refusing
 // to start is the honest failure; see loadNotifications.
@@ -146,6 +148,23 @@ type BrandConfig struct {
 // PaymentsConfig is the Mercado Pago integration, using the same variable names
 // as Vozko's backend so one account's credentials serve both.
 type PaymentsConfig struct {
+	// Provider decides which adapter is wired. It is read once at boot and
+	// nothing downstream branches on it: every use case depends on the
+	// payment.Gateway port and cannot tell the difference.
+	Provider paymentdomain.Provider
+
+	// --- Asaas -------------------------------------------------------------
+	// Asaas authenticates with an api key in its own header, and its sandbox is
+	// a different HOST rather than a flag, which is what stops a
+	// misconfiguration billing a real card.
+	AsaasAPIKey  string
+	AsaasBaseURL string
+	// AsaasWebhookToken is the shared secret Asaas echoes back. Unlike Mercado
+	// Pago's HMAC it does not sign the body, so it authenticates the SENDER and
+	// says nothing about what was sent.
+	AsaasWebhookToken string
+
+	// --- Mercado Pago ------------------------------------------------------
 	AccessToken   string
 	WebhookSecret string
 	BaseURL       string
@@ -171,7 +190,27 @@ type PaymentsConfig struct {
 
 // Enabled reports whether charges can be issued at all. Without a token the
 // box office still runs: tickets are managed, and checkout answers 503.
-func (p PaymentsConfig) Enabled() bool { return strings.TrimSpace(p.AccessToken) != "" }
+// Enabled reports whether the ACTIVE provider has credentials.
+//
+// Asked of the selected provider rather than of any of them: a deployment with a
+// leftover Mercado Pago token and no Asaas key must answer "not configured",
+// not try to charge through a provider it is not wired to.
+func (p PaymentsConfig) Enabled() bool {
+	switch p.Provider {
+	case paymentdomain.ProviderMercadoPago:
+		return strings.TrimSpace(p.AccessToken) != ""
+	default:
+		return strings.TrimSpace(p.AsaasAPIKey) != ""
+	}
+}
+
+// asaasSandboxBaseURL is duplicated from infra/asaas rather than imported.
+//
+// config sits below the adapters and must not depend on one: importing the
+// Asaas package here would make every deployment that uses Mercado Pago compile
+// in an adapter it never calls, and would invert the dependency the layering
+// exists to keep.
+const asaasSandboxBaseURL = "https://api-sandbox.asaas.com/v3"
 
 // QueueConfig tunes the durable worker.
 type QueueConfig struct {
@@ -504,6 +543,10 @@ func loadNotifications(frontendOrigin string) (NotificationsConfig, error) {
 }
 
 func loadPayments() (PaymentsConfig, error) {
+	provider, err := paymentdomain.ParseProvider(os.Getenv("PAYMENT_PROVIDER"))
+	if err != nil {
+		return PaymentsConfig{}, err
+	}
 	tolerance, err := duration("MERCADOPAGO_SIGNATURE_TOLERANCE", 0)
 	if err != nil {
 		return PaymentsConfig{}, err
@@ -521,7 +564,18 @@ func loadPayments() (PaymentsConfig, error) {
 		return PaymentsConfig{}, err
 	}
 
+	asaasBaseURL := strings.TrimSpace(os.Getenv("ASAAS_BASE_URL"))
+	if asaasBaseURL == "" {
+		// Sandbox by default. A deployment that forgets to say which
+		// environment it is in should issue play money, not real charges.
+		asaasBaseURL = asaasSandboxBaseURL
+	}
+
 	payments := PaymentsConfig{
+		Provider:           provider,
+		AsaasAPIKey:        strings.TrimSpace(os.Getenv("ASAAS_API_KEY")),
+		AsaasBaseURL:       asaasBaseURL,
+		AsaasWebhookToken:  strings.TrimSpace(os.Getenv("ASAAS_WEBHOOK_TOKEN")),
 		AccessToken:        strings.TrimSpace(os.Getenv("MERCADOPAGO_ACCESS_TOKEN")),
 		WebhookSecret:      strings.TrimSpace(os.Getenv("MERCADOPAGO_WEBHOOK_SECRET")),
 		BaseURL:            strings.TrimSpace(os.Getenv("MERCADOPAGO_BASE_URL")),
@@ -533,12 +587,21 @@ func loadPayments() (PaymentsConfig, error) {
 
 	// A configured provider without a webhook secret is the dangerous shape:
 	// the endpoint would have to either reject every notification or trust
-	// unsigned ones. Refusing to start is the only safe answer.
-	if payments.Enabled() && payments.WebhookSecret == "" {
-		return PaymentsConfig{}, fmt.Errorf("MERCADOPAGO_WEBHOOK_SECRET is required when MERCADOPAGO_ACCESS_TOKEN is set")
-	}
-	if payments.Enabled() && payments.NotificationURL == "" && os.Getenv("APP_ENV") == "production" {
-		return PaymentsConfig{}, fmt.Errorf("MERCADOPAGO_NOTIFICATION_URL is required in production")
+	// unsigned ones. Refusing to start is the only safe answer, and it applies
+	// to both providers; Asaas's shared token is weaker than an HMAC, which
+	// makes having one MORE important rather than less.
+	switch payments.Provider {
+	case paymentdomain.ProviderAsaas:
+		if payments.Enabled() && payments.AsaasWebhookToken == "" {
+			return PaymentsConfig{}, fmt.Errorf("ASAAS_WEBHOOK_TOKEN is required when ASAAS_API_KEY is set")
+		}
+	case paymentdomain.ProviderMercadoPago:
+		if payments.Enabled() && payments.WebhookSecret == "" {
+			return PaymentsConfig{}, fmt.Errorf("MERCADOPAGO_WEBHOOK_SECRET is required when MERCADOPAGO_ACCESS_TOKEN is set")
+		}
+		if payments.Enabled() && payments.NotificationURL == "" && os.Getenv("APP_ENV") == "production" {
+			return PaymentsConfig{}, fmt.Errorf("MERCADOPAGO_NOTIFICATION_URL is required in production")
+		}
 	}
 
 	payments.SandboxPayerEmail = sandboxPayerEmail()

@@ -17,8 +17,8 @@ import (
 // A steady-state boot must issue NO schema change at all, and this test is here
 // because that rule has been broken twice and cost a deadlock both times.
 //
-// The mechanism is always the same. Any DDL — ALTER, CREATE INDEX, ADD
-// CONSTRAINT — takes a lock on its table that every writer has to wait for. The
+// The mechanism is always the same. Any DDL: ALTER, CREATE INDEX, ADD
+// CONSTRAINT: takes a lock on its table that every writer has to wait for. The
 // migration holds it inside a transaction that already touched another table,
 // so it takes two locks in an order no running request shares, and PostgreSQL
 // resolves the cycle by killing somebody's checkout. That is survivable exactly

@@ -19,7 +19,7 @@ import (
 // evening selling Pista and Camarote was two rows that agreed about the event
 // only by repeating its name in a string column. This creates one event per
 // distinct (owner, event name) and points the tiers at it, taking the venue,
-// city and date from the tiers themselves — they already held them, identically,
+// city and date from the tiers themselves: they already held them, identically,
 // which is exactly the duplication the event table removes.
 //
 // It runs inside the migration transaction and it is idempotent: it only ever

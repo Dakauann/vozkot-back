@@ -35,22 +35,87 @@ definitions:
         example: Sessão encerrada com sucesso
         type: string
     type: object
+  auth.PhoneStartRequest:
+    properties:
+      phone:
+        example: (84) 99440-9624
+        type: string
+    type: object
+  auth.ProfileRequest:
+    properties:
+      birthDate:
+        example: "1994-03-21"
+        type: string
+      document:
+        example: 529.982.247-25
+        type: string
+      documentType:
+        enum:
+        - cpf
+        - cnpj
+        - passport
+        example: cpf
+        type: string
+      legalName:
+        example: Maria Souza
+        type: string
+    type: object
+  auth.ProfileResponse:
+    properties:
+      birthDate:
+        example: "1994-03-21"
+        type: string
+      complete:
+        example: true
+        type: boolean
+      documentMask:
+        example: 529.***.***-25
+        type: string
+      documentType:
+        example: cpf
+        type: string
+      legalName:
+        example: Maria Souza
+        type: string
+      phoneMask:
+        example: (84) *****-9624
+        type: string
+      phoneVerified:
+        example: false
+        type: boolean
+    type: object
   auth.RefreshTokenRequest:
     properties:
       refreshToken:
         example: token_de_atualizacao
         type: string
     type: object
-  auth.RegisterRequest:
+  auth.SetPasswordRequest:
+    properties:
+      current:
+        description: Current is required only when the account already has a password.
+        type: string
+      new:
+        example: UmaSenhaForte1
+        type: string
+    type: object
+  auth.StartRequest:
     properties:
       email:
-        example: maria@empresa.com.br
+        example: maria@exemplo.com.br
         type: string
-      name:
-        example: Maria Silva
+    type: object
+  auth.StartResponse:
+    properties:
+      challengeId:
+        example: vch_9f2c1d8a
         type: string
-      password:
-        example: SenhaForte1
+      expiresAt:
+        type: string
+      resendAt:
+        description: |-
+          ResendAt is when another code may be requested, so the screen can show a
+          real countdown instead of guessing at the server's rule.
         type: string
     type: object
   auth.UserResponse:
@@ -68,6 +133,15 @@ definitions:
         example: user
         type: string
     type: object
+  auth.VerifyRequest:
+    properties:
+      challengeId:
+        example: vch_9f2c1d8a
+        type: string
+      code:
+        example: "481905"
+        type: string
+    type: object
   checkout.Buyer:
     properties:
       document:
@@ -76,18 +150,44 @@ definitions:
         example: "12345678909"
         type: string
       email:
-        description: Email receives the ingresso and identifies the payer at Mercado
-          Pago.
+        description: Email receives the ingresso, and identifies the payer to the
+          provider.
         example: maria@exemplo.com.br
         type: string
       name:
         example: Maria Souza
         type: string
     type: object
+  checkout.CheckoutItem:
+    properties:
+      quantity:
+        example: 2
+        type: integer
+      ticketId:
+        example: tkt_a1b2c3d4
+        type: string
+    type: object
   checkout.CheckoutRequest:
     properties:
       buyer:
-        $ref: '#/definitions/checkout.Buyer'
+        allOf:
+        - $ref: '#/definitions/checkout.Buyer'
+        description: |-
+          Buyer is optional here. The browser reserves first and supplies the buyer
+          at /confirm, so that the tickets come off the shelf while the form is
+          being filled in rather than after it. Supplying it here does both at
+          once.
+      confirm:
+        description: |-
+          Confirm asks for the charge immediately, instead of waiting for the
+          confirm step. It requires Buyer to be complete.
+        example: false
+        type: boolean
+      items:
+        description: Items is the basket. Every tier must belong to the same event.
+        items:
+          $ref: '#/definitions/checkout.CheckoutItem'
+        type: array
       method:
         description: |-
           Method is optional and defaults to PIX, the only instrument this
@@ -100,7 +200,21 @@ definitions:
         example: 2
         type: integer
       ticketId:
+        description: |-
+          TicketID and Quantity are the single-tier shorthand, kept because an
+          operator selling one tier at the door, and the load harness, have no
+          use for a list of one. Ignored when Items is present.
         example: tkt_a1b2c3d4
+        type: string
+    type: object
+  checkout.ConfirmRequest:
+    properties:
+      buyer:
+        $ref: '#/definitions/checkout.Buyer'
+      method:
+        enum:
+        - pix
+        example: pix
         type: string
     type: object
   checkout.ErrorResponse:
@@ -113,6 +227,49 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/checkout.OrderResponse'
+    type: object
+  checkout.OrderEventResponse:
+    properties:
+      city:
+        example: Salvador
+        type: string
+      coverUrl:
+        type: string
+      id:
+        example: evt_7c1a
+        type: string
+      name:
+        example: Festival de Verão 2026
+        type: string
+      slug:
+        example: festival-de-verao-2026
+        type: string
+      startsAt:
+        type: string
+      uf:
+        example: BA
+        type: string
+      venue:
+        example: Arena Fonte Nova
+        type: string
+    type: object
+  checkout.OrderItemResponse:
+    properties:
+      quantity:
+        example: 2
+        type: integer
+      ticketId:
+        example: tkt_a1b2c3d4
+        type: string
+      ticketTitle:
+        example: Pista
+        type: string
+      totalCents:
+        example: 48000
+        type: integer
+      unitPriceCents:
+        example: 24000
+        type: integer
     type: object
   checkout.OrderListEnvelope:
     properties:
@@ -138,10 +295,23 @@ definitions:
       buyerName:
         example: Maria Souza
         type: string
+      confirmed:
+        description: |-
+          Confirmed reports whether the buyer has supplied their details. An
+          unconfirmed order is a basket on the short cart hold and has no charge.
+        example: false
+        type: boolean
       createdAt:
         type: string
       currency:
         example: BRL
+        type: string
+      event:
+        allOf:
+        - $ref: '#/definitions/checkout.OrderEventResponse'
+        description: Event is the night, resolved for listings. Omitted when unavailable.
+      eventId:
+        example: evt_7c1a
         type: string
       holdExpiresAt:
         description: |-
@@ -151,12 +321,20 @@ definitions:
       id:
         example: ord_9f2c1d8a
         type: string
+      items:
+        description: Items is every tier on the order, never empty.
+        items:
+          $ref: '#/definitions/checkout.OrderItemResponse'
+        type: array
       paidAt:
         type: string
       payment:
         $ref: '#/definitions/checkout.PaymentResponse'
       quantity:
-        example: 2
+        description: |-
+          Quantity is the total across every line, so a client that only wants the
+          headline number does not have to add them up.
+        example: 3
         type: integer
       status:
         enum:
@@ -169,14 +347,8 @@ definitions:
         - refund_required
         example: pending_payment
         type: string
-      ticketId:
-        example: tkt_a1b2c3d4
-        type: string
       totalCents:
         example: 48000
-        type: integer
-      unitPriceCents:
-        example: 24000
         type: integer
       updatedAt:
         type: string
@@ -197,7 +369,10 @@ definitions:
           tag.
         type: string
       provider:
-        example: mercadopago
+        description: |-
+          Provider is empty until a charge exists: an order that has not been
+          charged has not been through one.
+        example: asaas
         type: string
       status:
         enum:
@@ -209,6 +384,310 @@ definitions:
         - charged_back
         - in_analysis
         example: pending
+        type: string
+    type: object
+  event.CategoryResponse:
+    properties:
+      count:
+        description: |-
+          Count lets the UI grey out an empty category instead of hiding it. A
+          filter row whose options come and go is one a buyer cannot learn.
+        type: integer
+      value:
+        example: festas_shows
+        type: string
+    type: object
+  event.CityResponse:
+    properties:
+      city:
+        type: string
+      count:
+        type: integer
+      uf:
+        type: string
+    type: object
+  event.CreateRequest:
+    properties:
+      category:
+        example: festas_shows
+        type: string
+      description:
+        type: string
+      endsAt:
+        type: string
+      location:
+        $ref: '#/definitions/event.LocationRequest'
+      name:
+        example: Festival Aurora
+        type: string
+      startsAt:
+        example: "2026-11-15T22:00:00-03:00"
+        type: string
+      status:
+        enum:
+        - draft
+        - published
+        - cancelled
+        example: draft
+        type: string
+    type: object
+  event.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  event.EventEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/event.EventResponse'
+    type: object
+  event.EventResponse:
+    properties:
+      category:
+        type: string
+      createdAt:
+        type: string
+      description:
+        type: string
+      endsAt:
+        type: string
+      id:
+        example: evt_a1b2c3d4
+        type: string
+      location:
+        $ref: '#/definitions/event.LocationResponse'
+      media:
+        items:
+          $ref: '#/definitions/event.MediaResponse'
+        type: array
+      name:
+        type: string
+      slug:
+        example: festival-aurora
+        type: string
+      startsAt:
+        type: string
+      status:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  event.FiltersEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/event.FiltersResponse'
+    type: object
+  event.FiltersResponse:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/event.CategoryResponse'
+        type: array
+      cities:
+        items:
+          $ref: '#/definitions/event.CityResponse'
+        type: array
+    type: object
+  event.ListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/event.ListingResponse'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  event.ListingResponse:
+    properties:
+      availableTickets:
+        type: integer
+      category:
+        type: string
+      createdAt:
+        type: string
+      description:
+        type: string
+      endsAt:
+        type: string
+      fromPriceCents:
+        description: |-
+          FromPriceCents is the cheapest tier still on sale. Null renders as
+          "Esgotado" rather than as "free".
+        type: integer
+      id:
+        example: evt_a1b2c3d4
+        type: string
+      location:
+        $ref: '#/definitions/event.LocationResponse'
+      media:
+        items:
+          $ref: '#/definitions/event.MediaResponse'
+        type: array
+      name:
+        type: string
+      slug:
+        example: festival-aurora
+        type: string
+      startsAt:
+        type: string
+      status:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  event.LocationRequest:
+    properties:
+      address:
+        example: Av. Alberto Craveiro, 2901
+        type: string
+      city:
+        example: Fortaleza
+        type: string
+      latitude:
+        description: |-
+          Latitude and Longitude are optional and travel together. Supplying them
+          means "a person placed this pin", and the server will not overwrite them
+          with whatever a geocoder thinks.
+        example: -3.807
+        type: number
+      longitude:
+        example: -38.522
+        type: number
+      neighborhood:
+        example: Castelão
+        type: string
+      postalCode:
+        example: 60861-630
+        type: string
+      uf:
+        example: CE
+        type: string
+      venue:
+        example: Arena Castelão
+        type: string
+    type: object
+  event.LocationResponse:
+    properties:
+      address:
+        type: string
+      city:
+        type: string
+      latitude:
+        type: number
+      longitude:
+        type: number
+      mapsUrl:
+        description: |-
+          MapsURL and WazeURL are built server-side so every client opens the same
+          place, and so a client never has to know the URL shape of a map provider.
+          Empty when the event has no coordinates.
+        type: string
+      neighborhood:
+        type: string
+      postalCode:
+        type: string
+      uf:
+        type: string
+      venue:
+        type: string
+      wazeUrl:
+        type: string
+    type: object
+  event.MediaResponse:
+    properties:
+      blurDataUrl:
+        type: string
+      contentType:
+        type: string
+      height:
+        type: integer
+      id:
+        type: string
+      kind:
+        enum:
+        - image
+        - video
+        type: string
+      position:
+        type: integer
+      sizeBytes:
+        type: integer
+      url:
+        type: string
+      width:
+        description: |-
+          Width, Height and BlurDataURL are what a client needs to reserve the
+          right box and paint something before the bytes arrive. Zero and empty
+          when the asset predates the pipeline that generates them.
+        type: integer
+    type: object
+  event.PinRequest:
+    properties:
+      latitude:
+        example: -3.807
+        type: number
+      longitude:
+        example: -38.522
+        type: number
+    type: object
+  event.TierListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/event.TierResponse'
+        type: array
+    type: object
+  event.TierResponse:
+    properties:
+      available:
+        type: integer
+      currency:
+        type: string
+      description:
+        type: string
+      eventId:
+        type: string
+      id:
+        type: string
+      priceCents:
+        description: Centavos. No float ever touches a price.
+        type: integer
+      quantity:
+        type: integer
+      sold:
+        type: integer
+      status:
+        type: string
+      title:
+        type: string
+    type: object
+  event.UpdateRequest:
+    properties:
+      category:
+        example: festas_shows
+        type: string
+      description:
+        type: string
+      endsAt:
+        type: string
+      location:
+        $ref: '#/definitions/event.LocationRequest'
+      name:
+        example: Festival Aurora
+        type: string
+      startsAt:
+        example: "2026-11-15T22:00:00-03:00"
+        type: string
+      status:
+        enum:
+        - draft
+        - published
+        - cancelled
+        example: draft
         type: string
     type: object
   ticket.ChangeStatusRequest:
@@ -224,14 +703,14 @@ definitions:
     type: object
   ticket.CreateRequest:
     properties:
-      city:
-        example: Fortaleza, CE
-        type: string
       description:
         example: Acesso à área premium com bar exclusivo.
         type: string
-      eventName:
-        example: Festival Aurora
+      eventId:
+        description: |-
+          EventID is the happening this tier sells admission to. The event owns the
+          name, venue, city, date, category and map pin.
+        example: evt_a1b2c3d4
         type: string
       priceCents:
         example: 24000
@@ -239,9 +718,6 @@ definitions:
       quantity:
         example: 500
         type: integer
-      startsAt:
-        example: "2026-11-15T19:00:00-03:00"
-        type: string
       status:
         enum:
         - draft
@@ -253,20 +729,12 @@ definitions:
       title:
         example: Pista Premium
         type: string
-      venue:
-        example: Arena Castelão
-        type: string
     type: object
   ticket.ErrorResponse:
     properties:
       error:
         example: ticket not found
         type: string
-    type: object
-  ticket.MediaEnvelope:
-    properties:
-      data:
-        $ref: '#/definitions/ticket.MediaResponse'
     type: object
   ticket.MediaResponse:
     properties:
@@ -318,11 +786,8 @@ definitions:
   ticket.TicketResponse:
     properties:
       available:
-        example: 372
+        example: 360
         type: integer
-      city:
-        example: Fortaleza, CE
-        type: string
       createdAt:
         type: string
       currency:
@@ -330,8 +795,8 @@ definitions:
         type: string
       description:
         type: string
-      eventName:
-        example: Festival Aurora
+      eventId:
+        example: evt_a1b2c3d4
         type: string
       id:
         example: tkt_a1b2c3d4
@@ -346,11 +811,16 @@ definitions:
       quantity:
         example: 500
         type: integer
+      reserved:
+        description: |-
+          Reserved is stock held by orders waiting to be paid. An operator looking
+          at a tier that is nearly gone needs to know whether it went to sales or
+          to holds, because those two have completely different answers.
+        example: 12
+        type: integer
       sold:
         example: 128
         type: integer
-      startsAt:
-        type: string
       status:
         enum:
         - draft
@@ -364,20 +834,11 @@ definitions:
         type: string
       updatedAt:
         type: string
-      venue:
-        example: Arena Castelão
-        type: string
     type: object
   ticket.UpdateRequest:
     properties:
-      city:
-        example: Fortaleza, CE
-        type: string
       description:
         example: Acesso à área premium com bar exclusivo.
-        type: string
-      eventName:
-        example: Festival Aurora
         type: string
       priceCents:
         example: 24000
@@ -385,9 +846,6 @@ definitions:
       quantity:
         example: 500
         type: integer
-      startsAt:
-        example: "2026-11-15T19:00:00-03:00"
-        type: string
       status:
         enum:
         - draft
@@ -398,9 +856,6 @@ definitions:
         type: string
       title:
         example: Pista Premium
-        type: string
-      venue:
-        example: Arena Castelão
         type: string
     type: object
 info:
@@ -463,6 +918,271 @@ paths:
       summary: Comprar ingressos
       tags:
       - Compras
+  /api/v1/events:
+    get:
+      description: Lista os eventos do operador autenticado, incluindo rascunhos.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.ListEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Listar meus eventos
+      tags:
+      - Eventos
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Dados do evento
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/event.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/event.EventEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Criar um evento
+      tags:
+      - Eventos
+  /api/v1/events/{id}:
+    delete:
+      description: Recusa com 409 se o evento ainda tiver lotes de ingressos, porque
+        esses lotes podem ter pedidos e os pedidos são o registro do dinheiro que
+        mudou de mãos.
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Removido
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Excluir um evento
+      tags:
+      - Eventos
+    get:
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.EventEnvelope'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Consultar um evento
+      tags:
+      - Eventos
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Dados do evento
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/event.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.EventEnvelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Atualizar um evento
+      tags:
+      - Eventos
+  /api/v1/events/{id}/media:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Anexa uma imagem ou vídeo ao evento, um arquivo por requisição.
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Arquivo
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/event.MediaResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Enviar mídia do evento
+      tags:
+      - Eventos
+  /api/v1/events/{id}/media/{mediaId}:
+    delete:
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: ID da mídia
+        in: path
+        name: mediaId
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Removido
+      security:
+      - BearerAuth: []
+      summary: Remover mídia do evento
+      tags:
+      - Eventos
+  /api/v1/events/{id}/pin:
+    post:
+      consumes:
+      - application/json
+      description: 'Grava as coordenadas escolhidas por uma pessoa. Elas valem mais
+        que qualquer geocodificação: uma edição posterior no endereço não as sobrescreve.'
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Coordenadas
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/event.PinRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.EventEnvelope'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Posicionar o pino no mapa
+      tags:
+      - Eventos
+  /api/v1/events/{id}/publish:
+    post:
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.EventEnvelope'
+      security:
+      - BearerAuth: []
+      summary: Publicar um evento
+      tags:
+      - Eventos
+  /api/v1/events/{id}/unpublish:
+    post:
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.EventEnvelope'
+      security:
+      - BearerAuth: []
+      summary: Despublicar um evento
+      tags:
+      - Eventos
   /api/v1/orders:
     get:
       description: Lista os pedidos do comprador autenticado, do mais recente para
@@ -483,6 +1203,10 @@ paths:
       - description: Filtrar por ingresso
         in: query
         name: ticketId
+        type: string
+      - description: Filtrar pelos pedidos de um evento
+        in: query
+        name: eventId
         type: string
       - description: Itens por página (padrão 20, máximo 100)
         in: query
@@ -582,10 +1306,66 @@ paths:
       summary: Cancelar um pedido
       tags:
       - Compras
+  /api/v1/orders/{id}/confirm:
+    post:
+      consumes:
+      - application/json
+      description: Registra nome, e-mail e documento do comprador, estende a reserva
+        para a janela de pagamento e solicita a cobrança PIX. Reservar e confirmar
+        são passos separados porque os ingressos saem do estoque assim que o comprador
+        chega ao formulário, e não depois de preenchê-lo. Confirmar duas vezes atualiza
+        os dados sem estender a reserva de novo nem criar uma segunda cobrança.
+      parameters:
+      - description: ID do pedido
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Dados do comprador
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/checkout.ConfirmRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/checkout.OrderEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "409":
+          description: A reserva expirou
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Confirmar os dados do comprador
+      tags:
+      - Compras
   /api/v1/orders/{id}/refund:
     post:
-      description: Estorna um pedido pago no provedor de pagamento e devolve os ingressos
-        ao estoque. Restrito a administradores.
+      description: Agenda o estorno de um pedido pago no provedor de pagamento e devolve
+        os ingressos ao estoque. Restrito a administradores. O estorno é processado
+        por um job durável e confirmado relendo a cobrança no provedor, então a resposta
+        é 202 e o pedido deve ser consultado até ficar `refunded`. Pedir o estorno
+        duas vezes estorna uma vez.
       parameters:
       - description: ID do pedido
         in: path
@@ -595,8 +1375,8 @@ paths:
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
+        "202":
+          description: Accepted
           schema:
             $ref: '#/definitions/checkout.OrderEnvelope'
         "401":
@@ -611,8 +1391,12 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/checkout.ErrorResponse'
-        "502":
-          description: Bad Gateway
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/checkout.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/checkout.ErrorResponse'
       security:
@@ -620,11 +1404,140 @@ paths:
       summary: Estornar um pedido
       tags:
       - Compras
+  /api/v1/public/events:
+    get:
+      description: A vitrine pública. Aceita busca textual, categoria, cidade, intervalo
+        de datas, preço máximo, apenas gratuitos, apenas com ingressos disponíveis,
+        ordenação e paginação. Só retorna eventos publicados, independentemente do
+        que o cliente enviar.
+      parameters:
+      - description: Busca por nome, local, cidade ou descrição
+        in: query
+        name: q
+        type: string
+      - description: Categoria
+        in: query
+        name: category
+        type: string
+      - description: Cidade
+        in: query
+        name: city
+        type: string
+      - description: Eventos a partir desta data (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: Eventos até esta data (RFC3339)
+        in: query
+        name: until
+        type: string
+      - description: Preço máximo em centavos do lote mais barato
+        in: query
+        name: maxPrice
+        type: integer
+      - description: Apenas eventos gratuitos
+        in: query
+        name: free
+        type: boolean
+      - description: Apenas eventos com ingressos disponíveis
+        in: query
+        name: available
+        type: boolean
+      - description: Ordenação
+        enum:
+        - relevance
+        - starts_at
+        - price
+        - created_at
+        in: query
+        name: sort
+        type: string
+      - description: Itens por página (padrão 24, máximo 60)
+        in: query
+        name: limit
+        type: integer
+      - description: Deslocamento da paginação
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.ListEnvelope'
+      summary: Listar eventos publicados
+      tags:
+      - Catálogo
+  /api/v1/public/events/{id}/tiers:
+    get:
+      description: 'Os lotes que o evento vende, do mais barato ao mais caro. Só retorna
+        lotes à venda de eventos publicados: é o que o painel de compra da página
+        do evento monta.'
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.TierListEnvelope'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+      summary: Lotes de ingressos à venda
+      tags:
+      - Catálogo
+  /api/v1/public/events/{slug}:
+    get:
+      description: 'A página pública do evento, resolvida pelo slug da URL. Um rascunho
+        responde 404 e não 403: um 403 confirmaria que o evento existe naquele endereço.'
+      parameters:
+      - description: Slug do evento
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.EventEnvelope'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/event.ErrorResponse'
+      summary: Consultar um evento publicado
+      tags:
+      - Catálogo
+  /api/v1/public/filters:
+    get:
+      description: As categorias com a contagem de eventos publicados em cada uma,
+        e as cidades com mais eventos. É o que a página de listagem usa para montar
+        os próprios filtros.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/event.FiltersEnvelope'
+      summary: Opções de filtro
+      tags:
+      - Catálogo
   /api/v1/tickets:
     get:
-      description: Lista os ingressos do evento em ordem de data de início. Aceita
-        filtros de status, busca textual por evento, título, local ou cidade, ordenação
-        e paginação.
+      description: Lista os lotes de ingressos. Aceita filtro de status, busca por
+        título ou descrição do lote, ordenação e paginação.
       parameters:
       - description: Status do ingresso
         enum:
@@ -635,7 +1548,11 @@ paths:
         in: query
         name: status
         type: string
-      - description: Busca por evento, título, local ou cidade
+      - description: Filtrar pelos lotes de um evento
+        in: query
+        name: eventId
+        type: string
+      - description: Busca por título ou descrição do lote
         in: query
         name: q
         type: string
@@ -714,8 +1631,8 @@ paths:
       - Ingressos
   /api/v1/tickets/{id}:
     delete:
-      description: Remove o ingresso e todas as mídias associadas, inclusive os arquivos
-        no armazenamento.
+      description: 'Remove o lote de ingressos. A arte do evento não é afetada: ela
+        pertence ao evento.'
       parameters:
       - description: ID do ingresso
         in: path
@@ -741,8 +1658,8 @@ paths:
       tags:
       - Ingressos
     get:
-      description: Retorna um ingresso pelo identificador, com a galeria de imagens
-        e vídeos anexada.
+      description: Retorna um lote de ingressos pelo identificador. A arte do evento
+        fica no evento, não no lote.
       parameters:
       - description: ID do ingresso
         in: path
@@ -814,94 +1731,6 @@ paths:
       summary: Atualizar um ingresso
       tags:
       - Ingressos
-  /api/v1/tickets/{id}/media:
-    post:
-      consumes:
-      - multipart/form-data
-      description: 'Envia uma imagem ou vídeo para a galeria do ingresso via multipart.
-        O arquivo vai para o Cloudflare R2 quando as credenciais estão configuradas.
-        Imagens: até 10 MB (jpeg, png, webp, avif, gif). Vídeos: até 50 MB (mp4, webm,
-        quicktime). Limite de 12 mídias por ingresso.'
-      parameters:
-      - description: ID do ingresso
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Arquivo de imagem ou vídeo
-        in: formData
-        name: file
-        required: true
-        type: file
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/ticket.MediaEnvelope'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ticket.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/ticket.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ticket.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/ticket.ErrorResponse'
-        "413":
-          description: Request Entity Too Large
-          schema:
-            $ref: '#/definitions/ticket.ErrorResponse'
-        "422":
-          description: Unprocessable Entity
-          schema:
-            $ref: '#/definitions/ticket.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Enviar uma mídia do ingresso
-      tags:
-      - Ingressos
-  /api/v1/tickets/{id}/media/{mediaId}:
-    delete:
-      description: Remove uma imagem ou vídeo da galeria do ingresso e apaga o arquivo
-        do armazenamento.
-      parameters:
-      - description: ID do ingresso
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: ID da mídia
-        in: path
-        name: mediaId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "204":
-          description: Removido
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/ticket.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ticket.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Remover uma mídia do ingresso
-      tags:
-      - Ingressos
   /api/v1/tickets/{id}/status:
     patch:
       consumes:
@@ -948,6 +1777,83 @@ paths:
       summary: Alterar o status de um ingresso
       tags:
       - Ingressos
+  /auth/email/start:
+    post:
+      consumes:
+      - application/json
+      description: 'Envia um código de seis dígitos para o e-mail informado. A resposta
+        é idêntica quer o e-mail já tenha conta ou não: de propósito, para que este
+        endpoint não possa ser usado para descobrir quem tem conta. O código vale
+        10 minutos, serve uma vez só e aceita no máximo 5 tentativas.'
+      parameters:
+      - description: E-mail
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.StartRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/auth.StartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "429":
+          description: Código pedido cedo demais, ou vezes demais
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      summary: Pedir um código de acesso por e-mail
+      tags:
+      - Autenticação
+  /auth/email/verify:
+    post:
+      consumes:
+      - application/json
+      description: 'Confere o código e abre uma sessão. Se o e-mail ainda não tinha
+        conta, ela é criada agora: entrar e cadastrar são a mesma chamada, porque
+        separá-las exigiria revelar antes se o e-mail já existe.'
+      parameters:
+      - description: Código
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.VerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.AuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "410":
+          description: O código expirou ou já foi usado
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "429":
+          description: Tentativas demais
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      summary: Entrar com o código recebido por e-mail
+      tags:
+      - Autenticação
   /auth/login:
     post:
       consumes:
@@ -998,6 +1904,81 @@ paths:
       summary: Encerrar a sessão atual
       tags:
       - Autenticação
+  /auth/phone/start:
+    post:
+      consumes:
+      - application/json
+      description: 'Envia um código para o número informado. Responde 503 enquanto
+        não houver provedor de SMS configurado: o código nunca é registrado em log
+        nem devolvido na resposta. O restante do fluxo, limite de envios, limite de
+        tentativas, expiração, é real.'
+      parameters:
+      - description: Celular
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.PhoneStartRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/auth.StartResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Pedir um código para confirmar o celular
+      tags:
+      - Autenticação
+  /auth/phone/verify:
+    post:
+      consumes:
+      - application/json
+      description: Confere o código e marca o número como confirmado na conta.
+      parameters:
+      - description: Código
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.VerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.ProfileResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Confirmar o celular com o código
+      tags:
+      - Autenticação
   /auth/refresh:
     post:
       consumes:
@@ -1024,42 +2005,6 @@ paths:
       summary: Renovar a sessão
       tags:
       - Autenticação
-  /auth/register:
-    post:
-      consumes:
-      - application/json
-      description: Cria um usuário, inicia uma sessão e envia os tokens em cookies
-        httpOnly no modo navegador. A senha deve ter ao menos 8 caracteres, maiúscula,
-        minúscula e número.
-      parameters:
-      - description: Dados do cadastro
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/auth.RegisterRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/auth.AuthResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/auth.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/auth.ErrorResponse'
-        "422":
-          description: Unprocessable Entity
-          schema:
-            $ref: '#/definitions/auth.ErrorResponse'
-      summary: Cadastrar uma conta
-      tags:
-      - Autenticação
   /user/me:
     get:
       description: Retorna a identidade ligada à sessão autenticada.
@@ -1079,6 +2024,143 @@ paths:
       summary: Consultar o usuário atual
       tags:
       - Autenticação
+  /user/password:
+    put:
+      consumes:
+      - application/json
+      description: 'Adiciona uma senha à conta, como SEGUNDA forma de entrar: a primeira
+        continua sendo o código por e-mail, e a conta funciona sem senha. Definir
+        a primeira senha exige apenas a sessão; trocar uma senha existente exige a
+        senha atual, porque uma sessão emprestada não deve bastar para trancar o dono
+        fora da própria conta.'
+      parameters:
+      - description: Senha
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.SetPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "422":
+          description: Senha fraca, ou senha atual ausente
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Definir ou trocar a senha
+      tags:
+      - Autenticação
+  /user/profile:
+    get:
+      description: 'Retorna o estado do cadastro obrigatório. O documento vem MASCARADO:
+        o cliente só precisa saber se está preenchido e se parece o documento certo.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.ProfileResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Consultar os dados cadastrais
+      tags:
+      - Autenticação
+    put:
+      consumes:
+      - application/json
+      description: Grava documento, nome completo e data de nascimento. Exigidos por
+        lei para vender ingresso no Brasil, meia-entrada é limitada por CPF e a cobrança
+        PIX não é emitida sem documento. Todos os campos são armazenados criptografados.
+      parameters:
+      - description: Dados cadastrais
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.ProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.ProfileResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "409":
+          description: O documento já pertence a outra conta
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Salvar os dados cadastrais
+      tags:
+      - Autenticação
+  /webhooks/asaas:
+    post:
+      consumes:
+      - application/json
+      description: 'Recebe as notificações de cobrança do Asaas. A requisição é autenticada
+        pelo token compartilhado do cabeçalho asaas-access-token e o processamento
+        é assíncrono: o endpoint apenas enfileira a releitura da cobrança e responde.
+        O corpo da notificação NUNCA é usado como fonte de verdade: o Asaas envia
+        a cobrança inteira, e mesmo assim o estado é sempre relido pela API, porque
+        o token não assina o corpo.'
+      parameters:
+      - description: Token compartilhado configurado no painel do Asaas
+        in: header
+        name: asaas-access-token
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Notificação ignorada (não é de cobrança)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "202":
+          description: Notificação aceita para processamento
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Webhook do Asaas
+      tags:
+      - Webhooks
   /webhooks/mercadopago:
     post:
       consumes:
@@ -1086,7 +2168,7 @@ paths:
       description: 'Recebe as notificações de pagamento do Mercado Pago. A requisição
         é autenticada pela assinatura HMAC do cabeçalho x-signature e o processamento
         acontece de forma assíncrona: o endpoint apenas enfileira a leitura do pagamento
-        e responde. O corpo da notificação nunca é usado como fonte de verdade — o
+        e responde. O corpo da notificação nunca é usado como fonte de verdade; o
         estado é sempre relido do provedor.'
       parameters:
       - description: Assinatura HMAC enviada pelo Mercado Pago

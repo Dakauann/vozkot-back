@@ -25,8 +25,8 @@ func NewOrderRepository(db *gorm.DB) *OrderRepository {
 
 // Create writes the order and its lines.
 //
-// Both, or neither. The caller is always inside a unit of work — checkout
-// reserves stock in the same transaction — so an order that committed without
+// Both, or neither. The caller is always inside a unit of work, checkout
+// reserves stock in the same transaction, so an order that committed without
 // its items is not a state this can reach. The items are written with their own
 // conflict clause because a retry that got as far as the lines before dying
 // must be able to finish rather than fail on rows it wrote itself.
@@ -79,8 +79,8 @@ func (r *OrderRepository) GetByID(ctx context.Context, id string) (*domain.Order
 // SELECT ... FOR UPDATE, not a Go mutex: the two concurrent settlements may be
 // on different machines, and the only lock they share is the database's.
 //
-// The lock is on the order row alone. The lines are immutable once written —
-// nothing in the system ever updates an order_item — so reading them outside
+// The lock is on the order row alone. The lines are immutable once written;
+// nothing in the system ever updates an order_item, so reading them outside
 // the lock cannot see a half-changed set.
 func (r *OrderRepository) GetByIDForUpdate(ctx context.Context, id string) (*domain.Order, error) {
 	var record schema.Order
@@ -247,7 +247,7 @@ func (r *OrderRepository) ClaimExpired(ctx context.Context, now time.Time, limit
 	}
 	// RETURNING gives back the order rows and nothing else, and the caller is
 	// about to release stock against every line. Loading them is not an
-	// optimisation here — without the items the sweep would release nothing.
+	// optimisation here, without the items the sweep would release nothing.
 	pointers := make([]*domain.Order, 0, len(items))
 	for index := range items {
 		pointers = append(pointers, &items[index])
@@ -290,7 +290,7 @@ func (r *OrderRepository) CountOpenHoldsForUpdate(
 ) (domain.OpenHolds, error) {
 	buyerID = strings.TrimSpace(buyerID)
 	if buyerID == "" {
-		// A sale with no account behind it — an operator at the door — has no
+		// A sale with no account behind it, an operator at the door, has no
 		// identity to count against, and nothing to serialise on.
 		return domain.OpenHolds{}, nil
 	}
@@ -350,7 +350,7 @@ func (r *OrderRepository) attachItems(ctx context.Context, orders []*domain.Orde
 
 	var records []schema.OrderItem
 	// Ordered by ticket id so an order's lines always come back in the same
-	// sequence the domain sorted them into — which is the sequence the
+	// sequence the domain sorted them into, which is the sequence the
 	// reservation loop takes its locks in.
 	if err := r.db.WithContext(ctx).
 		Where("order_id IN ?", ids).
@@ -382,7 +382,7 @@ func (r *OrderRepository) attachItems(ctx context.Context, orders []*domain.Orde
 //
 // Computed here rather than with PostgreSQL's hashtext(), which is an
 // undocumented internal whose value is not promised to be stable across major
-// versions — and a lock key that changes under an upgrade is a lock that stops
+// versions, and a lock key that changes under an upgrade is a lock that stops
 // serialising during exactly the window nobody is watching.
 func buyerLockKey(buyerID string) int32 {
 	hash := fnv.New32a()

@@ -532,7 +532,7 @@ func TestCancellingABasketReturnsEveryTier(t *testing.T) {
 // makes the lock order identical for everyone, so the cycle cannot form.
 //
 // The assertion is that NOTHING fails for a reason other than stock, and that
-// the tiers are not oversold — a deadlock would surface as neither.
+// the tiers are not oversold; a deadlock would surface as neither.
 func TestOppositeBasketsDoNotDeadlock(t *testing.T) {
 	const attempts = 24
 	b := newBasket(t, attempts, attempts)

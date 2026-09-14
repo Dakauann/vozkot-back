@@ -15,7 +15,7 @@ import (
 //
 // Thirty checkouts a minute, ten tickets each and a thirty-minute hold means one
 // account can keep nine thousand tickets off the shelf indefinitely by cycling,
-// with no money at risk and no limit ever tripped — the rate limit bounds how
+// with no money at risk and no limit ever tripped, the rate limit bounds how
 // FAST someone reserves, never how MUCH they are sitting on, and it is the
 // second number that empties an event.
 //
@@ -70,7 +70,7 @@ func TestPerTierLimitCountsTheOrderBeingPlaced(t *testing.T) {
 // to pass.
 //
 // Without it, eight simultaneous checkouts by one account all read "zero open
-// orders", all pass a limit of two, and all commit — a limit that holds only
+// orders", all pass a limit of two, and all commit; a limit that holds only
 // when nobody tries, which is the same as no limit at all against someone
 // actually trying.
 func TestHoldLimitSurvivesConcurrentCheckouts(t *testing.T) {

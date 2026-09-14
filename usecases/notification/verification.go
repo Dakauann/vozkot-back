@@ -19,7 +19,7 @@ import (
 //     having a bad minute must not mean a person cannot sign in; the job
 //     retries.
 //   - Its dedupe key is the CODE, not the address. Two codes requested for one
-//     address are two different codes and both must be sent — a key on the
+//     address are two different codes and both must be sent, a key on the
 //     address would silently drop the second, leaving somebody holding a code
 //     the server has already replaced.
 //   - It is NEVER logged, and there is no path in which it is. With no provider
@@ -27,7 +27,7 @@ import (
 //     a credential written to stdout is a credential in whatever aggregator
 //     collects stdout, retained for as long as that keeps logs, readable by
 //     everyone who can read them. "Only in development" is not a property of a
-//     log line — it is a property of a config value somebody can set anywhere.
+//     log line; it is a property of a config value somebody can set anywhere.
 
 // CodeSender queues verification codes for delivery.
 type CodeSender struct {
@@ -50,7 +50,7 @@ func NewCodeSender(notifier *Notifier, dispatcher *queueUsecase.Dispatcher) *Cod
 func (s *CodeSender) Send(ctx context.Context, destination, code string, purpose authdomain.Purpose) error {
 	if s == nil || s.notifier == nil {
 		// No provider. The honest answer is that signing in does not work right
-		// now — not a code nobody will receive, and not a code in the log.
+		// now, not a code nobody will receive, and not a code in the log.
 		return authdomain.ErrDeliveryUnavailable
 	}
 
@@ -70,7 +70,7 @@ func (s *CodeSender) Send(ctx context.Context, destination, code string, purpose
 		return err
 	}
 	if job == nil {
-		// The notifier declined it — no sender for the channel, or a
+		// The notifier declined it: no sender for the channel, or a
 		// duplicate. A sign-in that queued nothing has not been sent, and
 		// saying so beats a screen waiting for a code that is not coming.
 		return authdomain.ErrDeliveryUnavailable

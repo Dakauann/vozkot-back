@@ -19,7 +19,7 @@ import "context"
 // told about it immediately after that transaction commits. The broker makes
 // delivery instant; the row makes it exactly-once, because a consumer claims
 // the row before doing anything and a redelivered message finds it already
-// claimed. If a publish is lost, the poller still finds the row — the system
+// claimed. If a publish is lost, the poller still finds the row, the system
 // degrades to the slower path instead of losing work.
 
 // Message is the envelope on the wire. It carries ids only: the consumer reads

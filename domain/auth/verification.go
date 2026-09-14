@@ -167,7 +167,7 @@ func (c *Challenge) Live(now time.Time) error {
 }
 
 // Consume marks the challenge spent. Called only after a correct code, and
-// inside the same transaction as whatever the code authorised — a challenge
+// inside the same transaction as whatever the code authorised, a challenge
 // that was accepted but not consumed is a code that works twice.
 func (c *Challenge) Consume(now time.Time) {
 	timestamp := now.UTC()
@@ -176,7 +176,7 @@ func (c *Challenge) Consume(now time.Time) {
 
 // SameCode compares two already-hashed values in constant time.
 //
-// Used where a hash is compared to a hash — the Hasher handles the plaintext
+// Used where a hash is compared to a hash, the Hasher handles the plaintext
 // path. Kept here so no caller is tempted to write ==.
 func SameCode(left, right string) bool {
 	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1

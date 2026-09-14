@@ -144,7 +144,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (*do
 //
 //  1. Coordinates the caller supplied are kept as they are. That is an operator
 //     who dragged the pin, and a person looking at a satellite image beats any
-//     geocoder — so a later edit to the description must not quietly move the
+//     geocoder, so a later edit to the description must not quietly move the
 //     venue back to where a postcode said it was.
 //  2. An address that did not change is not looked up again. Editing a title
 //     should not spend a third-party call, and on a provider with a rate limit

@@ -32,7 +32,7 @@ func NewEventRepository(db *gorm.DB) *EventRepository {
 //
 // Without the extension the `%` similarity operator does not exist and a query
 // using it fails outright, so the search degrades to exact word matching rather
-// than erroring — slower to find a misspelling, never broken.
+// than erroring: slower to find a misspelling, never broken.
 func hasTrigram(db *gorm.DB) bool {
 	var installed int64
 	if err := db.Raw(`SELECT COUNT(*) FROM pg_extension WHERE extname = 'pg_trgm'`).Scan(&installed).Error; err != nil {
@@ -137,7 +137,7 @@ type listRow struct {
 //
 // Everything a card renders is gathered here, in one statement, because a grid
 // of twenty-four events asking each for its own cheapest price is twenty-five
-// queries — the N+1 that a listing page dies of at exactly the moment it starts
+// queries, the N+1 that a listing page dies of at exactly the moment it starts
 // being popular.
 func (r *EventRepository) List(ctx context.Context, filter domain.Filter) (domain.Page, error) {
 	filter = filter.Normalize()

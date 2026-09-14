@@ -91,6 +91,425 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lista os eventos do operador autenticado, incluindo rascunhos.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Listar meus eventos",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.ListEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Criar um evento",
+                "parameters": [
+                    {
+                        "description": "Dados do evento",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/event.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/event.EventEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Consultar um evento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.EventEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Atualizar um evento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Dados do evento",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/event.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.EventEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Recusa com 409 se o evento ainda tiver lotes de ingressos, porque esses lotes podem ter pedidos e os pedidos são o registro do dinheiro que mudou de mãos.",
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Excluir um evento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Removido"
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/media": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Anexa uma imagem ou vídeo ao evento, um arquivo por requisição.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Enviar mídia do evento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Arquivo",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/event.MediaResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/media/{mediaId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Remover mídia do evento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "ID da mídia",
+                        "name": "mediaId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Removido"
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/pin": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Grava as coordenadas escolhidas por uma pessoa. Elas valem mais que qualquer geocodificação: uma edição posterior no endereço não as sobrescreve.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Posicionar o pino no mapa",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Coordenadas",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/event.PinRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.EventEnvelope"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/publish": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Publicar um evento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.EventEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/unpublish": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Eventos"
+                ],
+                "summary": "Despublicar um evento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.EventEnvelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/orders": {
             "get": {
                 "security": [
@@ -126,6 +545,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filtrar por ingresso",
                         "name": "ticketId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtrar pelos pedidos de um evento",
+                        "name": "eventId",
                         "in": "query"
                     },
                     {
@@ -270,6 +695,82 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/orders/{id}/confirm": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Registra nome, e-mail e documento do comprador, estende a reserva para a janela de pagamento e solicita a cobrança PIX. Reservar e confirmar são passos separados porque os ingressos saem do estoque assim que o comprador chega ao formulário, e não depois de preenchê-lo. Confirmar duas vezes atualiza os dados sem estender a reserva de novo nem criar uma segunda cobrança.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Compras"
+                ],
+                "summary": "Confirmar os dados do comprador",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Dados do comprador",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ConfirmRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.OrderEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "A reserva expirou",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/orders/{id}/refund": {
             "post": {
                 "security": [
@@ -277,7 +778,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Estorna um pedido pago no provedor de pagamento e devolve os ingressos ao estoque. Restrito a administradores.",
+                "description": "Agenda o estorno de um pedido pago no provedor de pagamento e devolve os ingressos ao estoque. Restrito a administradores. O estorno é processado por um job durável e confirmado relendo a cobrança no provedor, então a resposta é 202 e o pedido deve ser consultado até ficar ` + "`" + `refunded` + "`" + `. Pedir o estorno duas vezes estorna uma vez.",
                 "produces": [
                     "application/json"
                 ],
@@ -295,8 +796,8 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "200": {
-                        "description": "OK",
+                    "202": {
+                        "description": "Accepted",
                         "schema": {
                             "$ref": "#/definitions/checkout.OrderEnvelope"
                         }
@@ -319,10 +820,200 @@ const docTemplate = `{
                             "$ref": "#/definitions/checkout.ErrorResponse"
                         }
                     },
-                    "502": {
-                        "description": "Bad Gateway",
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/checkout.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/public/events": {
+            "get": {
+                "description": "A vitrine pública. Aceita busca textual, categoria, cidade, intervalo de datas, preço máximo, apenas gratuitos, apenas com ingressos disponíveis, ordenação e paginação. Só retorna eventos publicados, independentemente do que o cliente enviar.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catálogo"
+                ],
+                "summary": "Listar eventos publicados",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Busca por nome, local, cidade ou descrição",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Categoria",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cidade",
+                        "name": "city",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Eventos a partir desta data (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Eventos até esta data (RFC3339)",
+                        "name": "until",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Preço máximo em centavos do lote mais barato",
+                        "name": "maxPrice",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Apenas eventos gratuitos",
+                        "name": "free",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Apenas eventos com ingressos disponíveis",
+                        "name": "available",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "relevance",
+                            "starts_at",
+                            "price",
+                            "created_at"
+                        ],
+                        "type": "string",
+                        "description": "Ordenação",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (padrão 24, máximo 60)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Deslocamento da paginação",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.ListEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/public/events/{id}/tiers": {
+            "get": {
+                "description": "Os lotes que o evento vende, do mais barato ao mais caro. Só retorna lotes à venda de eventos publicados: é o que o painel de compra da página do evento monta.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catálogo"
+                ],
+                "summary": "Lotes de ingressos à venda",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.TierListEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/public/events/{slug}": {
+            "get": {
+                "description": "A página pública do evento, resolvida pelo slug da URL. Um rascunho responde 404 e não 403: um 403 confirmaria que o evento existe naquele endereço.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catálogo"
+                ],
+                "summary": "Consultar um evento publicado",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Slug do evento",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.EventEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/event.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/public/filters": {
+            "get": {
+                "description": "As categorias com a contagem de eventos publicados em cada uma, e as cidades com mais eventos. É o que a página de listagem usa para montar os próprios filtros.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catálogo"
+                ],
+                "summary": "Opções de filtro",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/event.FiltersEnvelope"
                         }
                     }
                 }
@@ -335,7 +1026,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lista os ingressos do evento em ordem de data de início. Aceita filtros de status, busca textual por evento, título, local ou cidade, ordenação e paginação.",
+                "description": "Lista os lotes de ingressos. Aceita filtro de status, busca por título ou descrição do lote, ordenação e paginação.",
                 "produces": [
                     "application/json"
                 ],
@@ -358,7 +1049,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Busca por evento, título, local ou cidade",
+                        "description": "Filtrar pelos lotes de um evento",
+                        "name": "eventId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Busca por título ou descrição do lote",
                         "name": "q",
                         "in": "query"
                     },
@@ -470,7 +1167,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retorna um ingresso pelo identificador, com a galeria de imagens e vídeos anexada.",
+                "description": "Retorna um lote de ingressos pelo identificador. A arte do evento fica no evento, não no lote.",
                 "produces": [
                     "application/json"
                 ],
@@ -582,7 +1279,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Remove o ingresso e todas as mídias associadas, inclusive os arquivos no armazenamento.",
+                "description": "Remove o lote de ingressos. A arte do evento não é afetada: ela pertence ao evento.",
                 "produces": [
                     "application/json"
                 ],
@@ -595,136 +1292,6 @@ const docTemplate = `{
                         "type": "string",
                         "description": "ID do ingresso",
                         "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "Removido"
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/ticket.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/ticket.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/tickets/{id}/media": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Envia uma imagem ou vídeo para a galeria do ingresso via multipart. O arquivo vai para o Cloudflare R2 quando as credenciais estão configuradas. Imagens: até 10 MB (jpeg, png, webp, avif, gif). Vídeos: até 50 MB (mp4, webm, quicktime). Limite de 12 mídias por ingresso.",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Ingressos"
-                ],
-                "summary": "Enviar uma mídia do ingresso",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "ID do ingresso",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "file",
-                        "description": "Arquivo de imagem ou vídeo",
-                        "name": "file",
-                        "in": "formData",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/ticket.MediaEnvelope"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ticket.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/ticket.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/ticket.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/ticket.ErrorResponse"
-                        }
-                    },
-                    "413": {
-                        "description": "Request Entity Too Large",
-                        "schema": {
-                            "$ref": "#/definitions/ticket.ErrorResponse"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/ticket.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/tickets/{id}/media/{mediaId}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Remove uma imagem ou vídeo da galeria do ingresso e apaga o arquivo do armazenamento.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Ingressos"
-                ],
-                "summary": "Remover uma mídia do ingresso",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "ID do ingresso",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "ID da mídia",
-                        "name": "mediaId",
                         "in": "path",
                         "required": true
                     }
@@ -818,6 +1385,116 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/email/start": {
+            "post": {
+                "description": "Envia um código de seis dígitos para o e-mail informado. A resposta é idêntica quer o e-mail já tenha conta ou não: de propósito, para que este endpoint não possa ser usado para descobrir quem tem conta. O código vale 10 minutos, serve uma vez só e aceita no máximo 5 tentativas.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Pedir um código de acesso por e-mail",
+                "parameters": [
+                    {
+                        "description": "E-mail",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.StartRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/auth.StartResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Código pedido cedo demais, ou vezes demais",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/email/verify": {
+            "post": {
+                "description": "Confere o código e abre uma sessão. Se o e-mail ainda não tinha conta, ela é criada agora: entrar e cadastrar são a mesma chamada, porque separá-las exigiria revelar antes se o e-mail já existe.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Entrar com o código recebido por e-mail",
+                "parameters": [
+                    {
+                        "description": "Código",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.VerifyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.AuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "O código expirou ou já foi usado",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Tentativas demais",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "description": "Autentica as credenciais e abre uma sessão. Envie X-Auth-Mode: cookie para receber cookies httpOnly em vez dos tokens no corpo.",
@@ -895,6 +1572,120 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/phone/start": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Envia um código para o número informado. Responde 503 enquanto não houver provedor de SMS configurado: o código nunca é registrado em log nem devolvido na resposta. O restante do fluxo, limite de envios, limite de tentativas, expiração, é real.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Pedir um código para confirmar o celular",
+                "parameters": [
+                    {
+                        "description": "Celular",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.PhoneStartRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/auth.StartResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/phone/verify": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Confere o código e marca o número como confirmado na conta.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Confirmar o celular com o código",
+                "parameters": [
+                    {
+                        "description": "Código",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.VerifyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ProfileResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "Gone",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/refresh": {
             "post": {
                 "description": "Rotaciona o token de atualização de uso único e emite um novo token de acesso. O refresh token pode vir no corpo ou no cookie httpOnly refreshToken.",
@@ -934,58 +1725,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/auth/register": {
-            "post": {
-                "description": "Cria um usuário, inicia uma sessão e envia os tokens em cookies httpOnly no modo navegador. A senha deve ter ao menos 8 caracteres, maiúscula, minúscula e número.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Autenticação"
-                ],
-                "summary": "Cadastrar uma conta",
-                "parameters": [
-                    {
-                        "description": "Dados do cadastro",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/auth.RegisterRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/auth.AuthResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/auth.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/user/me": {
             "get": {
                 "security": [
@@ -1017,9 +1756,205 @@ const docTemplate = `{
                 }
             }
         },
+        "/user/password": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Adiciona uma senha à conta, como SEGUNDA forma de entrar: a primeira continua sendo o código por e-mail, e a conta funciona sem senha. Definir a primeira senha exige apenas a sessão; trocar uma senha existente exige a senha atual, porque uma sessão emprestada não deve bastar para trancar o dono fora da própria conta.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Definir ou trocar a senha",
+                "parameters": [
+                    {
+                        "description": "Senha",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.SetPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Senha fraca, ou senha atual ausente",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/user/profile": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retorna o estado do cadastro obrigatório. O documento vem MASCARADO: o cliente só precisa saber se está preenchido e se parece o documento certo.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Consultar os dados cadastrais",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ProfileResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Grava documento, nome completo e data de nascimento. Exigidos por lei para vender ingresso no Brasil, meia-entrada é limitada por CPF e a cobrança PIX não é emitida sem documento. Todos os campos são armazenados criptografados.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Autenticação"
+                ],
+                "summary": "Salvar os dados cadastrais",
+                "parameters": [
+                    {
+                        "description": "Dados cadastrais",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.ProfileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ProfileResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "O documento já pertence a outra conta",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/webhooks/asaas": {
+            "post": {
+                "description": "Recebe as notificações de cobrança do Asaas. A requisição é autenticada pelo token compartilhado do cabeçalho asaas-access-token e o processamento é assíncrono: o endpoint apenas enfileira a releitura da cobrança e responde. O corpo da notificação NUNCA é usado como fonte de verdade: o Asaas envia a cobrança inteira, e mesmo assim o estado é sempre relido pela API, porque o token não assina o corpo.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Webhooks"
+                ],
+                "summary": "Webhook do Asaas",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token compartilhado configurado no painel do Asaas",
+                        "name": "asaas-access-token",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Notificação ignorada (não é de cobrança)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "202": {
+                        "description": "Notificação aceita para processamento",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/webhooks/mercadopago": {
             "post": {
-                "description": "Recebe as notificações de pagamento do Mercado Pago. A requisição é autenticada pela assinatura HMAC do cabeçalho x-signature e o processamento acontece de forma assíncrona: o endpoint apenas enfileira a leitura do pagamento e responde. O corpo da notificação nunca é usado como fonte de verdade — o estado é sempre relido do provedor.",
+                "description": "Recebe as notificações de pagamento do Mercado Pago. A requisição é autenticada pela assinatura HMAC do cabeçalho x-signature e o processamento acontece de forma assíncrona: o endpoint apenas enfileira a leitura do pagamento e responde. O corpo da notificação nunca é usado como fonte de verdade; o estado é sempre relido do provedor.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1150,6 +2085,74 @@ const docTemplate = `{
                 }
             }
         },
+        "auth.PhoneStartRequest": {
+            "type": "object",
+            "properties": {
+                "phone": {
+                    "type": "string",
+                    "example": "(84) 99440-9624"
+                }
+            }
+        },
+        "auth.ProfileRequest": {
+            "type": "object",
+            "properties": {
+                "birthDate": {
+                    "type": "string",
+                    "example": "1994-03-21"
+                },
+                "document": {
+                    "type": "string",
+                    "example": "529.982.247-25"
+                },
+                "documentType": {
+                    "type": "string",
+                    "enum": [
+                        "cpf",
+                        "cnpj",
+                        "passport"
+                    ],
+                    "example": "cpf"
+                },
+                "legalName": {
+                    "type": "string",
+                    "example": "Maria Souza"
+                }
+            }
+        },
+        "auth.ProfileResponse": {
+            "type": "object",
+            "properties": {
+                "birthDate": {
+                    "type": "string",
+                    "example": "1994-03-21"
+                },
+                "complete": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "documentMask": {
+                    "type": "string",
+                    "example": "529.***.***-25"
+                },
+                "documentType": {
+                    "type": "string",
+                    "example": "cpf"
+                },
+                "legalName": {
+                    "type": "string",
+                    "example": "Maria Souza"
+                },
+                "phoneMask": {
+                    "type": "string",
+                    "example": "(84) *****-9624"
+                },
+                "phoneVerified": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
         "auth.RefreshTokenRequest": {
             "type": "object",
             "properties": {
@@ -1159,20 +2162,41 @@ const docTemplate = `{
                 }
             }
         },
-        "auth.RegisterRequest": {
+        "auth.SetPasswordRequest": {
+            "type": "object",
+            "properties": {
+                "current": {
+                    "description": "Current is required only when the account already has a password.",
+                    "type": "string"
+                },
+                "new": {
+                    "type": "string",
+                    "example": "UmaSenhaForte1"
+                }
+            }
+        },
+        "auth.StartRequest": {
             "type": "object",
             "properties": {
                 "email": {
                     "type": "string",
-                    "example": "maria@empresa.com.br"
-                },
-                "name": {
+                    "example": "maria@exemplo.com.br"
+                }
+            }
+        },
+        "auth.StartResponse": {
+            "type": "object",
+            "properties": {
+                "challengeId": {
                     "type": "string",
-                    "example": "Maria Silva"
+                    "example": "vch_9f2c1d8a"
                 },
-                "password": {
-                    "type": "string",
-                    "example": "SenhaForte1"
+                "expiresAt": {
+                    "type": "string"
+                },
+                "resendAt": {
+                    "description": "ResendAt is when another code may be requested, so the screen can show a\nreal countdown instead of guessing at the server's rule.",
+                    "type": "string"
                 }
             }
         },
@@ -1197,6 +2221,19 @@ const docTemplate = `{
                 }
             }
         },
+        "auth.VerifyRequest": {
+            "type": "object",
+            "properties": {
+                "challengeId": {
+                    "type": "string",
+                    "example": "vch_9f2c1d8a"
+                },
+                "code": {
+                    "type": "string",
+                    "example": "481905"
+                }
+            }
+        },
         "checkout.Buyer": {
             "type": "object",
             "properties": {
@@ -1206,7 +2243,7 @@ const docTemplate = `{
                     "example": "12345678909"
                 },
                 "email": {
-                    "description": "Email receives the ingresso and identifies the payer at Mercado Pago.",
+                    "description": "Email receives the ingresso, and identifies the payer to the provider.",
                     "type": "string",
                     "example": "maria@exemplo.com.br"
                 },
@@ -1216,11 +2253,41 @@ const docTemplate = `{
                 }
             }
         },
+        "checkout.CheckoutItem": {
+            "type": "object",
+            "properties": {
+                "quantity": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "ticketId": {
+                    "type": "string",
+                    "example": "tkt_a1b2c3d4"
+                }
+            }
+        },
         "checkout.CheckoutRequest": {
             "type": "object",
             "properties": {
                 "buyer": {
-                    "$ref": "#/definitions/checkout.Buyer"
+                    "description": "Buyer is optional here. The browser reserves first and supplies the buyer\nat /confirm, so that the tickets come off the shelf while the form is\nbeing filled in rather than after it. Supplying it here does both at\nonce.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/checkout.Buyer"
+                        }
+                    ]
+                },
+                "confirm": {
+                    "description": "Confirm asks for the charge immediately, instead of waiting for the\nconfirm step. It requires Buyer to be complete.",
+                    "type": "boolean",
+                    "example": false
+                },
+                "items": {
+                    "description": "Items is the basket. Every tier must belong to the same event.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/checkout.CheckoutItem"
+                    }
                 },
                 "method": {
                     "description": "Method is optional and defaults to PIX, the only instrument this\nintegration can issue from a server.",
@@ -1235,8 +2302,24 @@ const docTemplate = `{
                     "example": 2
                 },
                 "ticketId": {
+                    "description": "TicketID and Quantity are the single-tier shorthand, kept because an\noperator selling one tier at the door, and the load harness, have no\nuse for a list of one. Ignored when Items is present.",
                     "type": "string",
                     "example": "tkt_a1b2c3d4"
+                }
+            }
+        },
+        "checkout.ConfirmRequest": {
+            "type": "object",
+            "properties": {
+                "buyer": {
+                    "$ref": "#/definitions/checkout.Buyer"
+                },
+                "method": {
+                    "type": "string",
+                    "enum": [
+                        "pix"
+                    ],
+                    "example": "pix"
                 }
             }
         },
@@ -1254,6 +2337,66 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/checkout.OrderResponse"
+                }
+            }
+        },
+        "checkout.OrderEventResponse": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "example": "Salvador"
+                },
+                "coverUrl": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "evt_7c1a"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Festival de Verão 2026"
+                },
+                "slug": {
+                    "type": "string",
+                    "example": "festival-de-verao-2026"
+                },
+                "startsAt": {
+                    "type": "string"
+                },
+                "uf": {
+                    "type": "string",
+                    "example": "BA"
+                },
+                "venue": {
+                    "type": "string",
+                    "example": "Arena Fonte Nova"
+                }
+            }
+        },
+        "checkout.OrderItemResponse": {
+            "type": "object",
+            "properties": {
+                "quantity": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "ticketId": {
+                    "type": "string",
+                    "example": "tkt_a1b2c3d4"
+                },
+                "ticketTitle": {
+                    "type": "string",
+                    "example": "Pista"
+                },
+                "totalCents": {
+                    "type": "integer",
+                    "example": 48000
+                },
+                "unitPriceCents": {
+                    "type": "integer",
+                    "example": 24000
                 }
             }
         },
@@ -1291,12 +2434,29 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Maria Souza"
                 },
+                "confirmed": {
+                    "description": "Confirmed reports whether the buyer has supplied their details. An\nunconfirmed order is a basket on the short cart hold and has no charge.",
+                    "type": "boolean",
+                    "example": false
+                },
                 "createdAt": {
                     "type": "string"
                 },
                 "currency": {
                     "type": "string",
                     "example": "BRL"
+                },
+                "event": {
+                    "description": "Event is the night, resolved for listings. Omitted when unavailable.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/checkout.OrderEventResponse"
+                        }
+                    ]
+                },
+                "eventId": {
+                    "type": "string",
+                    "example": "evt_7c1a"
                 },
                 "holdExpiresAt": {
                     "description": "HoldExpiresAt is when the reserved tickets go back on sale. It is the\nclock a checkout screen counts down.",
@@ -1306,6 +2466,13 @@ const docTemplate = `{
                     "type": "string",
                     "example": "ord_9f2c1d8a"
                 },
+                "items": {
+                    "description": "Items is every tier on the order, never empty.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/checkout.OrderItemResponse"
+                    }
+                },
                 "paidAt": {
                     "type": "string"
                 },
@@ -1313,8 +2480,9 @@ const docTemplate = `{
                     "$ref": "#/definitions/checkout.PaymentResponse"
                 },
                 "quantity": {
+                    "description": "Quantity is the total across every line, so a client that only wants the\nheadline number does not have to add them up.",
                     "type": "integer",
-                    "example": 2
+                    "example": 3
                 },
                 "status": {
                     "type": "string",
@@ -1329,17 +2497,9 @@ const docTemplate = `{
                     ],
                     "example": "pending_payment"
                 },
-                "ticketId": {
-                    "type": "string",
-                    "example": "tkt_a1b2c3d4"
-                },
                 "totalCents": {
                     "type": "integer",
                     "example": 48000
-                },
-                "unitPriceCents": {
-                    "type": "integer",
-                    "example": 24000
                 },
                 "updatedAt": {
                     "type": "string"
@@ -1366,8 +2526,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
+                    "description": "Provider is empty until a charge exists: an order that has not been\ncharged has not been through one.",
                     "type": "string",
-                    "example": "mercadopago"
+                    "example": "asaas"
                 },
                 "status": {
                     "type": "string",
@@ -1381,6 +2542,434 @@ const docTemplate = `{
                         "in_analysis"
                     ],
                     "example": "pending"
+                }
+            }
+        },
+        "event.CategoryResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "description": "Count lets the UI grey out an empty category instead of hiding it. A\nfilter row whose options come and go is one a buyer cannot learn.",
+                    "type": "integer"
+                },
+                "value": {
+                    "type": "string",
+                    "example": "festas_shows"
+                }
+            }
+        },
+        "event.CityResponse": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "uf": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.CreateRequest": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "example": "festas_shows"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "endsAt": {
+                    "type": "string"
+                },
+                "location": {
+                    "$ref": "#/definitions/event.LocationRequest"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Festival Aurora"
+                },
+                "startsAt": {
+                    "type": "string",
+                    "example": "2026-11-15T22:00:00-03:00"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "published",
+                        "cancelled"
+                    ],
+                    "example": "draft"
+                }
+            }
+        },
+        "event.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.EventEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/event.EventResponse"
+                }
+            }
+        },
+        "event.EventResponse": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "endsAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "evt_a1b2c3d4"
+                },
+                "location": {
+                    "$ref": "#/definitions/event.LocationResponse"
+                },
+                "media": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.MediaResponse"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string",
+                    "example": "festival-aurora"
+                },
+                "startsAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.FiltersEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/event.FiltersResponse"
+                }
+            }
+        },
+        "event.FiltersResponse": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.CategoryResponse"
+                    }
+                },
+                "cities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.CityResponse"
+                    }
+                }
+            }
+        },
+        "event.ListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.ListingResponse"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "event.ListingResponse": {
+            "type": "object",
+            "properties": {
+                "availableTickets": {
+                    "type": "integer"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "endsAt": {
+                    "type": "string"
+                },
+                "fromPriceCents": {
+                    "description": "FromPriceCents is the cheapest tier still on sale. Null renders as\n\"Esgotado\" rather than as \"free\".",
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "evt_a1b2c3d4"
+                },
+                "location": {
+                    "$ref": "#/definitions/event.LocationResponse"
+                },
+                "media": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.MediaResponse"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string",
+                    "example": "festival-aurora"
+                },
+                "startsAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.LocationRequest": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "example": "Av. Alberto Craveiro, 2901"
+                },
+                "city": {
+                    "type": "string",
+                    "example": "Fortaleza"
+                },
+                "latitude": {
+                    "description": "Latitude and Longitude are optional and travel together. Supplying them\nmeans \"a person placed this pin\", and the server will not overwrite them\nwith whatever a geocoder thinks.",
+                    "type": "number",
+                    "example": -3.807
+                },
+                "longitude": {
+                    "type": "number",
+                    "example": -38.522
+                },
+                "neighborhood": {
+                    "type": "string",
+                    "example": "Castelão"
+                },
+                "postalCode": {
+                    "type": "string",
+                    "example": "60861-630"
+                },
+                "uf": {
+                    "type": "string",
+                    "example": "CE"
+                },
+                "venue": {
+                    "type": "string",
+                    "example": "Arena Castelão"
+                }
+            }
+        },
+        "event.LocationResponse": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string"
+                },
+                "city": {
+                    "type": "string"
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "longitude": {
+                    "type": "number"
+                },
+                "mapsUrl": {
+                    "description": "MapsURL and WazeURL are built server-side so every client opens the same\nplace, and so a client never has to know the URL shape of a map provider.\nEmpty when the event has no coordinates.",
+                    "type": "string"
+                },
+                "neighborhood": {
+                    "type": "string"
+                },
+                "postalCode": {
+                    "type": "string"
+                },
+                "uf": {
+                    "type": "string"
+                },
+                "venue": {
+                    "type": "string"
+                },
+                "wazeUrl": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.MediaResponse": {
+            "type": "object",
+            "properties": {
+                "blurDataUrl": {
+                    "type": "string"
+                },
+                "contentType": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "image",
+                        "video"
+                    ]
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "sizeBytes": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "width": {
+                    "description": "Width, Height and BlurDataURL are what a client needs to reserve the\nright box and paint something before the bytes arrive. Zero and empty\nwhen the asset predates the pipeline that generates them.",
+                    "type": "integer"
+                }
+            }
+        },
+        "event.PinRequest": {
+            "type": "object",
+            "properties": {
+                "latitude": {
+                    "type": "number",
+                    "example": -3.807
+                },
+                "longitude": {
+                    "type": "number",
+                    "example": -38.522
+                }
+            }
+        },
+        "event.TierListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/event.TierResponse"
+                    }
+                }
+            }
+        },
+        "event.TierResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "integer"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "eventId": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "priceCents": {
+                    "description": "Centavos. No float ever touches a price.",
+                    "type": "integer"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "sold": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "event.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "example": "festas_shows"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "endsAt": {
+                    "type": "string"
+                },
+                "location": {
+                    "$ref": "#/definitions/event.LocationRequest"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Festival Aurora"
+                },
+                "startsAt": {
+                    "type": "string",
+                    "example": "2026-11-15T22:00:00-03:00"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "published",
+                        "cancelled"
+                    ],
+                    "example": "draft"
                 }
             }
         },
@@ -1402,17 +2991,14 @@ const docTemplate = `{
         "ticket.CreateRequest": {
             "type": "object",
             "properties": {
-                "city": {
-                    "type": "string",
-                    "example": "Fortaleza, CE"
-                },
                 "description": {
                     "type": "string",
                     "example": "Acesso à área premium com bar exclusivo."
                 },
-                "eventName": {
+                "eventId": {
+                    "description": "EventID is the happening this tier sells admission to. The event owns the\nname, venue, city, date, category and map pin.",
                     "type": "string",
-                    "example": "Festival Aurora"
+                    "example": "evt_a1b2c3d4"
                 },
                 "priceCents": {
                     "type": "integer",
@@ -1421,10 +3007,6 @@ const docTemplate = `{
                 "quantity": {
                     "type": "integer",
                     "example": 500
-                },
-                "startsAt": {
-                    "type": "string",
-                    "example": "2026-11-15T19:00:00-03:00"
                 },
                 "status": {
                     "type": "string",
@@ -1439,10 +3021,6 @@ const docTemplate = `{
                 "title": {
                     "type": "string",
                     "example": "Pista Premium"
-                },
-                "venue": {
-                    "type": "string",
-                    "example": "Arena Castelão"
                 }
             }
         },
@@ -1452,14 +3030,6 @@ const docTemplate = `{
                 "error": {
                     "type": "string",
                     "example": "ticket not found"
-                }
-            }
-        },
-        "ticket.MediaEnvelope": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/ticket.MediaResponse"
                 }
             }
         },
@@ -1535,11 +3105,7 @@ const docTemplate = `{
             "properties": {
                 "available": {
                     "type": "integer",
-                    "example": 372
-                },
-                "city": {
-                    "type": "string",
-                    "example": "Fortaleza, CE"
+                    "example": 360
                 },
                 "createdAt": {
                     "type": "string"
@@ -1551,9 +3117,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
-                "eventName": {
+                "eventId": {
                     "type": "string",
-                    "example": "Festival Aurora"
+                    "example": "evt_a1b2c3d4"
                 },
                 "id": {
                     "type": "string",
@@ -1573,12 +3139,14 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 500
                 },
+                "reserved": {
+                    "description": "Reserved is stock held by orders waiting to be paid. An operator looking\nat a tier that is nearly gone needs to know whether it went to sales or\nto holds, because those two have completely different answers.",
+                    "type": "integer",
+                    "example": 12
+                },
                 "sold": {
                     "type": "integer",
                     "example": 128
-                },
-                "startsAt": {
-                    "type": "string"
                 },
                 "status": {
                     "type": "string",
@@ -1596,27 +3164,15 @@ const docTemplate = `{
                 },
                 "updatedAt": {
                     "type": "string"
-                },
-                "venue": {
-                    "type": "string",
-                    "example": "Arena Castelão"
                 }
             }
         },
         "ticket.UpdateRequest": {
             "type": "object",
             "properties": {
-                "city": {
-                    "type": "string",
-                    "example": "Fortaleza, CE"
-                },
                 "description": {
                     "type": "string",
                     "example": "Acesso à área premium com bar exclusivo."
-                },
-                "eventName": {
-                    "type": "string",
-                    "example": "Festival Aurora"
                 },
                 "priceCents": {
                     "type": "integer",
@@ -1625,10 +3181,6 @@ const docTemplate = `{
                 "quantity": {
                     "type": "integer",
                     "example": 500
-                },
-                "startsAt": {
-                    "type": "string",
-                    "example": "2026-11-15T19:00:00-03:00"
                 },
                 "status": {
                     "type": "string",
@@ -1643,10 +3195,6 @@ const docTemplate = `{
                 "title": {
                     "type": "string",
                     "example": "Pista Premium"
-                },
-                "venue": {
-                    "type": "string",
-                    "example": "Arena Castelão"
                 }
             }
         }

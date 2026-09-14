@@ -17,7 +17,7 @@ import (
 
 // The queue under test is the PostgreSQL table, and the broker is RabbitMQ.
 // Exclusive claiming, dedupe among open jobs and stale reclaim are all
-// properties of SQL statements — a map with a mutex would only prove that a
+// properties of SQL statements; a map with a mutex would only prove that a
 // map with a mutex works.
 
 // newQueue returns the real queue plus a job type unique to this test, so its
@@ -193,7 +193,7 @@ func TestDedupeKeyCollapsesOpenDuplicatesOnly(t *testing.T) {
 		t.Fatalf("pending = %d, want 1: five redeliveries of one event are one read", pending)
 	}
 
-	// Once the first is done the key is free again — the partial unique index
+	// Once the first is done the key is free again, the partial unique index
 	// covers open jobs only, so a later event for the same payment is not
 	// swallowed forever.
 	worker := NewWorker(jobs)
@@ -209,7 +209,7 @@ func TestDedupeKeyCollapsesOpenDuplicatesOnly(t *testing.T) {
 
 // TestDuplicateWhileRunningRerunsTheJobOnce is the race the rerun flag
 // exists for: the running attempt may have read the provider before the event
-// the duplicate announces, so the job runs again — once — instead of finishing.
+// the duplicate announces, so the job runs again, once, instead of finishing.
 func TestDuplicateWhileRunningRerunsTheJobOnce(t *testing.T) {
 	jobs, jobType := newQueue(t)
 	ctx := context.Background()
@@ -409,6 +409,19 @@ func TestSchedulerEnqueuesOneSweepPerPeriod(t *testing.T) {
 			jobType+":sweep:20010913T%").Scan(&total)
 		return total
 	}
+	// Counts the sweeps ever queued, finished ones included. `scheduled` cannot
+	// see those, and a sweep that has FINISHED is the whole problem below.
+	everScheduled := func(jobType string) int64 {
+		var total int64
+		db.Raw("SELECT COUNT(*) FROM jobs WHERE dedupe_key LIKE ?",
+			jobType+":sweep:20010913T%").Scan(&total)
+		return total
+	}
+	// Stands in for a worker: claims the sweep that is due and finishes it.
+	run := func(jobType string, now time.Time) {
+		db.Exec(`UPDATE jobs SET status = 'done' WHERE dedupe_key LIKE ? AND status = 'pending' AND run_at <= ?`,
+			jobType+":sweep:20010913T%", now.UTC())
+	}
 
 	// Many instances ticking in the same period produce one sweep each, not one
 	// per instance.
@@ -429,7 +442,7 @@ func TestSchedulerEnqueuesOneSweepPerPeriod(t *testing.T) {
 	// The cadences differ because the work does. Releasing a lapsed hold and
 	// recovering a lost notification are minutes-matter jobs with a buyer
 	// waiting. Re-reading orders that already settled catches a refund
-	// notification nobody received — running that every minute would spend a
+	// notification nobody received; running that every minute would spend a
 	// provider call per paid order per minute to catch something that happens a
 	// few times a day.
 	scheduler.now = func() time.Time { return at(12, 45) }
@@ -444,12 +457,43 @@ func TestSchedulerEnqueuesOneSweepPerPeriod(t *testing.T) {
 		t.Fatalf("settled-order audits = %d within one hour, want 1: the hourly sweep ran on a minute cadence", got)
 	}
 
-	// The next hour turns it over.
-	scheduler.now = func() time.Time { return at(13, 5) }
+	// The hour turns over and the sweep actually RUNS. This is the state the
+	// cadence used to lose track of.
+	//
+	// The unique index behind a dedupe key covers only OPEN jobs, on purpose: a
+	// completed "sync order X" must never block the next sync of order X. So a
+	// finished sweep releases its key, and if sweeps were queued to run
+	// immediately the very next tick would insert the same bucket again with
+	// nothing left to conflict with. That is how the hourly audit came to run
+	// once a minute in a real deployment; sixty provider reads per settled
+	// order per hour, for a safety net that catches something a few times a
+	// day. Queuing it for the NEXT boundary keeps the row pending across the
+	// whole period, so the key is held for exactly as long as the period lasts.
+	scheduler.now = func() time.Time { return at(13, 0) }
 	scheduler.Tick(context.Background())
+	run(domain.TypeAuditSettled, at(13, 0))
 
-	if got := scheduled(domain.TypeAuditSettled); got != 2 {
-		t.Fatalf("settled-order audits = %d in a new hour, want 2", got)
+	if got := everScheduled(domain.TypeAuditSettled); got != 2 {
+		t.Fatalf("settled-order audits = %d once the first had run, want 2", got)
+	}
+
+	for _, minute := range []int{1, 2, 30, 59} {
+		scheduler.now = func() time.Time { return at(13, minute) }
+		scheduler.Tick(context.Background())
+		run(domain.TypeAuditSettled, at(13, minute))
+	}
+
+	if got := everScheduled(domain.TypeAuditSettled); got != 2 {
+		t.Fatalf("settled-order audits = %d after ticking through an hour, want 2: a finished sweep freed its key and every tick re-queued it", got)
+	}
+
+	// And the minute sweeps are unaffected: they still turn over every minute,
+	// which is what they are for.
+	before := everScheduled(domain.TypeExpireHolds)
+	scheduler.now = func() time.Time { return at(14, 7) }
+	scheduler.Tick(context.Background())
+	if got := everScheduled(domain.TypeExpireHolds); got != before+1 {
+		t.Fatalf("hold sweeps = %d in a new minute, want %d", got, before+1)
 	}
 }
 
@@ -530,7 +574,7 @@ func TestBrokerDeliversAPublishedJobToAWorker(t *testing.T) {
 		t.Fatal("the job never reached the worker through the broker")
 	}
 
-	// Redelivered by the broker — or published twice — the same message must
+	// Redelivered by the broker, or published twice, the same message must
 	// not run the job again.
 	NewDispatcher(broker).Dispatch(ctx, job)
 	select {

@@ -25,8 +25,8 @@ type User struct {
 	// on every sign-in, it carries a unique constraint, and it is already in
 	// the logs of every mail server the message passed through. Encrypting it
 	// would buy a blind index and lose the ability to read the table, while the
-	// fields that actually enable impersonation — document, legal name, date of
-	// birth — are the ones sealed below.
+	// fields that actually enable impersonation: document, legal name, date of
+	// birth; are the ones sealed below.
 	Email string `gorm:"not null;type:varchar(320);uniqueIndex:idx_users_email"`
 	// PasswordHash is empty for accounts created by a sign-in code, which is
 	// every account made after passwordless sign-in landed. It stays on the
@@ -42,7 +42,7 @@ type User struct {
 	// is needed to know how to read the number beside it.
 	DocumentType string `gorm:"type:varchar(16);not null;default:''"`
 	// Document is ciphertext. DocumentBlind is its searchable companion, and
-	// it is UNIQUE — which is what stops one CPF being spread across several
+	// it is UNIQUE, which is what stops one CPF being spread across several
 	// accounts to get around a per-document purchase cap.
 	Document      piigorm.EncryptedString `gorm:"type:bytea"`
 	DocumentBlind piigorm.BlindIndex      `gorm:"type:bytea;uniqueIndex:idx_users_document_blind"`
@@ -71,7 +71,7 @@ func (User) TableName() string { return "users" }
 //
 // Nothing in this table is readable as a list of who is signing in: the
 // destination is stored sealed, and the only searchable form of it is a blind
-// index. The code itself is never here — only a slow hash of it.
+// index. The code itself is never here, only a slow hash of it.
 type VerificationChallenge struct {
 	ID      string `gorm:"primaryKey;type:varchar(32)"`
 	Purpose string `gorm:"not null;type:varchar(32);index:idx_challenges_lookup,priority:1"`

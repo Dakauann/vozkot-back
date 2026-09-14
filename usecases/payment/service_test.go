@@ -31,8 +31,8 @@ import (
 
 // The provider is stubbed at the HTTP boundary and nowhere else: requests go
 // through the real Mercado Pago client and adapter, so what is under test is
-// the settlement rules AND the wire format together. The stub is stateful — a
-// payment it created can later be moved to approved, rejected or refunded — so
+// the settlement rules AND the wire format together. The stub is stateful, a
+// payment it created can later be moved to approved, rejected or refunded, so
 // each test drives the same sequence a real webhook-and-fetch would.
 
 type stubProvider struct {
@@ -285,7 +285,7 @@ func (h *harness) expire(t *testing.T, item *orderdomain.Order) {
 }
 
 // expireOrder is expire without a *testing.T, so it can be called from the
-// provider stub's goroutine — where t.Fatalf would be illegal.
+// provider stub's goroutine, where t.Fatalf would be illegal.
 func (h *harness) expireOrder(orderID string) error {
 	ctx := context.Background()
 	stored, err := h.orders.GetByID(ctx, orderID)
@@ -817,7 +817,7 @@ func TestWebhookBeforeChargeResponseIsPersistedStillSettles(t *testing.T) {
 // that concurrent workers made reachable, and it is a money bug.
 //
 // Creating a charge is a round trip to Mercado Pago, and the order can move
-// during it — most often because the hold expired and the tickets went back on
+// during it: most often because the hold expired and the tickets went back on
 // sale, which is exactly what happens when the provider is slow enough for the
 // job to be retried for half an hour. The copy of the order read BEFORE that
 // round trip is stale by the time it comes back, and writing it back would put

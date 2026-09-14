@@ -3,7 +3,7 @@
 //
 // Today every message leaves as email through Resend. The next one leaves over
 // WhatsApp, and when it does the only thing that changes is which Sender the
-// container registers for that channel — not checkout, not settlement, not the
+// container registers for that channel, not checkout, not settlement, not the
 // queue, not one call site. That is the whole reason this package exists: a
 // Request names WHO to tell, WHAT happened and on WHICH channel, and nothing
 // above infra ever names a provider or a body format.
@@ -29,7 +29,7 @@ type Channel string
 
 const (
 	ChannelEmail Channel = "email"
-	// The next channels land here — whatsapp, sms — each one a Sender in infra
+	// The next channels land here, whatsapp, sms, each one a Sender in infra
 	// and no change above it.
 )
 
@@ -101,7 +101,7 @@ func (r Recipient) Address(channel Channel) string {
 // Data is a SNAPSHOT, not a set of ids, and that is the one place this package
 // departs from the queue's "carry ids, read current state" rule. A receipt
 // states what was true when the buyer paid. Re-reading the order an hour later
-// — after an operator renamed the event, or corrected a venue — would email a
+//, after an operator renamed the event, or corrected a venue, would email a
 // different receipt than the one the money was taken for.
 type Request struct {
 	Channel   Channel
@@ -112,7 +112,7 @@ type Request struct {
 	Subject string
 	Data    map[string]any
 	// DedupeKey makes the send at-most-once for one logical event. It becomes
-	// the job's dedupe key, so the database — not a cache, not a mutex —
+	// the job's dedupe key, so the database, not a cache, not a mutex,
 	// decides whether a second "your payment arrived" is a duplicate.
 	DedupeKey string
 }
@@ -153,7 +153,7 @@ func (r Request) Validate() error {
 // Higher than the payment jobs' budget, and for the opposite reason. A charge
 // that will not go through needs a human quickly; a receipt only needs the
 // provider to come back. With the queue's five-minute backoff ceiling, twenty
-// attempts ride out roughly an hour of Resend being down — long enough that a
+// attempts ride out roughly an hour of Resend being down, long enough that a
 // provider incident costs nobody their ticket confirmation, short enough that
 // a genuinely bad address still lands in the dead list the same shift.
 const MaxDeliveryAttempts = 20

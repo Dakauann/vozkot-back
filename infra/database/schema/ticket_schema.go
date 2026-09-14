@@ -19,7 +19,7 @@ type Ticket struct {
 	// Declared `not null` because that is what the table actually is once the
 	// migration has run, and the two MUST agree: a struct that says nullable
 	// against a column that is not sends AutoMigrate into altering the column
-	// on every single boot, which is DDL in steady state — an ACCESS EXCLUSIVE
+	// on every single boot, which is DDL in steady state, an ACCESS EXCLUSIVE
 	// lock taken against live traffic, forever. It deadlocked a test run that
 	// way before this comment existed.
 	//

@@ -11,7 +11,6 @@ import (
 	eventHTTP "vozkot/delivery/http/event"
 	"vozkot/delivery/http/httpx"
 	ticketHTTP "vozkot/delivery/http/ticket"
-	webhooksHTTP "vozkot/delivery/http/webhooks"
 	"vozkot/infra/http/middleware"
 )
 
@@ -29,6 +28,15 @@ type Middleware interface {
 // A struct rather than a parameter list: the surface grows with the product,
 // and a call site with eight positional arguments is one rename away from
 // passing the wrong handler to the wrong route.
+// WebhookRegistrar mounts one provider's callback route.
+//
+// An interface rather than a concrete handler so the router does not name a
+// payment provider. Which one is mounted is decided once, in the container,
+// from PAYMENT_PROVIDER, and this file stays true whichever it is.
+type WebhookRegistrar interface {
+	Register(router *http.ServeMux)
+}
+
 type Dependencies struct {
 	Auth    *authHTTP.Handler
 	Tickets *ticketHTTP.Handler
@@ -36,9 +44,9 @@ type Dependencies struct {
 	Events   *eventHTTP.Handler
 	Checkout *checkoutHTTP.Handler
 	// Webhooks is nil when no payment provider is configured, and the route is
-	// then not mounted at all — a webhook endpoint that cannot verify a
+	// then not mounted at all; a webhook endpoint that cannot verify a
 	// signature must not exist.
-	Webhooks       *webhooksHTTP.MercadoPagoHandler
+	Webhooks       WebhookRegistrar
 	AuthMiddleware AuthMiddleware
 	// CheckoutLimit caps how often one caller may reserve inventory. Nil when
 	// Redis is not configured, and then only the per-account limit is absent;
@@ -125,7 +133,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	router.Handle("/api/v1/checkout", checkout)
 
-	// The webhook is public by necessity — the provider has no session — and
+	// The webhook is public by necessity, the provider has no session, and
 	// authenticated by its HMAC signature instead.
 	//
 	// Deliberately NOT rate limited, and it must stay that way. Every
@@ -135,8 +143,8 @@ func NewRouter(deps Dependencies) http.Handler {
 	// than nothing: a 429 makes Mercado Pago redeliver, which adds load rather
 	// than shedding it, and every rejected delivery is a buyer who has paid
 	// waiting on the reconciliation sweep instead of on a webhook. The endpoint
-	// is already cheap on purpose — one HMAC and one INSERT … ON CONFLICT, no
-	// provider call, no order read — and a forgery costs a 401. Pace this at the
+	// is already cheap on purpose: one HMAC and one INSERT … ON CONFLICT, no
+	// provider call, no order read, and a forgery costs a 401. Pace this at the
 	// edge by source address if it ever needs pacing, never here.
 	if deps.Webhooks != nil {
 		deps.Webhooks.Register(router)

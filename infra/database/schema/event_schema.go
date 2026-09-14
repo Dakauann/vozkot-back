@@ -4,7 +4,7 @@ import "time"
 
 // Event is the persisted happening: one listing, one page, one map pin.
 //
-// The columns a buyer filters by — category, city, starts_at, status — are each
+// The columns a buyer filters by, category, city, starts_at, status, are each
 // indexed, because a catalogue page applies several of them at once and a
 // listing that sequentially scans is a listing that gets slower every week it
 // is in business.

@@ -31,7 +31,7 @@ func NewJobRepository(db *gorm.DB) *JobRepository {
 // duplicate is decided by the database without an error, a rolled-back
 // transaction, or a line in its log. That is not cosmetic. A provider that
 // delivers every webhook three times would otherwise fail two inserts in
-// three, and a failure that is expected is not a failure — it is control flow,
+// three, and a failure that is expected is not a failure; it is control flow,
 // and control flow does not belong in the error log at a million events.
 //
 // What a duplicate does depends on the job it found:
@@ -159,7 +159,7 @@ func (q *JobRepository) ClaimByID(ctx context.Context, workerID, jobID string, n
 	return toDomain(&records[0]), true, nil
 }
 
-// Complete finishes a claimed job — unless a duplicate was enqueued while it
+// Complete finishes a claimed job, unless a duplicate was enqueued while it
 // ran, in which case the job goes straight back to pending for one more read
 // of state that is now newer than what this run saw. The attempt counter
 // starts over: that is new work, not a failure.
@@ -215,7 +215,7 @@ func (q *JobRepository) Kill(ctx context.Context, jobID, reason string, now time
 //
 // A process killed mid-job leaves a row marked processing forever. The
 // attempts counter is already spent, so a reclaimed job resumes its retry
-// budget rather than restarting it — a job that reliably kills its worker gets
+// budget rather than restarting it: a job that reliably kills its worker gets
 // parked instead of looping.
 func (q *JobRepository) ReclaimStale(ctx context.Context, olderThan, now time.Time) (int, error) {
 	result := q.db.WithContext(ctx).Model(&schema.Job{}).
@@ -235,7 +235,7 @@ func (q *JobRepository) ReclaimStale(ctx context.Context, olderThan, now time.Ti
 }
 
 // CountOutstanding is how much work the system still owes: jobs that are
-// running, and jobs that are pending — including those waiting out a retry
+// running, and jobs that are pending, including those waiting out a retry
 // backoff, whose run_at is in the future but whose work is not done.
 //
 // The one exception is a hold expiry scheduled for later: that is not work the

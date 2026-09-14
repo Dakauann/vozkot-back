@@ -44,7 +44,7 @@ func NewRateLimit(limiter cache.RateLimiter, scope string, limit int, window tim
 //
 // Login needs it: limiting by address alone lets a botnet spread a guessing run
 // across thousands of hosts and never trip a counter, so the account being
-// guessed has to be counted too — and the account is in the request body, which
+// guessed has to be counted too, and the account is in the request body, which
 // only the handler has parsed.
 func (m *RateLimit) Allow(ctx context.Context, key string) (cache.Decision, bool) {
 	if m == nil || m.limiter == nil || m.limit <= 0 {

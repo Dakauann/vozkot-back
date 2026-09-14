@@ -55,7 +55,7 @@ type Decision struct {
 }
 
 // Keys. Centralised so an invalidation and the read it invalidates cannot
-// drift apart — the classic cache bug is two string literals that used to
+// drift apart; the classic cache bug is two string literals that used to
 // match.
 const (
 	// TicketListPrefix covers every cached listing page, whatever its filters.
@@ -66,7 +66,7 @@ const (
 	OrderPrefix = "orders:item:"
 	// SessionPrefix covers "is this access token's session still live", the
 	// lookup the authentication middleware makes on EVERY authenticated
-	// request — the busiest query in the system once buyers start polling.
+	// request, the busiest query in the system once buyers start polling.
 	SessionPrefix = "sessions:jti:"
 	// SessionLivePrefix maps a session id back to the key above.
 	//

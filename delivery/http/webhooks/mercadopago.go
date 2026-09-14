@@ -3,7 +3,7 @@
 // The endpoint does as little as it possibly can: authenticate the request,
 // write a job, answer. It never fetches the payment, never touches an order and
 // never moves stock, because a webhook endpoint that does real work is one that
-// times out under a burst — and a provider that times out retries, which makes
+// times out under a burst, and a provider that times out retries, which makes
 // the burst worse.
 package webhooks
 
@@ -57,7 +57,7 @@ func (h *MercadoPagoHandler) Register(router *http.ServeMux) {
 }
 
 // @Summary		Webhook do Mercado Pago
-// @Description	Recebe as notificações de pagamento do Mercado Pago. A requisição é autenticada pela assinatura HMAC do cabeçalho x-signature e o processamento acontece de forma assíncrona: o endpoint apenas enfileira a leitura do pagamento e responde. O corpo da notificação nunca é usado como fonte de verdade — o estado é sempre relido do provedor.
+// @Description	Recebe as notificações de pagamento do Mercado Pago. A requisição é autenticada pela assinatura HMAC do cabeçalho x-signature e o processamento acontece de forma assíncrona: o endpoint apenas enfileira a leitura do pagamento e responde. O corpo da notificação nunca é usado como fonte de verdade; o estado é sempre relido do provedor.
 // @Tags			Webhooks
 // @Accept		json
 // @Produce		json

@@ -19,7 +19,7 @@ type ChallengeRepository interface {
 	//
 	// The lock is what makes the attempt counter honest. Read-check-increment
 	// without it lets ten concurrent guesses all read "attempts = 0", all pass
-	// the cap, and all count as the first try — which turns a five-guess limit
+	// the cap, and all count as the first try, which turns a five-guess limit
 	// into no limit at all for anybody willing to open ten connections.
 	FindForUpdate(ctx context.Context, id string) (*Challenge, error)
 	Update(ctx context.Context, item *Challenge) error

@@ -106,7 +106,7 @@ func TestRenderCarriesTheBrandAndTheFacts(t *testing.T) {
 // A missing key must never reach a buyer as Go's "<no value>". The use case
 // guarantees every key is set; this is the check that the guarantee is worth
 // something, by rendering with the keys absent and requiring the marker not to
-// appear — which it will not, because every optional value is behind a guard.
+// appear, which it will not, because every optional value is behind a guard.
 func TestRenderNeverEmitsNoValue(t *testing.T) {
 	renderer, err := NewRenderer(testBrand())
 	if err != nil {

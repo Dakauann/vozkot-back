@@ -12,7 +12,7 @@
 // Where this departs from Vozko is the mechanism, not the organisation: every
 // index here is built CONCURRENTLY and outside the migration transaction.
 // Vozko builds its constraints inside the transaction with AutoMigrate, which
-// is simpler and works until a replica boots while another is serving — and
+// is simpler and works until a replica boots while another is serving, and
 // then it deadlocks, because a plain CREATE INDEX takes a lock on its table
 // that every writer must wait for, while the transaction already holds a lock
 // on a table those writers took first. This project hit exactly that: a booting
@@ -52,7 +52,7 @@ var schemaConstraintIndexes = []indexDefinition{
 		WHERE dedupe_key IS NOT NULL AND status IN ('pending', 'processing')`},
 	// A payment id is unique only once a charge exists. Every order starts
 	// without one, and a total unique index would allow exactly one chargeless
-	// order per provider — which is to say, one order.
+	// order per provider, which is to say, one order.
 	//
 	// This is what makes "find the order this webhook is about" unambiguous, so
 	// a database without it can attach one payment to two orders.
@@ -64,7 +64,7 @@ var schemaConstraintIndexes = []indexDefinition{
 
 // performanceIndexes are the sweeps' and the hot path's reading order. Each one
 // is partial on the status its query filters by, so the index carries the rows
-// that query looks at and nothing else — which is what keeps it small on a
+// that query looks at and nothing else, which is what keeps it small on a
 // table that only grows.
 var performanceIndexes = []indexDefinition{
 	// Reconciliation pages oldest-checked-first through orders still waiting
@@ -106,7 +106,7 @@ var supersededIndexes = []string{
 	"idx_orders_provider_payment",
 	// Named a column that no longer exists. An index over (buyer_id,
 	// ticket_id) cannot be created against a table without ticket_id, and the
-	// replacement above carries the same name — so the old one is dropped
+	// replacement above carries the same name, so the old one is dropped
 	// before the new one is built rather than left to fail forever.
 	"idx_orders_ticket_id",
 }
@@ -128,7 +128,7 @@ func createIndexes(ctx context.Context, db *gorm.DB) error {
 		return dropSupersededIndexes(ctx, db)
 	}
 
-	// TRY the lock, never wait for it — and this is the subtle part.
+	// TRY the lock, never wait for it, and this is the subtle part.
 	//
 	// CREATE INDEX CONCURRENTLY waits for every transaction that could see the
 	// table to finish. A session blocked on pg_advisory_lock is such a

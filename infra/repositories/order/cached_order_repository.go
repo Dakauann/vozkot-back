@@ -19,7 +19,7 @@ import (
 //
 // The TTL is one second. Long enough to collapse a crowd of pollers onto one
 // database read, short enough that the moment a payment lands the buyer sees it
-// — and settlement invalidates the key anyway, so the second is a ceiling on
+//, and settlement invalidates the key anyway, so the second is a ceiling on
 // the worst case, not the normal wait.
 type CachedOrderRepository struct {
 	inner domain.Repository

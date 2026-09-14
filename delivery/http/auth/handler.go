@@ -58,7 +58,7 @@ type Handler struct {
 // WithVerification adds the passwordless and profile routes.
 //
 // A setter rather than two more constructor parameters, because every existing
-// caller — the tests, the load harness — wants the handler without them, and
+// caller, the tests, the load harness, wants the handler without them, and
 // widening the constructor would make each of those state that it does not.
 func (h *Handler) WithVerification(verification *usecase.Verification, profiles *usecase.Profiles) *Handler {
 	h.verification = verification
@@ -87,8 +87,8 @@ func NewHandler(
 // RegisterPublic mounts the unauthenticated credential routes.
 //
 // throttle is applied to all three. They are the only routes an anonymous
-// caller can reach that cost real work — a login is a bcrypt compare at cost
-// twelve, about a quarter second of CPU — so an unthrottled flood is both a
+// caller can reach that cost real work; a login is a bcrypt compare at cost
+// twelve, about a quarter second of CPU, so an unthrottled flood is both a
 // credential-stuffing surface and a way to spend the fleet's CPU without
 // holding an account. A nil throttle mounts them bare, which is what happens
 // when Redis is not configured.
@@ -96,7 +96,6 @@ func (h *Handler) RegisterPublic(router *http.ServeMux, throttle func(http.Handl
 	if throttle == nil {
 		throttle = func(next http.Handler) http.Handler { return next }
 	}
-	router.Handle("POST /auth/register", throttle(http.HandlerFunc(h.register)))
 	router.Handle("POST /auth/login", throttle(http.HandlerFunc(h.login)))
 	router.Handle("POST /auth/refresh", throttle(http.HandlerFunc(h.refresh)))
 }
@@ -104,34 +103,6 @@ func (h *Handler) RegisterPublic(router *http.ServeMux, throttle func(http.Handl
 func (h *Handler) RegisterProtected(router *http.ServeMux, require func(http.Handler) http.Handler) {
 	router.Handle("POST /auth/logout", require(http.HandlerFunc(h.logout)))
 	router.Handle("GET /user/me", require(http.HandlerFunc(h.me)))
-}
-
-// @Summary		Cadastrar uma conta
-// @Description	Cria um usuário, inicia uma sessão e envia os tokens em cookies httpOnly no modo navegador. A senha deve ter ao menos 8 caracteres, maiúscula, minúscula e número.
-// @Tags			Autenticação
-// @Accept		json
-// @Produce		json
-// @Param		request body RegisterRequest true "Dados do cadastro"
-// @Success		201 {object} AuthResponse
-// @Failure		400 {object} ErrorResponse
-// @Failure		409 {object} ErrorResponse
-// @Failure		422 {object} ErrorResponse
-// @Router		/auth/register [post]
-func (h *Handler) register(response http.ResponseWriter, request *http.Request) {
-	var body RegisterRequest
-	if err := httpx.ReadJSON(response, request, &body); err != nil {
-		httpx.WriteError(response, http.StatusBadRequest, err)
-		return
-	}
-	pair, err := h.service.Register(request.Context(), domain.CredentialsInput{
-		Name: body.Name, Email: body.Email, Password: body.Password,
-		IPAddress: h.callerIP(request), DeviceInfo: request.UserAgent(),
-	})
-	if err != nil {
-		httpx.WriteError(response, authStatus(err), err)
-		return
-	}
-	h.writeAuth(response, request, http.StatusCreated, pair)
 }
 
 // @Summary		Entrar com email e senha
@@ -278,7 +249,7 @@ func userResponse(item *user.User) UserResponse {
 // It deliberately does NOT read X-Forwarded-For. That header is client-supplied
 // text, and believing it without knowing the request came through a trusted
 // proxy lets any caller write whatever address they like onto a session record
-// — and, where the same value keys a rate limit, choose their own bucket.
+//, and, where the same value keys a rate limit, choose their own bucket.
 func peerAddress(request *http.Request) string {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err == nil {

@@ -20,14 +20,15 @@ import (
 	authUsecase "vozkot/usecases/auth"
 )
 
-// Register, login and refresh are the only routes an anonymous caller can reach
-// that cost real work.
+// Login, refresh and the two passwordless routes are all an anonymous caller
+// can reach, and all of them cost real work.
 //
-// A login is a bcrypt compare at cost twelve — on the order of a quarter second
-// of CPU — so an unthrottled flood is two attacks at once: credential stuffing,
+// A login is a bcrypt compare at cost twelve, on the order of a quarter second
+// of CPU, so an unthrottled flood is two attacks at once: credential stuffing,
 // and a way to spend the whole fleet's CPU without ever holding an account.
-// Free registration is the other half, because it makes accounts a renewable
-// resource for anyone who wants to sit on an event's inventory.
+// Free account creation is the other half, because it makes accounts a
+// renewable resource for anyone who wants to sit on an event's inventory. That
+// half now happens at /auth/email/start, so that is where it is measured.
 //
 // Real Redis, because the limiter is a Lua script's atomicity and a fake would
 // be testing the fake.
@@ -67,9 +68,20 @@ func newThrottleHarness(t *testing.T, perAddress, perEmail int) *throttleHarness
 		middleware.NewRateLimit(limiter, testsupport.Unique("login"), perEmail, time.Minute, clients),
 		clients.From)
 
+	// The passwordless routes are mounted from the same handler and share the
+	// address budget. The use case is given no sender on purpose: asking for a
+	// code then answers 503 before it generates one or writes a row, which is
+	// all this file needs; a request that reaches the endpoint and is not a
+	// 429, without leaving challenges behind for the next test to trip over.
+	handler = handler.WithVerification(
+		authUsecase.NewVerification(users, nil, nil, nil, nil, nil, service),
+		nil,
+	)
+
 	mux := http.NewServeMux()
 	addressLimit := middleware.NewRateLimit(limiter, testsupport.Unique("auth"), perAddress, time.Minute, clients)
 	handler.RegisterPublic(mux, addressLimit.Require)
+	handler.RegisterVerification(mux, addressLimit.Require, nil)
 
 	return &throttleHarness{mux: mux, email: email}
 }
@@ -189,20 +201,19 @@ func TestTheEmailBudgetIgnoresCaseAndWhitespace(t *testing.T) {
 	}
 }
 
-func TestRegisterIsThrottledToo(t *testing.T) {
+func TestAskingForASignInCodeIsThrottledToo(t *testing.T) {
+	// This is the account-creation route now: a code answered by an address
+	// with no account MAKES one. Unlimited access to it is unlimited accounts.
 	h := newThrottleHarness(t, 2, 100)
 	post := func() int {
-		body := `{"name":"Maria","email":"` + testsupport.Unique("new") + `@vozkot.test","password":"Senha12345"}`
-		request := httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(body))
+		body := `{"email":"` + testsupport.Unique("new") + `@vozkot.test"}`
+		request := httptest.NewRequest(http.MethodPost, "/auth/email/start", strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
 		request.RemoteAddr = "198.51.100.7:1234"
 		recorder := httptest.NewRecorder()
 		h.mux.ServeHTTP(recorder, request)
 		return recorder.Code
 	}
-	t.Cleanup(func() {
-		testsupport.Database(t).Exec("DELETE FROM users WHERE email LIKE 'new_%@vozkot.test'")
-	})
 
 	for attempt := 0; attempt < 2; attempt++ {
 		if code := post(); code == http.StatusTooManyRequests {
@@ -211,7 +222,7 @@ func TestRegisterIsThrottledToo(t *testing.T) {
 	}
 
 	if code := post(); code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429: free unlimited registration feeds the inventory-hostage attack", code)
+		t.Fatalf("status = %d, want 429: free unlimited sign-up feeds the inventory-hostage attack", code)
 	}
 }
 

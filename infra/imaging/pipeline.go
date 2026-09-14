@@ -39,7 +39,7 @@ import (
 // MaxPixels refuses an image larger than any real photograph a box office
 // uploads, before a byte of it is decoded.
 //
-// Thirty megapixels is a 6000×5000 photo — beyond any poster or stage shot, and
+// Thirty megapixels is a 6000×5000 photo: beyond any poster or stage shot, and
 // still 120 MB of RGBA if it were decoded. The check is on the DIMENSIONS from
 // the header rather than the file size, because the whole point of a
 // decompression bomb is that the two do not correspond.
@@ -54,7 +54,7 @@ var Variants = []int{400, 800, 1600}
 
 // blurWidth is how wide the inline placeholder is.
 //
-// Twenty pixels of JPEG is a few hundred bytes as a data URI — small enough to
+// Twenty pixels of JPEG is a few hundred bytes as a data URI, small enough to
 // sit in the HTML of every card on a page, and detailed enough to read as the
 // image rather than as a smear. It needs no JavaScript at all, which is the
 // whole reason it beats a hash for a server-rendered page.
@@ -219,7 +219,7 @@ func toRGBA(source image.Image) *image.RGBA {
 // encodeJPEG flattens transparency onto white first.
 //
 // JPEG has no alpha channel, and encoding an RGBA image with transparent
-// regions straight to it renders them BLACK — a PNG logo on a transparent
+// regions straight to it renders them BLACK, a PNG logo on a transparent
 // background becomes a black rectangle, which is the kind of bug that ships
 // because nobody uploads a transparent PNG until a customer does.
 func encodeJPEG(source *image.RGBA, quality int) ([]byte, error) {
@@ -245,7 +245,7 @@ func encodeJPEG(source *image.RGBA, quality int) ([]byte, error) {
 //
 // And it composites onto white exactly as encodeJPEG does, rather than skipping
 // transparent pixels. Skipping them means a fully transparent PNG averages over
-// nothing and comes back BLACK, while the image actually served is white — so
+// nothing and comes back BLACK, while the image actually served is white, so
 // the placeholder would be the photographic negative of the thing it stands in
 // for. The colour has to describe what a viewer will see.
 func averageColor(source *image.RGBA) string {

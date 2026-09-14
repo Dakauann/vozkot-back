@@ -191,7 +191,7 @@ func TestConcurrentRetriesWithOneKeyReserveOnce(t *testing.T) {
 		case http.StatusCreated:
 			created++
 		case http.StatusConflict:
-			// "Still in progress" — the honest answer for a loser of the race.
+			// "Still in progress"; the honest answer for a loser of the race.
 		default:
 			t.Fatalf("unexpected status %d among %v", code, codes)
 		}
@@ -235,7 +235,7 @@ func TestCheckoutValidatesTheBuyer(t *testing.T) {
 	//
 	// Counted for THIS key only. The table is shared with every other test in
 	// the package, and the recovery tests leave orphaned claims in `processing`
-	// on purpose — a count across the whole table would be measuring them.
+	// on purpose: a count across the whole table would be measuring them.
 	var count int64
 	h.db.Raw("SELECT COUNT(*) FROM idempotency_keys WHERE key = ? AND scope = 'checkout' AND state = 'processing'", key).Scan(&count)
 	if count != 0 {

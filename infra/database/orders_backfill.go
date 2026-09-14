@@ -64,7 +64,7 @@ func backfillOrderItems(tx *gorm.DB) error {
 // backfillOrderEvents derives each order's event from the tiers it covers.
 //
 // Through the items rather than through the old column, so it keeps working
-// for orders written after the drop — and so an order whose tier has since been
+// for orders written after the drop, and so an order whose tier has since been
 // deleted is left alone rather than pointed at nothing.
 func backfillOrderEvents(tx *gorm.DB) error {
 	if !tx.Migrator().HasColumn("orders", "event_id") {

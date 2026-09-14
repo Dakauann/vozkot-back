@@ -116,7 +116,7 @@ func TestAnOversizedImageIsRefusedBeforeItIsDecoded(t *testing.T) {
 }
 
 // oversizedPNGHeader is a PNG whose IHDR claims 20000×20000 (400 megapixels)
-// but which carries almost no data — the shape of a decompression bomb.
+// but which carries almost no data, the shape of a decompression bomb.
 func oversizedPNGHeader() []byte {
 	return buildPNGHeader(20000, 20000)
 }

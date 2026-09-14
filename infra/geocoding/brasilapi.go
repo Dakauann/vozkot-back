@@ -171,8 +171,8 @@ func (g *BrasilAPI) Locate(ctx context.Context, location eventdomain.Location) (
 
 // plausiblyBrazilian is a sanity check, not a boundary test.
 //
-// It exists to catch the two failure shapes that actually occur — a zero pair,
-// and a transposed latitude/longitude — rather than to police the border. A
+// It exists to catch the two failure shapes that actually occur: a zero pair,
+// and a transposed latitude/longitude, rather than to police the border. A
 // generous box costs nothing and a tight one would reject Oiapoque.
 func plausiblyBrazilian(latitude, longitude float64) bool {
 	if latitude == 0 && longitude == 0 {

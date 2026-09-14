@@ -213,7 +213,7 @@ func TestStartRefusesTicketsThatAreNotOnSale(t *testing.T) {
 //
 // Twenty buyers race for eight tickets, two each. Exactly four can win. The
 // losers must be refused rather than served a hold that pushes the tier past
-// its capacity — and PostgreSQL's CHECK constraint would reject the row even if
+// its capacity, and PostgreSQL's CHECK constraint would reject the row even if
 // the application tried.
 func TestStartNeverOversells(t *testing.T) {
 	const capacity = 8
@@ -277,7 +277,7 @@ func TestCancelReturnsStockAndIsIdempotent(t *testing.T) {
 	}
 
 	// Tapping cancel twice is not a user error, and must not release stock
-	// twice — which the database would refuse anyway.
+	// twice, which the database would refuse anyway.
 	if _, err := h.service.Cancel(context.Background(), item.ID); err != nil {
 		t.Fatalf("second Cancel() error = %v", err)
 	}

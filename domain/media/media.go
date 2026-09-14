@@ -103,7 +103,7 @@ type Media struct {
 	// reason is that it needs NO JavaScript: it is an ordinary src the browser
 	// decodes on first paint, present in the server-rendered HTML. A hash is
 	// smaller on the wire but has to be decoded by a library in the client,
-	// which costs a bundle, a hydration boundary and a frame of blank space —
+	// which costs a bundle, a hydration boundary and a frame of blank space,
 	// and only wins past roughly fifty images on one page, which a card grid
 	// does not reach above the fold.
 	BlurDataURL string

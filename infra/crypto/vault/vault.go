@@ -6,7 +6,7 @@
 // CPF is worse than one that cannot be read.
 //
 // A nonce is generated per message and prepended to the ciphertext. It is not a
-// secret — it only has to be unique for the key — and shipping it with the
+// secret, it only has to be unique for the key, and shipping it with the
 // message is what lets the same key encrypt more than once.
 package vault
 

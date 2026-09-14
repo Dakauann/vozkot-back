@@ -2,8 +2,8 @@
 // date, with one or more ticket tiers underneath it.
 //
 // It exists because an event and a ticket are not the same thing, and the
-// difference is the whole shape of the product. A ticket here is an INGRESSO —
-// Pista, Camarote, Meia-entrada — and an event that sells three of them is one
+// difference is the whole shape of the product. A ticket here is an INGRESSO;
+// Pista, Camarote, Meia-entrada, and an event that sells three of them is one
 // listing, one page, one map pin and one category, not three. Before this
 // package the two were the same row and an event was a repeated string in an
 // `event_name` column, which meant a listing had to group by that string, two
@@ -37,8 +37,8 @@ const (
 	// StatusPublished is listed and reachable. Whether a buyer can actually buy
 	// depends on the tiers underneath, which have their own status.
 	StatusPublished Status = "published"
-	// StatusCancelled called the event off. The page stays reachable — people
-	// who bought need to find it — and nothing new may be sold.
+	// StatusCancelled called the event off. The page stays reachable, people
+	// who bought need to find it, and nothing new may be sold.
 	StatusCancelled Status = "cancelled"
 )
 
@@ -197,7 +197,7 @@ type Event struct {
 	ID      string
 	OwnerID string
 	// Slug is the human-readable half of the public URL. It is derived from the
-	// name once, at creation, and then never changes on its own — a link that
+	// name once, at creation, and then never changes on its own, a link that
 	// someone shared has to keep working after the name is corrected.
 	Slug        string
 	Name        string
@@ -322,7 +322,7 @@ func (d Draft) normalize() (Draft, error) {
 // Slugify turns a name into the URL-safe half of a public address.
 //
 // Accents are folded rather than dropped, so "Sertão" becomes "sertao" and not
-// "serto" — a Brazilian catalogue where every other name loses a letter is a
+// "serto"; a Brazilian catalogue where every other name loses a letter is a
 // catalogue nobody can guess a URL in.
 func Slugify(name string) string {
 	var builder strings.Builder

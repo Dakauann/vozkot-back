@@ -20,7 +20,7 @@ func requestHash(body string) string { return idempotencydomain.HashRequest([]by
 // Before the lease, that buyer was told "a request with this key is still in
 // progress" for the next twenty-four hours. They could not see the order they
 // had just paid for, and a fresh key would open a SECOND hold on the same
-// tickets — the exact double-reservation the key exists to prevent, caused by
+// tickets: the exact double-reservation the key exists to prevent, caused by
 // the key. With the graceful-shutdown bug, this happened on every deploy.
 
 // orphan simulates a process killed mid-checkout: the claim stays in

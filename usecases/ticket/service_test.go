@@ -13,8 +13,8 @@ import (
 )
 
 // A ticket here is a TIER: a price and a number of seats, belonging to an
-// event. Everything about the happening — its name, venue, date, category, map
-// pin and artwork — lives on the event, and is tested in usecases/event.
+// event. Everything about the happening: its name, venue, date, category, map
+// pin and artwork; lives on the event, and is tested in usecases/event.
 //
 // Real PostgreSQL, because what these tests are about is stock arithmetic the
 // database arbitrates.

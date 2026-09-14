@@ -31,6 +31,39 @@ func newService(t *testing.T) (*Service, *authRepository.SessionRepository, doma
 	return NewService(users, sessions, passwords, tokens, 24*time.Hour), sessions, tokens
 }
 
+// seedPasswordAccount puts an account with a password straight into the
+// database.
+//
+// Not through a use case, because no use case does this any more: an account is
+// created by answering a sign-in code, and a password is added to it afterwards.
+// What is under test below is session handling: refresh rotation, the grace
+// window, revocation, which does not care how the row got there, so the row is
+// written directly rather than dragged through a two-step verification flow.
+func seedPasswordAccount(t *testing.T, email, password string) *user.User {
+	t.Helper()
+	db := testsupport.Database(t)
+	// An empty password means an account with NO password, the shape a
+	// sign-in code leaves behind. Hashing "" would give it a real hash and a
+	// real one is a different account entirely.
+	hash := ""
+	if password != "" {
+		hashed, err := security.NewPasswordService(security.MinPasswordHashCost).Hash(password)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash = hashed
+	}
+	now := time.Now().UTC()
+	account := &user.User{
+		ID: newID("usr"), Name: "Maria Silva", Email: email, PasswordHash: hash,
+		Role: user.RoleUser, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := userRepository.NewUserRepository(db).Create(context.Background(), account); err != nil {
+		t.Fatal(err)
+	}
+	return account
+}
+
 func cleanupUser(t *testing.T, email string) {
 	t.Helper()
 	db := testsupport.Database(t)
@@ -45,8 +78,9 @@ func TestCredentialsLifecycle(t *testing.T) {
 	email := testsupport.Unique("maria") + "@example.com"
 	cleanupUser(t, email)
 
-	created, err := service.Register(ctx, domain.CredentialsInput{
-		Name: "Maria Silva", Email: email, Password: "StrongPass1", DeviceInfo: "test",
+	seedPasswordAccount(t, email, "StrongPass1")
+	created, err := service.Login(ctx, domain.CredentialsInput{
+		Email: email, Password: "StrongPass1", DeviceInfo: "test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +104,7 @@ func TestCredentialsLifecycle(t *testing.T) {
 	}
 	// Presenting the previous token again inside the retry grace is an honest
 	// client whose first response was lost, and is served again rather than
-	// treated as theft. That grace is the service's documented behaviour — and
+	// treated as theft. That grace is the service's documented behaviour, and
 	// it rotates the session once more, so the tokens it returns are the live
 	// ones from here on.
 	retried, err := service.Refresh(ctx, created.RefreshToken, "127.0.0.1", "test")
@@ -97,24 +131,34 @@ func TestCredentialsLifecycle(t *testing.T) {
 	}
 }
 
-func TestRegistrationValidation(t *testing.T) {
+// The strength rule survived the removal of Register; it just moved to the only
+// place a password is now chosen.
+//
+// The duplicate-address half of the old registration test is not reproduced
+// here: nothing in this package inserts users any more, and the case-insensitive
+// unique index it was really exercising is covered directly against Postgres in
+// infra/database/repositories_integration_test.go.
+func TestAFirstPasswordMustBeStrong(t *testing.T) {
 	ctx := context.Background()
 	service, _, _ := newService(t)
 	email := testsupport.Unique("maria") + "@example.com"
 	cleanupUser(t, email)
 
-	_, err := service.Register(ctx, domain.CredentialsInput{Name: "Maria", Email: email, Password: "weak"})
+	// No password yet, exactly the account a sign-in code has just created.
+	account := seedPasswordAccount(t, email, "")
+
+	err := service.SetPassword(ctx, SetPasswordInput{UserID: account.ID, New: "weak"})
 	if !errors.Is(err, domain.ErrWeakPassword) {
 		t.Fatalf("expected weak password error, got %v", err)
 	}
 
-	_, err = service.Register(ctx, domain.CredentialsInput{Name: "Maria", Email: email, Password: "StrongPass1"})
-	if err != nil {
-		t.Fatal(err)
+	if err := service.SetPassword(ctx, SetPasswordInput{UserID: account.ID, New: "StrongPass1"}); err != nil {
+		t.Fatalf("a strong first password was refused: %v", err)
 	}
-	// Case-insensitive: the unique index is on the lowercased address.
-	_, err = service.Register(ctx, domain.CredentialsInput{Name: "Other", Email: "MARIA" + email[5:], Password: "StrongPass1"})
-	if !errors.Is(err, user.ErrEmailAlreadyExists) {
-		t.Fatalf("expected duplicate email error, got %v", err)
+
+	// And now that it HAS one, changing it takes the old one. A session alone
+	// must not be enough to lock the owner out of their own account.
+	if err := service.SetPassword(ctx, SetPasswordInput{UserID: account.ID, New: "AnotherPass1"}); !errors.Is(err, ErrCurrentPasswordRequired) {
+		t.Fatalf("expected the current password to be demanded, got %v", err)
 	}
 }

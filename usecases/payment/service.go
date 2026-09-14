@@ -6,7 +6,7 @@
 //     it changed into is always read back from the provider, because anyone can
 //     POST a body that says "approved".
 //  2. Every path is safe to run twice. Providers redeliver, queues retry, and
-//     an operator may replay a sync by hand — so state transitions report
+//     an operator may replay a sync by hand, so state transitions report
 //     whether they changed anything, and stock only moves when they did.
 package payment
 
@@ -115,16 +115,16 @@ func (s *Service) CreateCharge(ctx context.Context, orderID string) error {
 	// copy read before the provider was called.
 	//
 	// That read is now old. Creating a charge takes a round trip to Mercado
-	// Pago — a few hundred milliseconds normally, and up to the whole retry
-	// budget when the provider is failing — and the order can move during it:
+	// Pago: a few hundred milliseconds normally, and up to the whole retry
+	// budget when the provider is failing, and the order can move during it:
 	// the hold expires and the tickets go back on sale, a webhook settles it,
 	// an admin cancels it. Writing this stale copy back would silently undo
 	// that, resurrecting an expired order to pending_payment while its stock
 	// belongs to somebody else. settle re-reads the row under FOR UPDATE and
 	// is the only place that writes it.
 	//
-	// It also covers the charge that is born final — an already-approved
-	// payment, or one the provider rejects outright — which must be settled
+	// It also covers the charge that is born final, an already-approved
+	// payment, or one the provider rejects outright, which must be settled
 	// now rather than waiting for a webhook that may never come.
 	return s.settle(ctx, item.ID, charge)
 }
@@ -152,7 +152,7 @@ func (s *Service) SyncOrder(ctx context.Context, orderID string) error {
 // SyncPayment reconciles by provider payment id, which is all a webhook knows.
 //
 // The order is found by payment id, and failing that by the charge's external
-// reference — which covers the genuine race where the provider's notification
+// reference, which covers the genuine race where the provider's notification
 // arrives before the charge response was persisted.
 func (s *Service) SyncPayment(ctx context.Context, paymentID string) error {
 	charge, err := s.fetch(ctx, paymentID)
@@ -186,7 +186,7 @@ var ErrNotRefundable = errors.New("order has no settled charge to refund")
 // round trip to a third party that is occasionally slow and occasionally down,
 // and running it on the request meant a provider slower than the HTTP write
 // timeout left the money refunded at Mercado Pago and the order untouched here
-// — the two facts that must never disagree, disagreeing, with nothing left to
+//; the two facts that must never disagree, disagreeing, with nothing left to
 // reconcile them. The job row is durable, retried with backoff, and keyed on
 // the order, so an operator double-clicking refunds once.
 //
@@ -246,7 +246,7 @@ func (s *Service) Refund(ctx context.Context, orderID string) error {
 		return err
 	}
 	if item.Status == orderdomain.StatusRefunded {
-		// Already given back — a redelivered job, or an operator who pressed
+		// Already given back: a redelivered job, or an operator who pressed
 		// the button while the first refund was settling.
 		return nil
 	}
@@ -274,7 +274,7 @@ func (s *Service) Refund(ctx context.Context, orderID string) error {
 // Reconcile only ever looks at orders still waiting for money, which leaves one
 // hole: a refund or a chargeback raised in the provider's own dashboard reaches
 // the box office through exactly one notification. Lose that delivery and the
-// order stays paid and the seat stays sold for good — the money went back and
+// order stays paid and the seat stays sold for good, the money went back and
 // the inventory never did, and nothing in the system would ever notice.
 //
 // It runs hourly rather than every minute, and only for events that have not
@@ -445,7 +445,7 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 	err := s.unit.Run(ctx, func(ctx context.Context, repositories uow.Repositories) error {
 		// Locked for the rest of the transaction. Two deliveries of the same
 		// approval processed at once now take turns, and the second reads the
-		// paid order the first committed — the redelivery case handled by the
+		// paid order the first committed, the redelivery case handled by the
 		// "did this change anything" check below, not by an error.
 		item, err := repositories.Orders().GetByIDForUpdate(ctx, orderID)
 		if err != nil {
@@ -464,8 +464,8 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 			//
 			// Unless the order is already finished and already carries a
 			// charge, in which case this news is older than what the order
-			// knows — the provider's answer to "create the charge" overtaken
-			// by the webhook that settled it — and older news is not recorded
+			// knows; the provider's answer to "create the charge" overtaken
+			// by the webhook that settled it, and older news is not recorded
 			// over newer.
 			if previous.Final() && storedPaymentID != "" {
 				return nil
@@ -490,13 +490,13 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 		// Whether an approval can actually be honoured is decided BEFORE the
 		// order is moved, not after. Applying "paid" first and discovering the
 		// tickets are gone second would leave the order in a state the machine
-		// cannot legally move out of — and the honest answer, "we owe a
+		// cannot legally move out of, and the honest answer, "we owe a
 		// refund", would be unreachable.
 		reservedLate := false
 		if next == orderdomain.StatusPaid && !previous.HoldsStock() {
 			// The hold lapsed and the tickets went back on sale. Paying for an
-			// expired reservation is frequent — a buyer opens the bank app,
-			// gets distracted, pays eleven minutes later — so the stock is
+			// expired reservation is frequent: a buyer opens the bank app,
+			// gets distracted, pays eleven minutes later, so the stock is
 			// asked for again rather than assumed.
 			reserved, err := reserveAll(ctx, repositories, item)
 			if err != nil {
@@ -593,8 +593,8 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 
 // raise queues one buyer message from inside the settlement transaction.
 //
-// The tier is read for the event details the message carries — the show, the
-// door time, the venue — because a receipt that says only "R$ 240,00" is not a
+// The tier is read for the event details the message carries; the show, the
+// door time, the venue, because a receipt that says only "R$ 240,00" is not a
 // receipt. A tier that has been deleted costs those details and not the
 // settlement: the message still goes out, naming the order.
 func (s *Service) raise(
@@ -609,7 +609,7 @@ func (s *Service) raise(
 	}
 	// The event carries what the receipt actually reads as: the show, the door
 	// time, the venue. Read straight off the order, which now names the night
-	// it is for — the tiers underneath it only ever agreed about that anyway.
+	// it is for, the tiers underneath it only ever agreed about that anyway.
 	var happening *eventdomain.Event
 	if item.EventID != "" {
 		found, err := repositories.Events().GetByID(ctx, item.EventID)
@@ -663,7 +663,7 @@ func randomID() string {
 //
 // All or nothing is the only honest answer. An order half-reserved is an order
 // the buyer paid for in full and would be admitted on in part, and there is no
-// status that describes that — so a line that cannot be re-taken releases the
+// status that describes that, so a line that cannot be re-taken releases the
 // lines above it and the whole order becomes a refund the box office owes.
 //
 // The lines are walked in the order they are held, which NormalizeItems sorted

@@ -18,7 +18,7 @@ type IdempotencyKey struct {
 	StatusCode  int    `gorm:"not null;default:0"`
 	// Response is raw bytes, not jsonb, on purpose: jsonb normalises key order
 	// and whitespace, and a replay has to return byte for byte what the first
-	// request answered — a client comparing the two must see the same body.
+	// request answered; a client comparing the two must see the same body.
 	Response []byte `gorm:"type:bytea"`
 
 	CreatedAt   time.Time `gorm:"not null;autoCreateTime"`
@@ -26,7 +26,7 @@ type IdempotencyKey struct {
 	// LeaseExpiresAt is when an unfinished claim may be taken over by a retry.
 	//
 	// Nullable on purpose. A row written before leases existed has none, and
-	// "no lease" is exactly the orphan case a takeover is for — so NULL reads
+	// "no lease" is exactly the orphan case a takeover is for, so NULL reads
 	// as lapsed rather than as forever.
 	LeaseExpiresAt *time.Time
 	// ExpiresAt is indexed because pruning queries it and nothing else.

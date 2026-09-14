@@ -53,7 +53,7 @@ func (s *Service) derive(kind domain.Kind, data []byte) *domain.Derived {
 //
 // That order matters: a row written before the upload could point at an object
 // that never arrived, and a listing would render a broken image. The reverse
-// failure — bytes stored, row refused — is repaired below by deleting the
+// failure, bytes stored, row refused, is repaired below by deleting the
 // object, so neither half is left stranded.
 func (s *Service) Add(ctx context.Context, upload domain.Upload) (*domain.Media, error) {
 	kind, err := upload.Validate()

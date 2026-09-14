@@ -1,7 +1,7 @@
 // Package piigorm puts the encryption at the database boundary.
 //
 // A column typed EncryptedString is ciphertext in PostgreSQL and plaintext in
-// Go, and the conversion happens in Scan and Value — which is to say, in the
+// Go, and the conversion happens in Scan and Value, which is to say, in the
 // two places every read and every write must pass through. Nothing above this
 // layer can forget to encrypt, because there is no path that writes the column
 // without calling Value.
@@ -51,7 +51,7 @@ func mustService() (*pii.Service, error) {
 // EncryptedString is a string that is only ever ciphertext at rest.
 //
 // Valid distinguishes "no value" from "the empty string", the way sql.NullString
-// does — an absent document and a document recorded as blank are different
+// does; an absent document and a document recorded as blank are different
 // facts, and a NULL column is not something to encrypt.
 type EncryptedString struct {
 	Plain string
@@ -126,7 +126,7 @@ func (e EncryptedString) String() string {
 type BlindIndex []byte
 
 // NewBlindIndex derives the index for a value within a scope. An empty value
-// yields nil, which stores as NULL — so "no document" does not collide with
+// yields nil, which stores as NULL, so "no document" does not collide with
 // every other row that also has none under a unique index.
 func NewBlindIndex(scope, value string) (BlindIndex, error) {
 	if value == "" {

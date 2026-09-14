@@ -36,7 +36,7 @@ const (
 //
 // The port is deliberately small and deliberately forgiving. Its one
 // implementation talks to a third party over the network, which means it is
-// sometimes slow, sometimes down, and sometimes simply does not know — and an
+// sometimes slow, sometimes down, and sometimes simply does not know, and an
 // event whose address no geocoder recognises is still a real event that must be
 // possible to publish. So:
 //

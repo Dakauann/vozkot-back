@@ -79,7 +79,7 @@ func (n *Notifier) Handles(channel domain.Channel) bool {
 // the payment it confirms, or neither does.
 //
 // It returns the job so the caller can announce it to the broker AFTER the
-// commit — never inside it, for the same reason checkout does not. A nil job
+// commit, never inside it, for the same reason checkout does not. A nil job
 // with a nil error means there was nothing to write: notifications are off, an
 // identical message is already queued, or the request cannot be delivered on
 // any registered channel.
@@ -99,8 +99,8 @@ func (n *Notifier) Enqueue(ctx context.Context, jobs queue.Queue, request domain
 		return nil, nil
 	}
 	if err := request.Validate(); err != nil {
-		// A buyer without an address is not an error the caller can act on —
-		// an order can legitimately carry one this channel cannot reach — so
+		// A buyer without an address is not an error the caller can act on;
+		// an order can legitimately carry one this channel cannot reach, so
 		// it is logged and skipped rather than failing the payment that was
 		// being settled around it.
 		log.Printf("notifications: skipping %s on %s: %v", request.Template, request.Channel, err)
@@ -126,7 +126,7 @@ func (n *Notifier) Enqueue(ctx context.Context, jobs queue.Queue, request domain
 	if !added {
 		// The same message is already queued. A webhook redelivered five times
 		// is five settlements that each want to send one receipt, and exactly
-		// one of them wins here — decided by the database, without an error.
+		// one of them wins here: decided by the database, without an error.
 		return nil, nil
 	}
 	return job, nil

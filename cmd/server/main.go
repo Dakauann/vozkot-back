@@ -57,8 +57,8 @@ func main() {
 // application is what main drives: something that serves until it is told to
 // stop, and that stops in an orderly way when asked.
 //
-// An interface rather than *container.Container so the sequencing below — the
-// part that was wrong, and the part that is hard to get right — can be tested
+// An interface rather than *container.Container so the sequencing below, the
+// part that was wrong, and the part that is hard to get right; can be tested
 // without a database, a broker and a payment provider.
 type application interface {
 	Start() error
@@ -70,7 +70,7 @@ type application interface {
 //
 // The waiting is the whole point, and its absence was a bug that made every
 // deploy behave like a crash. Start() returns http.ErrServerClosed the instant
-// Shutdown closes the listener — not when the drain is done — so a main that
+// Shutdown closes the listener, not when the drain is done, so a main that
 // returned there killed the process with connections still being served, jobs
 // still mid-charge, and the careful drain in container.Shutdown never reaching
 // its end. Those jobs then sat marked processing until the five-minute stale
@@ -98,7 +98,7 @@ func run(app application, stop <-chan struct{}, timeout time.Duration) error {
 	}()
 
 	if err := app.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		// The server never got going — a port already in use, a bad address.
+		// The server never got going: a port already in use, a bad address.
 		// There is no drain to wait for.
 		return err
 	}

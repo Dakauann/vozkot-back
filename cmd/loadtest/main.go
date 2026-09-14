@@ -1,9 +1,9 @@
 // Command loadtest drives the purchase system the way an on-sale does, then
 // audits the result the way an accountant would.
 //
-// It runs the REAL pipeline in one process — checkout, the PostgreSQL job
+// It runs the REAL pipeline in one process: checkout, the PostgreSQL job
 // ledger, RabbitMQ transport when configured, the Redis cache and rate limiter
-// when configured, the Mercado Pago adapter, settlement — against a stub of
+// when configured, the Mercado Pago adapter, settlement, against a stub of
 // Mercado Pago's HTTP API that misbehaves on purpose: it answers slowly, fails
 // a share of requests with 5xx, delivers every webhook more than once, and
 // signs each one with the real HMAC so the real verifier has to accept it.
@@ -85,8 +85,8 @@ type options struct {
 	retryShare      float64
 	drainTimeout    time.Duration
 	keep            bool
-	// overHTTP drives the REAL router — TLS, session lookup, idempotency
-	// claim, the admission bulkhead, JSON — instead of calling the use case.
+	// overHTTP drives the REAL router: TLS, session lookup, idempotency
+	// claim, the admission bulkhead, JSON, instead of calling the use case.
 	//
 	// The two numbers are not comparable and the difference is the point. A
 	// use-case run measures how fast PostgreSQL can arbitrate inventory; a
@@ -447,7 +447,7 @@ func run(cfg config.Config, opts options) error {
 	// production limit would refuse most of the storm and measure nothing. A
 	// ceiling above what the run can reach still exercises the per-buyer
 	// advisory lock and the count on EVERY checkout, which is what needs
-	// measuring — the limit's own behaviour is tested where it lives.
+	// measuring; the limit's own behaviour is tested where it lives.
 	perBuyer := opts.orders/max(opts.buyers, 1) + 1
 	holdLimits := orderdomain.HoldLimits{Orders: perBuyer * 2}
 	checkout := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, 30*time.Minute, 30*time.Minute, holdLimits)
@@ -514,7 +514,7 @@ func run(cfg config.Config, opts options) error {
 		VALUES (?, 'Load Test', ?, 'x', 'user', 0, NOW(), NOW())`, ownerID, ownerID+"@vozkot.test").Error; err != nil {
 		return err
 	}
-	// One event, many tiers — the shape a real on-sale has, and the one the
+	// One event, many tiers; the shape a real on-sale has, and the one the
 	// inventory contention this harness measures actually happens in.
 	happening, err := eventdomain.New("evt_load_"+runID, ownerID, eventdomain.Draft{
 		Name:     "Load Test " + runID,
@@ -568,11 +568,11 @@ func run(cfg config.Config, opts options) error {
 		if !opts.keep {
 			defer cleanupHTTPAccounts(db, runID)
 		}
-		log.Printf("driving: the real HTTP router over TLS — bulkhead %d in flight per replica, %d account(s) with sessions",
+		log.Printf("driving: the real HTTP router over TLS: bulkhead %d in flight per replica, %d account(s) with sessions",
 			opts.maxInFlight, opts.buyers)
 		log.Printf("NOTE: the per-account checkout rate limit is off in this mode; it would refuse a storm this dense before the bulkhead saw it")
 	} else {
-		log.Printf("driving: the checkout use case directly — NOT a per-replica HTTP number; run with -http for that")
+		log.Printf("driving: the checkout use case directly, NOT a per-replica HTTP number; run with -http for that")
 	}
 	defer storm.close()
 
@@ -627,7 +627,7 @@ func run(cfg config.Config, opts options) error {
 					orderIDs.Store(orderID, true)
 					// A share of buyers retry with the same key: the network
 					// dropped the response. The retry must come back with the
-					// SAME order and must hold nothing extra — over HTTP that
+					// SAME order and must hold nothing extra, over HTTP that
 					// is a replayed 201, in the use case a refused duplicate.
 					if roll() < opts.retryShare {
 						retryID, retryResult, _ := storm.checkout(ctx, buyer, key, ticketID, quantity)
@@ -663,18 +663,18 @@ func run(cfg config.Config, opts options) error {
 		// The number a capacity plan may quote is what the replica ADMITTED,
 		// not what was thrown at it. A shed request never reached a database
 		// connection, so counting it as throughput measures how fast the
-		// bulkhead can decline — which is fast, and meaningless.
+		// bulkhead can decline, which is fast, and meaningless.
 		offered := float64(opts.orders)
 		admitted := offered - float64(shed.Load()) - float64(throttled.Load())
 		log.Printf("per-replica HTTP capacity: %.0f admitted request(s)/s at a bulkhead of %d (%.0f offered/s, %d shed with 503, %d throttled with 429)",
 			admitted/stormTook.Seconds(), opts.maxInFlight,
 			offered/stormTook.Seconds(), shed.Load(), throttled.Load())
 		if shedShare := float64(shed.Load()) / offered; shedShare > 0.05 {
-			log.Printf("NOTE: %.0f%% of requests were shed, so the offered load was above this replica's capacity — "+
+			log.Printf("NOTE: %.0f%% of requests were shed, so the offered load was above this replica's capacity, "+
 				"the admitted figure is the ceiling, and the edge admission rate belongs below it", shedShare*100)
 		}
 	} else {
-		log.Printf("use-case throughput: %.0f attempt(s)/s — inventory arbitration only, NOT a per-replica HTTP ceiling",
+		log.Printf("use-case throughput: %.0f attempt(s)/s: inventory arbitration only, NOT a per-replica HTTP ceiling",
 			float64(opts.orders)/stormTook.Seconds())
 	}
 	log.Printf("checkout latency: p50 %s  p95 %s  p99 %s",
@@ -735,8 +735,8 @@ func newHTTP2Server(handler http.Handler) *httptest.Server {
 // statementErrors counts every statement the database refused during the run.
 //
 // Nothing the system does under load should fail at the database. Every
-// collision it expects — a webhook delivered three times, a checkout retried
-// over a dropped connection, a tier that just sold out — is decided by a
+// collision it expects: a webhook delivered three times, a checkout retried
+// over a dropped connection, a tier that just sold out; is decided by a
 // statement that SUCCEEDS. A count above zero is a mechanism using errors as
 // control flow, which at a million events is a rolled-back transaction and a
 // line in the database log per event, and that is what this invariant
@@ -773,12 +773,12 @@ func (l *statementErrors) report() string {
 }
 
 // ownJobs is the predicate that scopes a jobs query to this run, through the
-// orders the jobs name — the table is shared with other runs, the test suite
+// orders the jobs name; the table is shared with other runs, the test suite
 // and the API, and their jobs are not this run's concern.
 //
 // Two IN-subqueries rather than one EXISTS with an OR: PostgreSQL evaluates
 // each subquery once into a hash and probes it per job, where the OR inside a
-// correlated EXISTS forces a scan of the run's orders for every job — quadratic,
+// correlated EXISTS forces a scan of the run's orders for every job: quadratic,
 // and at twenty thousand orders the harness spent longer counting the queue
 // than the queue spent draining.
 const ownJobs = `(j.payload->>'orderId' IN (SELECT id FROM orders WHERE idempotency_key LIKE @run)
@@ -970,7 +970,7 @@ func audit(db *gorm.DB, runID string, tierIDs []string, provider *stubProvider, 
 	return nil
 }
 
-// cleanup removes the run's rows — jobs first, because a job whose order is
+// cleanup removes the run's rows; jobs first, because a job whose order is
 // gone is an orphan the next run would otherwise have to park.
 func cleanup(db *gorm.DB, runID, ownerID string) {
 	db.Exec(`DELETE FROM jobs j WHERE `+ownJobs, map[string]any{"run": "load-" + runID + "-%"})

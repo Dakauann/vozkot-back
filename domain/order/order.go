@@ -110,7 +110,7 @@ type OpenHolds struct {
 //
 // Without this, the per-minute rate limit does not close: at thirty checkouts a
 // minute, ten tickets each and a thirty-minute hold, one account can keep nine
-// thousand tickets unavailable indefinitely by cycling — the "hold an event
+// thousand tickets unavailable indefinitely by cycling; the "hold an event
 // hostage" move, executed with no money at risk. The rate limit bounds how FAST
 // someone reserves; this bounds how MUCH they may be sitting on at once, which
 // is the quantity that actually hurts.
@@ -159,7 +159,7 @@ func (l HoldLimits) Allows(current OpenHolds, items []Item) error {
 //
 // It counts the ORDER, not the line. Capping each line instead would mean an
 // event with three tiers had a real ceiling of thirty and one with ten had a
-// hundred — a cap that loosens itself the more the organiser subdivides the
+// hundred, a cap that loosens itself the more the organiser subdivides the
 // house is not a cap.
 const MaxQuantityPerOrder = 10
 
@@ -250,7 +250,7 @@ func (o *Order) TotalQuantity() int {
 }
 
 // TicketIDs lists the tiers this order touches, in the order its items are
-// held — which NormalizeItems has already sorted.
+// held, which NormalizeItems has already sorted.
 func (o *Order) TicketIDs() []string {
 	ids := make([]string, 0, len(o.Items))
 	for _, line := range o.Items {
@@ -281,8 +281,8 @@ type Draft struct {
 
 // NormalizeItems collapses repeated tiers, drops empty lines, and sorts.
 //
-// A client that names the same tier twice — two taps of "+" that raced, a retry
-// that merged — means three of that tier, not two separate holds on it. Merging
+// A client that names the same tier twice: two taps of "+" that raced, a retry
+// that merged; means three of that tier, not two separate holds on it. Merging
 // here rather than at the database keeps one tier to one row, which is what
 // makes both the per-tier cap and the lock ordering below meaningful.
 func NormalizeItems(items []DraftItem) ([]DraftItem, error) {
@@ -295,7 +295,7 @@ func NormalizeItems(items []DraftItem) ([]DraftItem, error) {
 		}
 		if line.Quantity <= 0 {
 			// A zero line is a tier the buyer stepped back down to none of. Not
-			// an error — simply not part of the order.
+			// an error, simply not part of the order.
 			continue
 		}
 		if at, seen := index[id]; seen {
@@ -367,7 +367,7 @@ func New(id string, draft Draft, holdFor time.Duration, now time.Time) (*Order, 
 
 	// The buyer's name and email are checked only when they are supplied. A
 	// cart hold is opened before the form is filled in, and refusing it for a
-	// blank name would mean holding nothing until the buyer finished typing —
+	// blank name would mean holding nothing until the buyer finished typing,
 	// which is the race the early hold exists to remove. Confirm is where the
 	// same two fields become mandatory.
 	if draft.BuyerName != "" || draft.BuyerEmail != "" {
@@ -387,23 +387,28 @@ func New(id string, draft Draft, holdFor time.Duration, now time.Time) (*Order, 
 
 	timestamp := now.UTC()
 	return &Order{
-		ID:              id,
-		EventID:         strings.TrimSpace(draft.EventID),
-		BuyerID:         strings.TrimSpace(draft.BuyerID),
-		BuyerName:       draft.BuyerName,
-		BuyerEmail:      draft.BuyerEmail,
-		BuyerDocument:   draft.BuyerDocument,
-		Items:           draft.Items,
-		TotalCents:      total,
-		Currency:        currency,
-		Status:          StatusPendingPayment,
-		HoldExpiresAt:   timestamp.Add(holdFor),
-		PaymentProvider: payment.ProviderMercadoPago,
-		PaymentStatus:   payment.StatusPending,
-		PaymentMethod:   method,
-		IdempotencyKey:  strings.TrimSpace(draft.IdempotencyKey),
-		CreatedAt:       timestamp,
-		UpdatedAt:       timestamp,
+		ID:            id,
+		EventID:       strings.TrimSpace(draft.EventID),
+		BuyerID:       strings.TrimSpace(draft.BuyerID),
+		BuyerName:     draft.BuyerName,
+		BuyerEmail:    draft.BuyerEmail,
+		BuyerDocument: draft.BuyerDocument,
+		Items:         draft.Items,
+		TotalCents:    total,
+		Currency:      currency,
+		Status:        StatusPendingPayment,
+		HoldExpiresAt: timestamp.Add(holdFor),
+		// No provider named here, deliberately. An order that has not been
+		// charged yet has not been through ANY provider, and stamping one at
+		// creation was how every order ended up labelled "mercadopago" whatever
+		// actually issued the charge. AttachCharge sets it from the charge, so
+		// the field says what really happened rather than what was configured
+		// when the row was written.
+		PaymentStatus:  payment.StatusPending,
+		PaymentMethod:  method,
+		IdempotencyKey: strings.TrimSpace(draft.IdempotencyKey),
+		CreatedAt:      timestamp,
+		UpdatedAt:      timestamp,
 	}, nil
 }
 
@@ -412,7 +417,7 @@ func New(id string, draft Draft, holdFor time.Duration, now time.Time) (*Order, 
 //
 // The extension happens ONCE, however many times this is called. A buyer who
 // submits the form twice, or whose phone retried the request, must not get a
-// second window — an extension per press is a way to hold stock forever by
+// second window; an extension per press is a way to hold stock forever by
 // pressing a button.
 func (o *Order) Confirm(
 	name, email, document string,
@@ -447,8 +452,8 @@ func (o *Order) Confirm(
 		return false, nil
 	}
 	o.Confirmed = true
-	// Only ever forward. A hold already further out than the new window — an
-	// operator-lengthened one, or a clock that disagrees — must not be pulled
+	// Only ever forward. A hold already further out than the new window, an
+	// operator-lengthened one, or a clock that disagrees; must not be pulled
 	// backwards by a confirmation.
 	if extended := timestamp.Add(holdFor); extended.After(o.HoldExpiresAt) {
 		o.HoldExpiresAt = extended

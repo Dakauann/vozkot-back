@@ -21,7 +21,7 @@ import (
 //     "4 left" can disappoint a buyer but can never oversell an event.
 //   - Writes made through this decorator invalidate immediately. Writes made
 //     inside a transaction go through the undecorated repository the unit of
-//     work builds, so those are bounded by the TTL instead — which is why the
+//     work builds, so those are bounded by the TTL instead, which is why the
 //     TTL is seconds rather than minutes.
 type CachedTicketRepository struct {
 	inner domain.Repository

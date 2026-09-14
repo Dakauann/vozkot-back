@@ -5,12 +5,6 @@ type LoginRequest struct {
 	Password string `json:"password" example:"SenhaForte1"`
 }
 
-type RegisterRequest struct {
-	Name     string `json:"name" example:"Maria Silva"`
-	Email    string `json:"email" example:"maria@empresa.com.br"`
-	Password string `json:"password" example:"SenhaForte1"`
-}
-
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refreshToken,omitempty" example:"token_de_atualizacao"`
 }

@@ -371,14 +371,14 @@ func TestAnUndeliverableMessageIsParkedImmediately(t *testing.T) {
 		t.Fatalf("job status = %q, want dead", row.Status)
 	}
 	if row.Attempts != 1 {
-		t.Fatalf("attempts = %d, want 1 — an undeliverable message must not burn the budget", row.Attempts)
+		t.Fatalf("attempts = %d, want 1; an undeliverable message must not burn the budget", row.Attempts)
 	}
 	if h.requests.Load() != 0 {
 		t.Error("the provider was called for an undeliverable message")
 	}
 }
 
-// With no channel registered — no RESEND_API_KEY in development — nothing is
+// With no channel registered, no RESEND_API_KEY in development, nothing is
 // queued at all, so the dead list does not fill with work that was never
 // possible.
 func TestNothingIsQueuedWithoutAChannel(t *testing.T) {

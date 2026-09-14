@@ -19,7 +19,7 @@ import (
 // newLogger reports slow queries and real failures, and nothing else.
 //
 // "Record not found" is left out on purpose: it is the ordinary answer to a
-// lookup — an order that does not exist, a key never claimed — and logging it
+// lookup, an order that does not exist, a key never claimed, and logging it
 // as an error, with a stack line, would bury the failures that matter under
 // the one that never is.
 func newLogger() logger.Interface {
@@ -51,7 +51,7 @@ func dsn(cfg config.DatabaseConfig) string {
 // across connections and, when a query text last prepared inside a
 // transaction is run outside one, re-prepares it on a connection borrowed
 // from the pool. A transaction that reaches that query meanwhile waits for
-// the prepare while holding its own connection — and with the pool full of
+// the prepare while holding its own connection, and with the pool full of
 // such transactions, the prepare never gets one. The load harness hit exactly
 // this: every connection idle on BEGIN, nothing blocked in PostgreSQL, zero
 // orders. pgx keeps its own statement cache per connection, which gives the

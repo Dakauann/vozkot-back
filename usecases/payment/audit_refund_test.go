@@ -20,7 +20,7 @@ import (
 //
 // And a refund used to run on the HTTP request. A provider slower than the
 // twenty-second write timeout left the money refunded at Mercado Pago and the
-// order untouched here — the two facts that must never disagree, disagreeing,
+// order untouched here; the two facts that must never disagree, disagreeing,
 // with nothing left to reconcile them.
 
 // paid drives an order all the way to paid, the way a webhook would.

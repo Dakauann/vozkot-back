@@ -17,7 +17,7 @@ import (
 // Notification is the envelope Mercado Pago POSTs to the webhook URL.
 //
 // It carries no payment state: only a resource id under data.id. Acting on it
-// therefore always requires a GET /v1/payments/{id}, and that is a feature —
+// therefore always requires a GET /v1/payments/{id}, and that is a feature;
 // state that is read back cannot be forged by whoever sent the request.
 //
 // Reference: https://www.mercadopago.com/developers/en/docs/your-integrations/notifications/webhooks

@@ -57,7 +57,7 @@ func (p *Profiles) Save(ctx context.Context, input SaveInput) (*user.User, error
 	}
 
 	// A phone already proven is carried forward. Filling in the identity block
-	// a second time — to correct a typo in a name — must not silently
+	// a second time, to correct a typo in a name, must not silently
 	// un-verify a number.
 	profile.Phone = account.Profile.Phone
 	profile.PhoneVerifiedAt = account.Profile.PhoneVerifiedAt

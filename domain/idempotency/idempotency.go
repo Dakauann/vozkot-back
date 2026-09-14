@@ -5,7 +5,7 @@
 // request and the response it produced, and a retry with the same key returns
 // that stored response instead of doing the work again. Without it, a buyer
 // whose connection drops mid-checkout taps twice and holds two batches of
-// tickets — or pays for both.
+// tickets, or pays for both.
 package idempotency
 
 import (
@@ -62,8 +62,8 @@ const TTL = 24 * time.Hour
 // DefaultLease is how long one claim may stay unfinished before another request
 // may take it over.
 //
-// It has to exceed the slowest honest request — the HTTP write timeout is the
-// ceiling on that — because a lease that lapses while the first request is
+// It has to exceed the slowest honest request; the HTTP write timeout is the
+// ceiling on that, because a lease that lapses while the first request is
 // still working would let a second one run the same checkout concurrently,
 // which is the double-charge the key exists to prevent. A minute against a
 // twenty-second write timeout is three times the margin.
@@ -74,7 +74,7 @@ type Claim struct {
 	// Mine is true when this caller owns the claim and must do the work.
 	Mine bool
 	// Recovered is true when the claim was taken over from a request that never
-	// finished — a process killed mid-checkout, or a deploy.
+	// finished: a process killed mid-checkout, or a deploy.
 	//
 	// It matters because the work may ALREADY have committed: the claim is
 	// written before the handler runs and completed after it, so a crash
@@ -100,7 +100,7 @@ func (r *Record) Lapsed(now time.Time) bool {
 type Store interface {
 	// Begin claims a key, reporting whether this caller now owns it.
 	//
-	// The claim has to be atomic — one INSERT that either wins or loses —
+	// The claim has to be atomic, one INSERT that either wins or loses,
 	// because two simultaneous retries of the same request are the exact race
 	// this is protecting against. Taking over a lapsed claim is atomic for the
 	// same reason: one conditional UPDATE, so two retries of an orphaned

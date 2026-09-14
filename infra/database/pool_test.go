@@ -20,7 +20,7 @@ import (
 //
 // The load harness found the failure this guards against. With every pooled
 // connection held by a checkout transaction, each of those transactions sat
-// on BEGIN forever, waiting for a statement to be prepared — and the prepare
+// on BEGIN forever, waiting for a statement to be prepared, and the prepare
 // was waiting for a free connection, which none of them would release until
 // the statement ran. Zero orders in six minutes, nothing blocked at the
 // database, and an API that would do the same the first time concurrency
@@ -77,7 +77,7 @@ func TestTransactionsNeverWaitForASecondConnection(t *testing.T) {
 
 	// Outside any transaction, the same lookup: with the pool full it waits
 	// for a connection, and it must be able to get one once the transactions
-	// finish — which they can only do if they do not wait on it.
+	// finish, which they can only do if they do not wait on it.
 	go func() { done <- lookup(db) }()
 	time.Sleep(200 * time.Millisecond)
 	close(release)

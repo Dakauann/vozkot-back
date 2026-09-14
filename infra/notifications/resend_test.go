@@ -52,7 +52,7 @@ func testMessage() domain.Message {
 	return domain.Message{
 		To:             "maria@exemplo.com.br",
 		Name:           "Maria Souza",
-		Subject:        "Pagamento confirmado — pedido A1B2C3D4",
+		Subject:        "Pagamento confirmado: pedido A1B2C3D4",
 		Body:           "<html><body>ok</body></html>",
 		Category:       "order_confirmed",
 		IdempotencyKey: "notification.send:order_confirmed:ord_1",
@@ -96,7 +96,7 @@ func TestSendPostsWhatTheProviderExpects(t *testing.T) {
 	if got := captured.body["reply_to"]; got != "suporte@tickets.example" {
 		t.Errorf("reply_to = %v", got)
 	}
-	if got := captured.body["subject"]; got != "Pagamento confirmado — pedido A1B2C3D4" {
+	if got := captured.body["subject"]; got != "Pagamento confirmado, pedido A1B2C3D4" {
 		t.Errorf("subject = %v", got)
 	}
 	if got := captured.body["html"]; got != "<html><body>ok</body></html>" {
@@ -159,7 +159,7 @@ func TestSendDoesNotRetryRejectedRequests(t *testing.T) {
 	}
 }
 
-// A provider outage comes back as an ordinary error so the QUEUE retries it —
+// A provider outage comes back as an ordinary error so the QUEUE retries it,
 // with minutes of backoff, and across a deploy, which this call cannot do.
 func TestSendHandsProviderOutagesBackToTheQueue(t *testing.T) {
 	sender := newTestSender(t, 0, func(response http.ResponseWriter, _ *http.Request) {
@@ -209,7 +209,7 @@ func TestSendIsRateLimited(t *testing.T) {
 func TestSendRespectsTheCallerContext(t *testing.T) {
 	// Released with a defer rather than t.Cleanup: cleanups run last-in
 	// first-out, and the server's own Close was registered second, so a
-	// cleanup here would run after it — leaving Close waiting on the handler
+	// cleanup here would run after it, leaving Close waiting on the handler
 	// this channel is what frees.
 	release := make(chan struct{})
 	defer close(release)

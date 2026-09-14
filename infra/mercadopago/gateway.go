@@ -83,7 +83,7 @@ func (g *gateway) CreateCharge(ctx context.Context, request payment.ChargeReques
 
 	firstName, lastName := splitName(request.Customer.Name)
 	// Mercado Pago's minimum PIX window is 30 minutes. A shorter hold is
-	// clamped up, which means a code can outlive its reservation — the case the
+	// clamped up, which means a code can outlive its reservation, the case the
 	// order's late-payment path exists to settle honestly.
 	expiresAt := ClampExpiry(request.ExpiresAt, g.now())
 

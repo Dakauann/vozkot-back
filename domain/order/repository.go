@@ -23,7 +23,7 @@ type Filter struct {
 	// EventNotBefore keeps a sweep to orders whose event has not happened yet.
 	//
 	// The settled-order audit needs it: re-reading every order ever paid, at
-	// the provider, forever, is unbounded work for no benefit — once the doors
+	// the provider, forever, is unbounded work for no benefit, once the doors
 	// have closed a late refund is bookkeeping, not inventory.
 	EventNotBefore time.Time
 }
@@ -39,8 +39,8 @@ type Repository interface {
 	GetByID(ctx context.Context, id string) (*Order, error)
 	// GetByIDForUpdate reads the order and holds its row until the enclosing
 	// transaction ends. Every read-then-write on an order goes through it, so
-	// two settlements of the same order — a redelivered webhook racing the
-	// reconciliation sweep — run one after the other, and the second sees
+	// two settlements of the same order, a redelivered webhook racing the
+	// reconciliation sweep; run one after the other, and the second sees
 	// what the first committed instead of both seeing "pending".
 	GetByIDForUpdate(ctx context.Context, id string) (*Order, error)
 	FindByIdempotencyKey(ctx context.Context, key string) (*Order, error)
@@ -62,7 +62,7 @@ type Repository interface {
 	// for the same reason: a count that is not held against the insert it
 	// guards is decoration. Two checkouts by one account arriving together
 	// would otherwise both read "one open order", both pass a limit of two, and
-	// both commit — the check defeated by the only traffic that would try.
+	// both commit; the check defeated by the only traffic that would try.
 	//
 	// The lock is per BUYER, so it costs an honest buyer nothing: it is only
 	// ever contended by someone checking out twice at once, which is either a

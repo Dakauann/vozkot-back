@@ -128,7 +128,7 @@ func TestChargedBasketIsPricedAcrossEveryLine(t *testing.T) {
 
 	charged := h.provider.amount(paymentID)
 	if charged != 980.0 {
-		t.Fatalf("charged %.2f, want 980.00 — the whole basket, not one line", charged)
+		t.Fatalf("charged %.2f, want 980.00: the whole basket, not one line", charged)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestRefundedBasketReturnsEveryTierToStock(t *testing.T) {
 //
 // The hold lapsed, Pista is still available, and Camarote sold out while the
 // buyer was in their banking app. Taking the Pista back and calling the order
-// paid would admit them on two of three tickets they paid in full for — and
+// paid would admit them on two of three tickets they paid in full for, and
 // would take stock for an order that cannot be honoured. The only honest answer
 // is that the box office owes a refund, and that the Pista it briefly took back
 // is released again.

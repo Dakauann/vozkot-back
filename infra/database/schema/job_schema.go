@@ -12,14 +12,14 @@ import "time"
 // The column order matters. Leading with status and run_at makes "pending jobs
 // due now, oldest first" one range scan that stops at its LIMIT, with the type
 // checked in the index. Leading with type would make it one scan per handled
-// type plus a sort of the entire backlog on every claim — fine when the queue
+// type plus a sort of the entire backlog on every claim, fine when the queue
 // is empty, and exactly wrong during the burst a queue exists for.
 type Job struct {
 	ID   string `gorm:"primaryKey;type:varchar(48)"`
 	Type string `gorm:"not null;type:varchar(64);index:idx_jobs_claim,priority:3"`
 	// No column default. PostgreSQL stores one on a jsonb column as
 	// '{}'::jsonb, which never matches the literal in a struct tag, so
-	// AutoMigrate re-issues ALTER COLUMN SET DEFAULT on every boot — DDL in
+	// AutoMigrate re-issues ALTER COLUMN SET DEFAULT on every boot, DDL in
 	// steady state, and a table lock on the busiest table in the system. The
 	// repository already defaults an empty payload in Go, which is the only
 	// place that writes one.

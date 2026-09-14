@@ -6,7 +6,7 @@ package main
 // the right question for the locking design and the wrong one for a capacity
 // plan, because it skips everything a real checkout also pays for: TLS, the
 // session lookup, the idempotency claim and its completing UPDATE, JSON in and
-// out, and — decisively — the admission bulkhead, which caps a replica at
+// out, and, decisively, the admission bulkhead, which caps a replica at
 // CHECKOUT_MAX_IN_FLIGHT divided by the latency of the WHOLE request.
 //
 // So this mode stands up delivery/http.NewRouter with every real dependency
@@ -55,7 +55,7 @@ type outcome int
 
 const (
 	outcomeCreated outcome = iota
-	// outcomeSoldOut is the tier running out — expected, and the majority of a
+	// outcomeSoldOut is the tier running out: expected, and the majority of a
 	// well-designed run.
 	outcomeSoldOut
 	// outcomeShed is the admission bulkhead refusing the request before it
@@ -197,7 +197,7 @@ func truncateBody(payload []byte) string {
 // Every dependency is the production one: the same middleware chain, the same
 // idempotency store, the same session guard. The two deliberate departures are
 // named in the log, because a harness that silently differs from production is
-// worse than no harness — the per-account checkout rate limit is off (thirty a
+// worse than no harness; the per-account checkout rate limit is off (thirty a
 // minute would refuse a storm that makes hundreds per buyer in seconds, and it
 // is not what this run measures), and the hold limits are raised for the same
 // reason.

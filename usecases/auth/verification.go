@@ -15,7 +15,7 @@ import (
 // Passwordless sign-in: prove you can read an address, and you are in.
 //
 // The threat model is worth stating, because it is not the same as a password's.
-// There is no secret to steal and no secret to reuse across sites — which
+// There is no secret to steal and no secret to reuse across sites, which
 // removes the two biggest causes of account takeover outright. What it adds is
 // that the mailbox becomes the account, and that the code in flight is a live
 // credential for a few minutes. So the code is random, hashed at rest, capped
@@ -78,7 +78,7 @@ func NewVerification(
 // Started is what the caller is told after a code goes out.
 //
 // It carries no hint about whether the address is known. The challenge id is
-// safe to return — it is random, it is useless without the code, and the client
+// safe to return; it is random, it is useless without the code, and the client
 // needs something to send the code back against.
 type Started struct {
 	ChallengeID string
@@ -173,7 +173,7 @@ func (v *Verification) start(
 	// and the person holding it has no way to know that.
 	if err := sender.Send(ctx, destination, code, purpose); err != nil {
 		// The challenge stays. It expires on its own, and it keeps counting
-		// against the rate limit — which is correct: a failing mail provider
+		// against the rate limit, which is correct: a failing mail provider
 		// must not become an unlimited retry loop.
 		return Started{}, err
 	}
@@ -224,8 +224,8 @@ func (v *Verification) VerifyEmailSignIn(
 		}
 		return &VerifiedSignIn{Tokens: tokens, Created: false}, nil
 	case errors.Is(err, user.ErrNotFound):
-		// First time. The account is made now, with no password — there is
-		// none to make — and with no name either: the name arrives with the
+		// First time. The account is made now, with no password, there is
+		// none to make, and with no name either: the name arrives with the
 		// identity block, and inventing one from the address would put a
 		// mangled string on somebody's ticket.
 		now := v.now().UTC()
@@ -343,7 +343,7 @@ func (v *Verification) consume(
 // SweepExpiredChallenges clears out codes that can no longer be answered.
 //
 // They are deliberately short lived, and keeping them afterwards would be
-// retaining a record of who signed in and when — which is the thing this
+// retaining a record of who signed in and when, which is the thing this
 // table's shape is designed not to hold.
 func (v *Verification) SweepExpiredChallenges(ctx context.Context, limit int) (int, error) {
 	removed, err := v.challenges.DeleteExpired(ctx, v.now().UTC(), limit)

@@ -7,12 +7,12 @@
 //  1. ENVELOPE ENCRYPTION. A value is sealed with the active key and stored as
 //     `[format][key version][nonce][ciphertext]`. The version is IN the
 //     envelope, so a key can be rotated by adding a new one and changing which
-//     is active — old rows keep opening under the old key, and nothing has to
+//     is active; old rows keep opening under the old key, and nothing has to
 //     be re-encrypted in a single terrifying migration.
 //
 //  2. BLIND INDEX. A keyed HMAC of the same value, stored beside it. AES-GCM
-//     produces a different ciphertext every time — that is the point of the
-//     nonce — so an encrypted column cannot be searched or made unique. The
+//     produces a different ciphertext every time, that is the point of the
+//     nonce, so an encrypted column cannot be searched or made unique. The
 //     HMAC is deterministic, so it can be indexed, while still being useless to
 //     anyone who takes the database without the key: it is not reversible, and
 //     it is not a plain hash an attacker can attack with a list of every valid
@@ -116,7 +116,7 @@ func (s *Service) Decrypt(envelope []byte) ([]byte, error) {
 // BlindIndex is the searchable, non-reversible form of a value.
 //
 // The scope and the value are separated by a zero byte so that ("ab", "c") and
-// ("a", "bc") cannot produce the same index — the classic length-extension
+// ("a", "bc") cannot produce the same index, the classic length-extension
 // mistake in a concatenated MAC input.
 func (s *Service) BlindIndex(scope, value string) []byte {
 	mac := hmac.New(sha256.New, s.blindKey)

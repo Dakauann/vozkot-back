@@ -56,8 +56,8 @@ func NewCachedSessionRepository(inner domain.SessionRepository, cache cachedomai
 // cachedSession is the cache's own encoding of a session.
 //
 // The domain type CANNOT be marshalled directly, and this is the trap this
-// whole file exists to avoid: its json tags are the API's — a session is listed
-// back to the user who owns it — and they drop `UserID`, `AccessJTI` and
+// whole file exists to avoid: its json tags are the API's; a session is listed
+// back to the user who owns it, and they drop `UserID`, `AccessJTI` and
 // `RevokedAt` with `json:"-"`. Encoding the domain type would therefore store a
 // session that decodes as belonging to nobody and never revoked, and
 // `Active()` would wave it through. A revoked session that authenticates is the
@@ -78,8 +78,8 @@ type cachedSession struct {
 	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
 }
 
-// sessionPointer is what a session id resolves to, so revoking and rotating —
-// which name a session by id — can find the entry keyed by access token.
+// sessionPointer is what a session id resolves to, so revoking and rotating,
+// which name a session by id; can find the entry keyed by access token.
 type sessionPointer struct {
 	UserID string `json:"userId"`
 	JTI    string `json:"jti"`
@@ -206,7 +206,7 @@ func (r *CachedSessionRepository) forget(ctx context.Context, sessionID string) 
 	liveKey := cachedomain.SessionLiveKey(sessionID)
 	raw, err := r.cache.Get(ctx, liveKey)
 	if err != nil {
-		// Nothing cached for this session, or the cache is unreachable — in
+		// Nothing cached for this session, or the cache is unreachable, in
 		// which case the next request misses and reads the revoked row anyway.
 		return
 	}

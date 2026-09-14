@@ -14,7 +14,7 @@ import (
 //
 // It is the worker's handler and nothing else. There is no loop, no backoff
 // and no attempt counter in here, because the job row already has all three
-// and they survive a deploy — which is the one property an in-process retry
+// and they survive a deploy, which is the one property an in-process retry
 // loop can never have.
 type Service struct {
 	renderer domain.Renderer
@@ -47,7 +47,7 @@ func (s *Service) Channels() []domain.Channel {
 // The error it returns is a verdict for the queue, and the split matters:
 //
 //   - queue.Permanent parks the job on the first attempt. Reserved for what no
-//     retry can fix — a channel with no sender, a recipient with no address, a
+//     retry can fix: a channel with no sender, a recipient with no address, a
 //     template that will not render. Trying those twenty times over an hour
 //     tells nobody anything the first attempt did not, and hides work that
 //     needs a person inside the retry queue.
@@ -84,8 +84,8 @@ func (s *Service) Deliver(ctx context.Context, payload domain.Payload) error {
 		Body:     body,
 		Category: string(request.Template),
 		// The provider is handed the same key the queue deduplicated on. A job
-		// the provider accepted but that failed to record itself — a worker
-		// killed between the send and the row update — is reclaimed by the
+		// the provider accepted but that failed to record itself, a worker
+		// killed between the send and the row update; is reclaimed by the
 		// stale sweep and sent again; the key is what makes that second send
 		// arrive zero times instead of twice.
 		IdempotencyKey: request.DedupeKey,

@@ -29,7 +29,7 @@ type SessionRepository interface {
 	FindByPreviousRefreshTokenHash(ctx context.Context, hash string) (*Session, error)
 	// FindByAccessJTI answers "is this access token's session still live".
 	//
-	// It is the hot path — every authenticated request makes it — so an
+	// It is the hot path, every authenticated request makes it, so an
 	// implementation is free to answer it from a cache. Two consequences are
 	// part of the contract rather than one adapter's quirk:
 	//
@@ -44,7 +44,7 @@ type SessionRepository interface {
 	// It must return ErrSessionNotFound, and only that, for "no such live
 	// session". Any other error means the lookup itself failed, and a caller
 	// has to be able to tell an unauthenticated request from an unavailable
-	// database — answering a failover with "your token is bad" logs every
+	// database; answering a failover with "your token is bad" logs every
 	// buyer out mid-checkout.
 	FindByAccessJTI(ctx context.Context, userID, jti string) (*Session, error)
 	Rotate(ctx context.Context, sessionID, expectedHash, nextHash, nextJTI string, rotatedAt time.Time) (bool, error)

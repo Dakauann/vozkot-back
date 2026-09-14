@@ -283,7 +283,7 @@ func mockTiers(category mockCategory, eventIndex int) []mockTier {
 	fullPrice := category.BasePriceCents + int64(eventIndex*500)
 	return []mockTier{
 		{
-			Title:       "Ingresso inteira — 1º lote",
+			Title:       "Ingresso inteira: 1º lote",
 			Description: "Acesso individual pelo primeiro lote de vendas. Apresente o ingresso digital na entrada.",
 			PriceCents:  fullPrice,
 			Quantity:    quantity,

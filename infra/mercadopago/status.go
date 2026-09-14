@@ -33,7 +33,7 @@ const (
 // It reads the whole payment rather than the status string alone, because two
 // cases are invisible from the status: a partially refunded charge stays
 // "approved" and only moves status_detail, and an unpaid PIX that ran out its
-// clock arrives as "cancelled" with status_detail "expired" — which is "not
+// clock arrives as "cancelled" with status_detail "expired", which is "not
 // paid in time", not "voided by us".
 //
 // in_process and in_mediation deliberately map to in-analysis: the money is not

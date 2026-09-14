@@ -20,7 +20,7 @@ import (
 // The lookup being cached is the busiest query in the system: every
 // authenticated request makes it, and a checkout screen polls for a PIX code
 // for the length of a thirty-minute hold. What has to stay true is that a
-// session which STOPPED being valid stops authenticating — immediately when the
+// session which STOPPED being valid stops authenticating, immediately when the
 // system is told, and within the TTL when it is not.
 
 type sessionHarness struct {
@@ -81,7 +81,7 @@ func (h *sessionHarness) create(t *testing.T) *domain.Session {
 // merely wrapped.
 //
 // The row is deleted out from under the cache: if the second lookup still
-// answers, it answered from Redis. That is the whole point of the change — at a
+// answers, it answered from Redis. That is the whole point of the change, at a
 // two-second poll rate this turns fifteen primary reads per buyer per window
 // into one.
 func TestSecondLookupSkipsPostgreSQL(t *testing.T) {
@@ -95,8 +95,8 @@ func TestSecondLookupSkipsPostgreSQL(t *testing.T) {
 
 	// Checked separately from the hit below, so a failure says WHICH half broke:
 	// a lookup that never populated the cache, or a cache that did not answer.
-	// Redis is best-effort by design — the repository logs and carries on when a
-	// write fails — so a bare "it went to PostgreSQL" would be ambiguous.
+	// Redis is best-effort by design; the repository logs and carries on when a
+	// write fails, so a bare "it went to PostgreSQL" would be ambiguous.
 	if _, err := h.cache.Get(ctx, cachedomain.SessionKey(h.userID, session.AccessJTI)); err != nil {
 		t.Fatalf("the first lookup did not populate the cache (%v); every request would keep hitting PostgreSQL", err)
 	}
@@ -197,7 +197,7 @@ func TestAFailedRotationInvalidatesNothing(t *testing.T) {
 // domain.Session's json tags are the API's: UserID, AccessJTI and RevokedAt are
 // all `json:"-"`, because a session listed back to its owner should not carry
 // them. Encoding the domain type into the cache would therefore store a session
-// that decodes as belonging to nobody and never revoked — and Active() would
+// that decodes as belonging to nobody and never revoked, and Active() would
 // wave it through. A revoked session that authenticates is the one bug this
 // file must not have.
 func TestCachedSessionCarriesRevocationAndIdentity(t *testing.T) {
@@ -293,7 +293,7 @@ func TestTheEntryNeverOutlivesItsSession(t *testing.T) {
 		t.Fatalf("warm the cache: %v", err)
 	}
 
-	// Even if the entry survived, liveness is evaluated fresh every request —
+	// Even if the entry survived, liveness is evaluated fresh every request,
 	// so the session is refused on its own terms, not the cache's.
 	time.Sleep(1200 * time.Millisecond)
 	found, err := h.cached.FindByAccessJTI(ctx, h.userID, session.AccessJTI)
@@ -304,7 +304,7 @@ func TestTheEntryNeverOutlivesItsSession(t *testing.T) {
 
 // TestAMissIsNeverCached: a lookup that found nothing must not become a
 // permanent refusal, and a lookup that FAILED must stay distinguishable from
-// one that found nothing — 401 and 503 are different answers.
+// one that found nothing; 401 and 503 are different answers.
 func TestAMissIsNeverCached(t *testing.T) {
 	h := newSessionHarness(t, 30*time.Second)
 	ctx := context.Background()

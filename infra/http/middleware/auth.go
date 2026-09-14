@@ -42,7 +42,7 @@ func (m *Auth) Require(next http.Handler) http.Handler {
 			httpx.WriteError(response, http.StatusUnauthorized, auth.ErrUnauthorized)
 			return
 		case err != nil:
-			// The lookup itself failed — a pool timeout, a failover, an
+			// The lookup itself failed: a pool timeout, a failover, an
 			// unreachable database. Answering 401 here would be a lie with
 			// teeth: the browser client refreshes once, that fails the same
 			// way, and it clears the cookies, so a thirty-second blip logs

@@ -52,7 +52,7 @@ func RunMigrations(ctx context.Context, db *gorm.DB) error {
 		// Events must exist before the backfill can write any, and tickets
 		// cannot be migrated against a `not null` event_id until every tier
 		// HAS one. So: create events, add the column nullable, backfill, apply
-		// the constraint — and only then let AutoMigrate compare the tickets
+		// the constraint, and only then let AutoMigrate compare the tickets
 		// struct against a table that already matches it. Migrating tickets
 		// first would leave the column nullable in the database and `not null`
 		// in the tag, and AutoMigrate would try to reconcile the two on every
@@ -104,7 +104,7 @@ func RunMigrations(ctx context.Context, db *gorm.DB) error {
 		); err != nil {
 			return fmt.Errorf("auto migrate: %w", err)
 		}
-		// Copy, derive, verify, drop — in that order, and never the other way
+		// Copy, derive, verify, drop, in that order, and never the other way
 		// round. See orders_backfill.go for why each step is guarded the way it
 		// is.
 		if err := backfillOrderItems(tx); err != nil {
@@ -214,7 +214,7 @@ func rawResponseBytes(tx *gorm.DB) error {
 // beat the same term buried in a description (C), or searching for a city
 // returns every event that merely mentions it.
 //
-// The 'portuguese' configuration is the point of using this at all — it stems,
+// The 'portuguese' configuration is the point of using this at all: it stems,
 // so "shows" finds "show" and "festas" finds "festa", and it drops stop words
 // so "a casa" searches for "casa".
 func addSearchVector(tx *gorm.DB) error {
@@ -241,7 +241,7 @@ func addSearchVector(tx *gorm.DB) error {
 // enableTrigramSearch turns on the extension that makes a misspelling findable.
 //
 // Full-text search matches WORDS, so a buyer who types "festivl" gets nothing
-// at all — and a search box that punishes a typo with an empty page is one
+// at all, and a search box that punishes a typo with an empty page is one
 // people stop using. Trigram similarity catches those, and the two are used
 // together: full text decides relevance, trigram decides that "festivl" meant
 // "festival".
@@ -265,7 +265,7 @@ func enableTrigramSearch(ctx context.Context, db *gorm.DB) {
 //
 // Each constraint is added only when absent. ADD CONSTRAINT takes an ACCESS
 // EXCLUSIVE lock on the table, and a boot that re-ran it on every start would
-// stall — or deadlock against — every checkout in flight during a rolling
+// stall, or deadlock against, every checkout in flight during a rolling
 // deploy. A steady-state boot must run no DDL at all.
 func addStockGuards(tx *gorm.DB) error {
 	guards := []struct {

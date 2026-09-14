@@ -63,7 +63,7 @@ func TestCreateChargeSendsWhatMercadoPagoRequires(t *testing.T) {
 	if idempotencyKey != "ord_1" {
 		t.Fatalf("X-Idempotency-Key = %q, want the order id", idempotencyKey)
 	}
-	// Cents in, decimal on the wire. 48000 centavos is R$ 480,00 — not 48000.
+	// Cents in, decimal on the wire. 48000 centavos is R$ 480,00, not 48000.
 	if captured.TransactionAmount != 480 {
 		t.Fatalf("transaction_amount = %v, want 480", captured.TransactionAmount)
 	}

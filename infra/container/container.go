@@ -25,6 +25,7 @@ import (
 	paymentdomain "vozkot/domain/payment"
 	queuedomain "vozkot/domain/queue"
 	ticketdomain "vozkot/domain/ticket"
+	"vozkot/infra/asaas"
 	"vozkot/infra/config"
 	"vozkot/infra/crypto/pii"
 	"vozkot/infra/crypto/piigorm"
@@ -239,8 +240,8 @@ func New(cfg config.Config) (*Container, error) {
 			holdLimits.Orders, holdLimits.TicketsPerTier)
 	}
 	// Buyer messaging. Built before the payment service because settlement is
-	// what raises a receipt, and built as ONE stack — renderer, channel
-	// senders, notifier — so the channels the notifier will accept are exactly
+	// what raises a receipt, and built as ONE stack: renderer, channel
+	// senders, notifier, so the channels the notifier will accept are exactly
 	// the channels something can deliver.
 	messenger, purchases, notifier, err := buildNotifications(cfg.Notifications, jobs, dispatcher)
 	if err != nil {
@@ -251,15 +252,15 @@ func New(cfg config.Config) (*Container, error) {
 	//
 	// Both depend on the encryption keyring: the challenge table seals its
 	// destinations and the user table seals its documents, so without keys
-	// there is nowhere safe to put either. Rather than fall back to plaintext —
-	// which is how a "temporary" unencrypted column becomes permanent — the
+	// there is nowhere safe to put either. Rather than fall back to plaintext,
+	// which is how a "temporary" unencrypted column becomes permanent, the
 	// routes are simply not mounted, and the password sign-in that predates
 	// them keeps working.
 	if piiService != nil {
 		codes := notificationUsecase.NewCodeSender(notifier, dispatcher)
 		challenges := authRepository.NewChallengeRepository(db)
 		// No phone sender. There is no SMS or WhatsApp provider wired, so the
-		// phone routes answer 503 rather than pretending — a nil sender is the
+		// phone routes answer 503 rather than pretending; a nil sender is the
 		// honest representation of "this channel does not exist yet", and the
 		// alternative was a stub that logged the code, which puts a live
 		// credential in whatever collects stdout.
@@ -285,12 +286,23 @@ func New(cfg config.Config) (*Container, error) {
 	paymentService := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, purchases)
 	checkoutHandler := checkoutHTTP.NewHandler(checkoutService, paymentService, eventService, keys, cfg.Queue.IdempotencyLease)
 
-	var webhookHandler *webhooksHTTP.MercadoPagoHandler
-	if cfg.Payments.Enabled() {
-		webhookHandler = webhooksHTTP.NewMercadoPagoHandler(jobs, dispatcher, cfg.Payments.WebhookSecret, cfg.Payments.SignatureTolerance)
-		log.Printf("payments: Mercado Pago enabled, holds last %s", cfg.Payments.HoldFor)
-	} else {
+	webhookHandler := buildWebhookHandler(cfg.Payments, jobs, dispatcher)
+	switch {
+	case !cfg.Payments.Enabled() && cfg.Payments.Provider == paymentdomain.ProviderMercadoPago:
 		log.Printf("payments: Mercado Pago is not configured; checkout will answer 503 until MERCADOPAGO_ACCESS_TOKEN is set")
+	case !cfg.Payments.Enabled():
+		log.Printf("payments: Asaas is not configured; checkout will answer 503 until ASAAS_API_KEY is set")
+	case cfg.Payments.Provider == paymentdomain.ProviderMercadoPago:
+		log.Printf("payments: Mercado Pago enabled, holds last %s", cfg.Payments.HoldFor)
+	default:
+		// The environment is stated plainly, because the sandbox is a different
+		// HOST rather than a flag and "am I billing real money" is the first
+		// question anybody has when a charge behaves unexpectedly.
+		mode := "PRODUCTION (charges are real)"
+		if asaas.NewClient(cfg.Payments.AsaasAPIKey, cfg.Payments.AsaasBaseURL).Sandbox() {
+			mode = "SANDBOX"
+		}
+		log.Printf("payments: Asaas enabled in %s mode, holds last %s", mode, cfg.Payments.HoldFor)
 	}
 
 	var checkoutLimit, authLimit *authMiddleware.RateLimit
@@ -332,7 +344,7 @@ func New(cfg config.Config) (*Container, error) {
 //
 // Everything is decided here and nowhere else: which provider carries email,
 // which channels therefore exist, and what the notifier is allowed to queue.
-// With no RESEND_API_KEY it returns nils all the way down — a supported state
+// With no RESEND_API_KEY it returns nils all the way down, a supported state
 // in development, and one config.loadNotifications refuses in production,
 // because a box office that takes money and tells nobody is worse than one
 // that will not start.
@@ -366,28 +378,58 @@ func buildNotifications(
 // buildGateway returns the payment adapter, or nil when the provider is not
 // configured. A nil gateway is a supported state: the box office still manages
 // tickets, and checkout answers "payment provider is not configured".
+// buildGateway resolves PAYMENT_PROVIDER into a concrete adapter.
+//
+// This function and the webhook selection below it are the ONLY places in the
+// codebase that branch on which provider is active. Everything downstream:
+// checkout, settlement, refunds, the reconciliation sweep, depends on the
+// payment.Gateway port and cannot tell the difference.
 func buildGateway(cfg config.PaymentsConfig) paymentdomain.Gateway {
 	if !cfg.Enabled() {
 		return nil
 	}
-	options := []mercadopago.Option{}
-	if cfg.NotificationURL != "" {
-		options = append(options, mercadopago.WithNotificationURL(cfg.NotificationURL))
-	}
-	client := mercadopago.NewClient(cfg.AccessToken, cfg.BaseURL, options...)
 
-	gatewayOptions := []mercadopago.GatewayOption{}
-	if cfg.SandboxPayerEmail != "" {
-		gatewayOptions = append(gatewayOptions, mercadopago.WithSandboxPayerEmail(cfg.SandboxPayerEmail))
+	switch cfg.Provider {
+	case paymentdomain.ProviderMercadoPago:
+		options := []mercadopago.Option{}
+		if cfg.NotificationURL != "" {
+			options = append(options, mercadopago.WithNotificationURL(cfg.NotificationURL))
+		}
+		client := mercadopago.NewClient(cfg.AccessToken, cfg.BaseURL, options...)
+
+		gatewayOptions := []mercadopago.GatewayOption{}
+		if cfg.SandboxPayerEmail != "" {
+			gatewayOptions = append(gatewayOptions, mercadopago.WithSandboxPayerEmail(cfg.SandboxPayerEmail))
+		}
+		return mercadopago.NewGateway(client, gatewayOptions...)
+
+	default:
+		return asaas.NewGateway(asaas.NewClient(cfg.AsaasAPIKey, cfg.AsaasBaseURL))
 	}
-	return mercadopago.NewGateway(client, gatewayOptions...)
+}
+
+// buildWebhookHandler mounts the callback route for the active provider.
+func buildWebhookHandler(
+	cfg config.PaymentsConfig,
+	jobs queuedomain.Queue,
+	dispatcher *queueUsecase.Dispatcher,
+) delivery.WebhookRegistrar {
+	if !cfg.Enabled() {
+		return nil
+	}
+	switch cfg.Provider {
+	case paymentdomain.ProviderMercadoPago:
+		return webhooksHTTP.NewMercadoPagoHandler(jobs, dispatcher, cfg.WebhookSecret, cfg.SignatureTolerance)
+	default:
+		return webhooksHTTP.NewAsaasHandler(jobs, dispatcher, cfg.AsaasWebhookToken)
+	}
 }
 
 // startWorkers runs the queue in this process.
 //
 // In-process by default because it is one binary to deploy and the work is
 // small; the same worker runs standalone by starting the binary with the HTTP
-// server disabled, and nothing in the design assumes a single node — claiming
+// server disabled, and nothing in the design assumes a single node, claiming
 // is exclusive at the database.
 func (c *Container) startWorkers(
 	cfg config.Config,
@@ -449,7 +491,7 @@ func (c *Container) startWorkers(
 			// Spent sign-in codes ride the same sweep rather than getting a
 			// timer of their own. They expire on the same order of minutes as a
 			// hold, and keeping them afterwards would be retaining a record of
-			// who signed in and when — which is exactly what that table's shape
+			// who signed in and when, which is exactly what that table's shape
 			// avoids holding.
 			if c.challenges != nil {
 				if _, sweepErr := c.challenges.SweepExpiredChallenges(ctx, 500); sweepErr != nil {

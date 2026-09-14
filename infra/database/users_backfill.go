@@ -9,8 +9,8 @@ import (
 // relaxPasswordColumn lets an account exist without one.
 //
 // Sign-in is a code sent to an address; there is no password to store for an
-// account created that way. The column stays — the seeded operator accounts
-// still have one, and removing it would lock them out — but it stops being
+// account created that way. The column stays, the seeded operator accounts
+// still have one, and removing it would lock them out, but it stops being
 // required, and its default becomes the empty string so an insert that omits it
 // is legal.
 //
@@ -24,7 +24,7 @@ func relaxPasswordColumn(tx *gorm.DB) error {
 	// Read the column's CURRENT shape before touching it.
 	//
 	// ALTER TABLE takes an ACCESS EXCLUSIVE lock, which queues every read and
-	// write to `users` behind it — including the sign-ins happening during a
+	// write to `users` behind it, including the sign-ins happening during a
 	// rolling deploy. Issuing it unconditionally means every replica takes that
 	// lock on every boot, forever, to make a change that was already made. So
 	// the statements below run once, on the boot that actually needs them, and

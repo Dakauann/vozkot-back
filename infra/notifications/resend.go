@@ -23,8 +23,8 @@ const (
 	// The overall budget is deliberately small next to the queue's. A worker
 	// gives a job two minutes; spending all of it inside one provider call
 	// would hold a slot that could be delivering somebody else's receipt, and
-	// would delay the moment the durable retry — the one that survives this
-	// process — takes over. Thirty seconds absorbs a blip; anything longer
+	// would delay the moment the durable retry, the one that survives this
+	// process; takes over. Thirty seconds absorbs a blip; anything longer
 	// than a blip is the job table's problem.
 	emailSendPerAttemptTimeout = 12 * time.Second
 	emailSendOverallTimeout    = 30 * time.Second
@@ -41,15 +41,15 @@ const (
 //
 // Sends are rate limited client-side with a token bucket so a burst of
 // confirmations queues instead of collecting 429s, and each send retries the
-// transient failures — rate limit, request timeout, transport error — honouring
+// transient failures, rate limit, request timeout, transport error, honouring
 // the API's Retry-After hint. Anything that outlives that budget is handed back
 // to the caller, because the job row retries better than a goroutine does: it
 // survives a deploy.
 //
 // The bucket is PER PROCESS. Running N replicas multiplies the aggregate rate
 // by N, so RESEND_MAX_REQUESTS_PER_SECOND is set to the account's limit divided
-// by the replica count. Overshoot is not fatal — a 429 comes back with the
-// provider's own Retry-After and is retried — but it is wasted work at exactly
+// by the replica count. Overshoot is not fatal; a 429 comes back with the
+// provider's own Retry-After and is retried, but it is wasted work at exactly
 // the moment there is the most of it.
 type EmailSender struct {
 	client      *resend.Client
@@ -187,7 +187,7 @@ func (e *EmailSender) Send(ctx context.Context, message domain.Message) error {
 //
 // A 429 arrives as a typed *resend.RateLimitError (matching resend.ErrRateLimit);
 // request timeouts and transport errors are transient by definition. Everything
-// else is left to the queue — including the SDK's untyped rendering of a 4xx
+// else is left to the queue, including the SDK's untyped rendering of a 4xx
 // and of a 5xx, which it does not tell apart. That is the right home for it:
 // the queue waits minutes rather than seconds, and it is still waiting after a
 // deploy.

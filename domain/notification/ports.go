@@ -27,7 +27,7 @@ type Message struct {
 	Name string
 	// Subject is meaningful to email and ignored elsewhere.
 	Subject string
-	// Body is whatever the channel carries — HTML for email.
+	// Body is whatever the channel carries, HTML for email.
 	Body string
 	// Category is the template this message came from, carried so an adapter
 	// can label it at the provider. It is what lets an operator read the
@@ -43,8 +43,8 @@ type Message struct {
 
 // Sender delivers messages over exactly one channel.
 //
-// A Sender owns its provider's manners — rate limits, retry-after, transport
-// timeouts — and nothing else. It does not decide whether a failure is worth
+// A Sender owns its provider's manners: rate limits, retry-after, transport
+// timeouts, and nothing else. It does not decide whether a failure is worth
 // retrying beyond its own call: that is the queue's job, and the queue is the
 // only thing that survives the process.
 type Sender interface {

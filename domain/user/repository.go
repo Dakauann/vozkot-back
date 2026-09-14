@@ -21,7 +21,7 @@ type Repository interface {
 	// filling in their own name.
 	//
 	// It returns ErrDocumentInUse when the document already belongs to another
-	// account — decided by a unique index rather than by a prior SELECT, which
+	// account: decided by a unique index rather than by a prior SELECT, which
 	// two simultaneous sign-ups would both pass.
 	SaveProfile(ctx context.Context, id string, profile Profile) error
 	// FindByDocument resolves an account by its document, through the blind

@@ -10,7 +10,7 @@ import (
 //
 // Brazilian event ticketing needs a document behind a purchase: meia-entrada is
 // capped per CPF by law, purchase limits are enforced per document, and a PIX
-// charge cannot be issued without one. That is the reason these fields exist —
+// charge cannot be issued without one. That is the reason these fields exist,
 // not a profile, not a marketing record. Everything here is asked for because
 // something refuses to work without it.
 //
@@ -188,7 +188,7 @@ func NormalizePhone(raw string) (string, error) {
 	digits := onlyDigits(raw)
 	switch {
 	case len(digits) == 11:
-		// (84) 99440-9624 — area code plus a nine-digit mobile.
+		// (84) 99440-9624, area code plus a nine-digit mobile.
 		digits = "55" + digits
 	case len(digits) == 13 && strings.HasPrefix(digits, "55"):
 		// Already carries the country code.
@@ -234,7 +234,7 @@ func alphanumeric(value string) bool {
 // validCPF checks the two verification digits.
 //
 // The all-same-digit values (00000000000, 11111111111 …) pass the arithmetic
-// and are not real documents, so they are rejected explicitly — they are what
+// and are not real documents, so they are rejected explicitly; they are what
 // somebody types to get past a form.
 func validCPF(digits string) bool {
 	if allSame(digits) {

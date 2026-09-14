@@ -55,7 +55,7 @@ type Order struct {
 	UpdatedAt time.Time `gorm:"not null;autoUpdateTime"`
 
 	// No Event association, deliberately. Declaring one would have AutoMigrate
-	// create the foreign key immediately — against a table whose existing rows
+	// create the foreign key immediately, against a table whose existing rows
 	// have not been backfilled yet, which fails every boot that has orders
 	// predating the column. The constraint is added by enforceOrderEventLink
 	// once every order has an event, and skipped while any does not.
@@ -63,7 +63,7 @@ type Order struct {
 	// The items constraint is declared HERE, on the has-many side, and not on a
 	// belongs-to field over on OrderItem. Declaring it in both places makes
 	// GORM emit two foreign keys over the same column, and the one it derives
-	// from this side carries no ON DELETE — so deleting an order would be
+	// from this side carries no ON DELETE, so deleting an order would be
 	// refused by a constraint nobody wrote down.
 	Items []OrderItem `gorm:"foreignKey:OrderID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
@@ -73,7 +73,7 @@ func (Order) TableName() string { return "orders" }
 // OrderItem is one tier's line on an order: which tier, how many, and what each
 // cost when it was bought.
 //
-// The tier link is RESTRICTed for the same reason the event link is — these
+// The tier link is RESTRICTed for the same reason the event link is, these
 // rows are the record of what money was taken for. The title and unit price are
 // COPIES rather than joins, so a renamed or re-priced tier cannot rewrite a
 // receipt after the fact.
@@ -81,7 +81,7 @@ type OrderItem struct {
 	ID string `gorm:"primaryKey;type:varchar(32)"`
 	// OrderID and TicketID are unique together: one tier, one line. That index
 	// is what makes a merged retry impossible to persist as two holds on the
-	// same tier, whatever the caller sent — and it doubles as the lookup every
+	// same tier, whatever the caller sent, and it doubles as the lookup every
 	// settlement uses to find an order's lines.
 	OrderID     string `gorm:"not null;type:varchar(32);uniqueIndex:idx_order_items_order_ticket,priority:1"`
 	TicketID    string `gorm:"not null;type:varchar(32);uniqueIndex:idx_order_items_order_ticket,priority:2;index:idx_order_items_ticket_id"`

@@ -12,8 +12,8 @@ import (
 // Adding a password to an account that was created without one.
 //
 // Passwordless sign-in is the default and the recommended path, and it is
-// deliberately not the ONLY one. Email delivery fails — a provider has an
-// outage, a filter eats the message, somebody is on a plane — and an account
+// deliberately not the ONLY one. Email delivery fails; a provider has an
+// outage, a filter eats the message, somebody is on a plane, and an account
 // whose only key arrives by email is an account that is unreachable exactly
 // when its owner most wants in. Nielsen Norman's guidance on passwordless
 // accounts says the same thing: offer a password AFTER the account exists, for
@@ -43,7 +43,7 @@ type SetPasswordInput struct {
 //
 // The rule about `Current` is the security-relevant part. Setting a FIRST
 // password needs only the session, which was itself obtained by proving control
-// of the mailbox minutes ago — asking for a password the account does not have
+// of the mailbox minutes ago; asking for a password the account does not have
 // would be impossible to satisfy. CHANGING an existing one requires the old
 // one, because a session is a weaker proof than a password plus a session: a
 // borrowed laptop or a stolen token should not be enough to lock the owner out
@@ -94,7 +94,7 @@ func (s *Service) HasPassword(ctx context.Context, userID string) (bool, error) 
 // LoginWithPassword is the second way in, for accounts that chose one.
 //
 // It is the existing Login by another name, exported under one that says which
-// of the two paths it is — a codebase with `Login` and `VerifyEmailSignIn` side
+// of the two paths it is, a codebase with `Login` and `VerifyEmailSignIn` side
 // by side reads as though only the first is really signing in.
 func (s *Service) LoginWithPassword(ctx context.Context, input domain.CredentialsInput) (*domain.TokenPair, error) {
 	return s.Login(ctx, input)

@@ -102,7 +102,7 @@ func TestCNPJCheckDigitsAreVerified(t *testing.T) {
 }
 
 // TestPassportIsAcceptedWithoutAChecksum: no checksum exists, so the rule is
-// shape and canonical case — a buyer at an international event has neither a
+// shape and canonical case: a buyer at an international event has neither a
 // CPF nor a CNPJ and must still be able to buy.
 func TestPassportIsAcceptedWithoutAChecksum(t *testing.T) {
 	input := draft()

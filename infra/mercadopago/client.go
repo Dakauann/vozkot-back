@@ -132,7 +132,7 @@ func (e *ResponseError) Error() string {
 		message += " [" + detail + "]"
 	}
 	if hint := e.Hint(); hint != "" {
-		message += " — likely cause: " + hint
+		message += ", likely cause: " + hint
 	}
 	return fmt.Sprintf("mercadopago: request failed with status %d: %s", e.StatusCode, message)
 }
