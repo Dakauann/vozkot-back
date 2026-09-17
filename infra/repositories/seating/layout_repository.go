@@ -151,6 +151,38 @@ func (r *LayoutRepository) ListLayouts(ctx context.Context, venueID string) ([]d
 	for index := range records {
 		layouts = append(layouts, *toDomainLayout(&records[index]))
 	}
+	if len(layouts) == 0 {
+		return layouts, nil
+	}
+
+	// One grouped count for the whole list. A detail fetch per plan would be a
+	// request per row on the page whose job is comparing them.
+	ids := make([]string, 0, len(layouts))
+	for index := range layouts {
+		ids = append(ids, layouts[index].ID)
+	}
+	var counted []struct {
+		LayoutID string
+		Seats    int
+	}
+	if err := r.db.WithContext(ctx).
+		Table("layout_seats AS ls").
+		Select("sec.layout_id AS layout_id, count(*) AS seats").
+		Joins("JOIN layout_sections AS sec ON sec.id = ls.section_id").
+		Where("sec.layout_id IN ?", ids).
+		Group("sec.layout_id").
+		Scan(&counted).Error; err != nil {
+		// A listing without its counts is still a listing. Failing the whole
+		// page over a derived number would trade the feature for the detail.
+		return layouts, nil
+	}
+	seats := make(map[string]int, len(counted))
+	for _, row := range counted {
+		seats[row.LayoutID] = row.Seats
+	}
+	for index := range layouts {
+		layouts[index].SeatCount = seats[layouts[index].ID]
+	}
 	return layouts, nil
 }
 
@@ -224,6 +256,8 @@ func (r *LayoutRepository) ReplaceSections(
 			OffsetY:      section.OffsetY,
 			Width:        section.Width,
 			Height:       section.Height,
+			Rotation:     section.Rotation,
+			Category:     section.Category,
 			Shape:        shape,
 			Definition:   section.Definition,
 			DisplayOrder: section.DisplayOrder,
@@ -248,6 +282,7 @@ func (r *LayoutRepository) ReplaceSections(
 			Y:         seat.Y,
 			Rotation:  seat.Rotation,
 			Kind:      string(seat.Kind),
+			Category:  seat.Category,
 			RowOrder:  seat.RowOrder,
 			SeatOrder: seat.SeatOrder,
 		})
@@ -299,6 +334,8 @@ func (r *LayoutRepository) SectionsOf(ctx context.Context, layoutID string) ([]d
 			OffsetY:      record.OffsetY,
 			Width:        record.Width,
 			Height:       record.Height,
+			Rotation:     record.Rotation,
+			Category:     record.Category,
 			Definition:   record.Definition,
 			DisplayOrder: record.DisplayOrder,
 		}
@@ -334,6 +371,7 @@ func (r *LayoutRepository) SeatsOf(ctx context.Context, layoutID string) ([]doma
 			Y:         record.Y,
 			Rotation:  record.Rotation,
 			Kind:      domain.SeatKind(record.Kind),
+			Category:  record.Category,
 			RowOrder:  record.RowOrder,
 			SeatOrder: record.SeatOrder,
 		})

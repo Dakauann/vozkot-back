@@ -338,10 +338,18 @@ func Encryption(t *testing.T) {
 }
 
 // SeatedRoom is a materialised seat map: what a test needs to buy a chair.
+// SeatedRoomCategory is the price band SeedSeatedRoom's section falls in.
+//
+// A band defaults to its section's NAME, so this is the section's name — and
+// binding a layout is keyed by band, not by section id.
+const SeatedRoomCategory = "Plateia A"
+
 type SeatedRoom struct {
 	VenueID   string
 	LayoutID  string
 	SectionID string
+	// Category is the price band to key a MaterialisePlan with.
+	Category string
 	// LayoutSeatIDs are the definition seats, in row-then-seat order.
 	LayoutSeatIDs []string
 }
@@ -362,6 +370,7 @@ func SeedSeatedRoom(t *testing.T, db *gorm.DB, ownerID string, rows, perRow int)
 		VenueID:   Unique("ven"),
 		LayoutID:  Unique("lay"),
 		SectionID: Unique("sec"),
+		Category:  SeatedRoomCategory,
 	}
 
 	if err := db.Exec(`

@@ -4,10 +4,12 @@ package seating
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	domain "vozkot/domain/seating"
 	"vozkot/infra/database/schema"
@@ -292,14 +294,21 @@ func (r *SeatRepository) Unblock(ctx context.Context, eventID string, seatIDs []
 // SeatingOf reports the manifest an event is selling, if any.
 func (r *SeatRepository) SeatingOf(ctx context.Context, eventID string) (*domain.EventSeating, error) {
 	var record schema.EventSeating
-	err := r.db.WithContext(ctx).Where("event_id = ?", eventID).First(&record).Error
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "SHARE"}).Where("event_id = ?", eventID).First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	var areas map[string]domain.AreaBinding
+	if len(record.Areas) > 0 {
+		if err := json.Unmarshal(record.Areas, &areas); err != nil {
+			return nil, err
+		}
+	}
 	return &domain.EventSeating{
+		Areas:          areas,
 		EventID:        record.EventID,
 		LayoutID:       record.LayoutID,
 		LayoutVersion:  record.LayoutVersion,

@@ -21,7 +21,12 @@ func clearNotificationEnv(t *testing.T) {
 // A fresh clone must produce working links and a working logo before anybody
 // has set a BRAND_ variable, which is the same bargain the media adapter makes
 // with its local directory.
-func TestNotificationsDefaultToTheFrontendOrigin(t *testing.T) {
+//
+// This asserted the logo defaulted to the frontend origin, which is what the
+// code did and is the opposite of the comment above it: that origin is
+// localhost outside production, and a localhost <img> in an email is a broken
+// image in every inbox that opens it. The default is now the embedded mark.
+func TestNotificationsDefaultToAWorkingLogo(t *testing.T) {
 	clearNotificationEnv(t)
 
 	cfg, err := loadNotifications("http://localhost:3000")
@@ -37,14 +42,31 @@ func TestNotificationsDefaultToTheFrontendOrigin(t *testing.T) {
 	if cfg.Brand.SiteURL != "http://localhost:3000" {
 		t.Errorf("site URL = %q", cfg.Brand.SiteURL)
 	}
-	if want := "http://localhost:3000/brand/vozko-tickets-logo.png"; cfg.Brand.LogoURL != want {
-		t.Errorf("logo URL = %q, want %q", cfg.Brand.LogoURL, want)
+	// Links still point at the frontend; only the IMAGE has to travel with the
+	// message, because a link is followed by the reader and an image is not.
+	if cfg.Brand.LogoURL != EmbeddedLogoSrc {
+		t.Errorf("logo URL = %q, want the embedded mark %q", cfg.Brand.LogoURL, EmbeddedLogoSrc)
 	}
 	if cfg.FromName != "Vozko Tickets" {
 		t.Errorf("from name = %q", cfg.FromName)
 	}
 	if cfg.MaxRPS != 4 {
 		t.Errorf("max RPS = %d, want the safe default 4", cfg.MaxRPS)
+	}
+}
+
+// A deployment with somewhere to host the mark says so, and is then handed the
+// URL rather than ~27KB on every message.
+func TestAHostedLogoOverridesTheEmbeddedOne(t *testing.T) {
+	clearNotificationEnv(t)
+	t.Setenv("BRAND_LOGO_URL", "https://cdn.example/vozko.png")
+
+	cfg, err := loadNotifications("http://localhost:3000")
+	if err != nil {
+		t.Fatalf("loadNotifications() error = %v", err)
+	}
+	if cfg.Brand.LogoURL != "https://cdn.example/vozko.png" {
+		t.Errorf("logo URL = %q, want the configured one", cfg.Brand.LogoURL)
 	}
 }
 

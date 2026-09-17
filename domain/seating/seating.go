@@ -22,6 +22,7 @@ package seating
 
 import (
 	"errors"
+	"sort"
 	"strings"
 )
 
@@ -195,6 +196,93 @@ const (
 	BlockDistancing  BlockReason = "distancing"
 	BlockUnspecified BlockReason = ""
 )
+
+// Category resolves the price band a seat belongs to.
+//
+// Three levels, most specific first: the seat's own category, then its
+// section's, then the section's NAME. That last fallback is what makes an
+// ordinary room need no pricing decisions at all — a plateia is one band called
+// "Plateia" because that is what it is called, and an organiser who never opens
+// the pricing controls gets exactly the behaviour they had before categories
+// existed.
+//
+// A name and not an id, deliberately. Two sections can share a band — "Plateia
+// Esquerda" and "Plateia Direita" both priced as "Plateia" is one dropdown
+// instead of two — and that is only expressible if the key is the band's name.
+//
+// One function because three callers need the same answer: the materialise that
+// assigns a tier to a chair, the validation that refuses a price list naming a
+// band the room does not have, and the API that hands the resolved band to the
+// editor so the editor never has to repeat this.
+func Category(seatCategory, sectionCategory, sectionName string) string {
+	if band := strings.TrimSpace(seatCategory); band != "" {
+		return band
+	}
+	if band := strings.TrimSpace(sectionCategory); band != "" {
+		return band
+	}
+	return strings.TrimSpace(sectionName)
+}
+
+// BandsOf lists a room's price bands, in the order their colour is assigned.
+//
+// Every band gets a hue, and the ORDER is the hue: slot one is blue, slot two is
+// orange, and so on down a fixed categorical palette. That makes the order
+// load-bearing rather than cosmetic, so it is computed once, here, and handed to
+// every surface that draws the room — the organiser's canvas, the buyer's map,
+// the preview and both legends. Two answers to "what colour is Plateia" is a
+// room that changes colour when you walk between screens.
+//
+// Stable by construction: first appearance walking the sections as they are
+// DISPLAYED, then their chairs in the order an usher reads them. A band added
+// later appends rather than inserting, so naming a new one does not repaint the
+// room somebody has just learned to read.
+func BandsOf(sections []Section, seats []Seat) []string {
+	order := make(map[string]int, len(sections))
+	for index, section := range sections {
+		order[section.ID] = index
+	}
+	// The section's own band comes first for each section, because a section
+	// declares its band before any of its chairs override it.
+	sorted := make([]Section, len(sections))
+	copy(sorted, sections)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].DisplayOrder < sorted[j].DisplayOrder
+	})
+
+	seen := map[string]bool{}
+	bands := make([]string, 0, 4)
+	take := func(band string) {
+		if band == "" || seen[band] {
+			return
+		}
+		seen[band] = true
+		bands = append(bands, band)
+	}
+
+	bySection := make(map[string][]Seat, len(sections))
+	for index := range seats {
+		bySection[seats[index].SectionID] = append(bySection[seats[index].SectionID], seats[index])
+	}
+
+	for _, section := range sorted {
+		if section.Kind.Marker() {
+			continue
+		}
+		take(Category("", section.Category, section.Name))
+		inside := bySection[section.ID]
+		sort.SliceStable(inside, func(i, j int) bool {
+			if inside[i].RowOrder != inside[j].RowOrder {
+				return inside[i].RowOrder < inside[j].RowOrder
+			}
+			return inside[i].SeatOrder < inside[j].SeatOrder
+		})
+		for index := range inside {
+			take(Category(inside[index].Category, section.Category, section.Name))
+		}
+	}
+	return bands
+}
 
 // Label is a seat's name as a human reads it, and as it must keep reading on a
 // ticket after the venue renumbers.

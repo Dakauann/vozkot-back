@@ -74,6 +74,11 @@ type LayoutSection struct {
 	Width   float64 `gorm:"not null;default:0"`
 	Height  float64 `gorm:"not null;default:0"`
 	Shape   []byte  `gorm:"type:jsonb"`
+	// Rotation turns the block, in degrees clockwise about its own centre.
+	Rotation float64 `gorm:"not null;default:0"`
+	// Category is the price band these seats belong to by default. Empty means
+	// the section's own name.
+	Category string `gorm:"not null;type:varchar(80);default:''"`
 	// Definition is the editor form that generated this block, so a saved room
 	// can be reopened and changed rather than only looked at.
 	Definition   []byte `gorm:"type:jsonb"`
@@ -96,6 +101,10 @@ type LayoutSeat struct {
 	Y         float64 `gorm:"not null;default:0"`
 	Rotation  float64 `gorm:"not null;default:0"`
 	Kind      string  `gorm:"not null;type:varchar(24);default:'standard'"`
+	// Category overrides the section's price band for this one chair. Empty for
+	// almost every seat; set for the front rows that cost more and the
+	// partial-view chair that costs less.
+	Category string `gorm:"not null;type:varchar(80);default:''"`
 	// RowOrder and SeatOrder are the authoritative ordering, and adjacency.
 	// Labels cannot be sorted: houses skip row I, "10" sorts before "9" as
 	// text, and old theatres number odd and even outward from the centre aisle.
@@ -109,6 +118,7 @@ func (LayoutSeat) TableName() string { return "layout_seats" }
 
 // EventSeating binds one event to one layout version: the manifest.
 type EventSeating struct {
+	Areas          []byte    `gorm:"type:jsonb"`
 	EventID        string    `gorm:"primaryKey;type:varchar(32)"`
 	LayoutID       string    `gorm:"not null;type:varchar(32);index:idx_event_seatings_layout_id"`
 	LayoutVersion  int       `gorm:"not null;default:1"`

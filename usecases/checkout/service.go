@@ -259,6 +259,37 @@ func (s *Service) Start(ctx context.Context, input StartInput) (*orderdomain.Ord
 			})
 		}
 
+		// Hold the manifest stable through the reservation. Configuration takes an
+		// exclusive lock, so an area cannot be reassigned during checkout.
+		manifest, err := repositories.Seats().SeatingOf(ctx, eventID)
+		if err != nil {
+			return err
+		}
+		if manifest != nil {
+			for _, area := range manifest.Areas {
+				for index := range lines {
+					if lines[index].TicketID == area.TicketID {
+						lines[index].TicketTitle = area.Name
+					}
+				}
+			}
+		}
+
+		// A mixed event has counted tiers and tiers that require named chairs.
+		// Determine that from inventory, never from the presence of seat IDs in
+		// the request: omitting them must not bypass reservation of a chair.
+		seatCounts, err := repositories.Seats().CountsByEvent(ctx, eventID)
+		if err != nil {
+			return err
+		}
+		for _, counts := range seatCounts {
+			for _, wanted := range requested {
+				if wanted.TicketID == counts.TicketID && counts.Total() > 0 && !wanted.Seated() {
+					return fmt.Errorf("%w: choose numbered seats for this ticket", orderdomain.ErrInvalidTicket)
+				}
+			}
+		}
+
 		// Before any inventory moves: is this account already sitting on more
 		// than it is allowed to? The check is inside the transaction and behind
 		// a per-buyer lock, so two simultaneous checkouts cannot both pass it.

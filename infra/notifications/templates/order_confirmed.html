@@ -65,7 +65,7 @@
      it is never only a picture. */}}
 <tr>
     <td class="vk-pad" style="padding:30px 40px 0;">
-        <p style="margin:0 0 4px; font-family:Inter,Arial,sans-serif; font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#8492a0;">
+        <p style="margin:0 0 4px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; letter-spacing:-0.005em; color:#58626a;">
             {{if gt (len .Tickets) 1}}Seus ingressos{{else}}Seu ingresso{{end}}
         </p>
         <p style="margin:0 0 18px; font-family:Inter,Arial,sans-serif; font-size:13px; color:#58626a; line-height:1.6;">
@@ -78,18 +78,18 @@
 <tr>
     <td class="vk-pad" style="padding:0 40px 14px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
-               style="border:1px solid #e3e8ec; border-radius:10px; background:#ffffff;">
+               style="border:1px solid #dce1e5; border-radius:8px; background:#ffffff;">
             <tr>
                 <td style="padding:20px 22px 6px;" align="center">
                     <p style="margin:0 0 2px; font-family:Inter,Arial,sans-serif; font-size:14px; font-weight:600; color:#14171a;">
                         {{.Title}}
                     </p>
                     {{if gt .Total 1}}
-                    <p style="margin:0 0 14px; font-family:Inter,Arial,sans-serif; font-size:12px; color:#8492a0;">
+                    <p style="margin:0 0 14px; font-family:Inter,Arial,sans-serif; font-size:12px; color:#58626a;">
                         Ingresso {{.Sequence}} de {{.Total}}
                     </p>
                     {{else}}
-                    <p style="margin:0 0 14px; font-family:Inter,Arial,sans-serif; font-size:12px; color:#8492a0;">
+                    <p style="margin:0 0 14px; font-family:Inter,Arial,sans-serif; font-size:12px; color:#58626a;">
                         Entrada única
                     </p>
                     {{end}}
@@ -105,7 +105,7 @@
             {{end}}
             <tr>
                 <td style="padding:14px 22px 22px;" align="center">
-                    <p style="margin:0 0 6px; font-family:Inter,Arial,sans-serif; font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#8492a0;">
+                    <p style="margin:0 0 6px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; letter-spacing:-0.005em; color:#58626a;">
                         Código
                     </p>
                     {{/* Monospace and widely spaced, because this is the line a
@@ -132,7 +132,7 @@
 
 <tr>
     <td class="vk-pad" style="padding:22px 40px 0;">
-        <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:13px; color:#8492a0; line-height:1.7; text-align:center;">
+        <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:13px; color:#58626a; line-height:1.7; text-align:center;">
             Não reconhece esta compra? Responda a este e-mail{{if .Brand.SupportEmail}} ou escreva para <a href="mailto:{{.Brand.SupportEmail}}" style="color:#007a5c; text-decoration:none;">{{.Brand.SupportEmail}}</a>{{end}} imediatamente.
         </p>
     </td>

@@ -18,6 +18,20 @@ type Renderer interface {
 	Render(channel Channel, template Template, data map[string]any) (string, error)
 }
 
+// ChromeInliner is the optional half of Renderer: a renderer whose every body
+// references an inline part of its own, the way the email layout's header
+// points at the wordmark.
+//
+// Optional rather than part of Renderer because it is a property of one
+// rendering of one channel, not of rendering. A body that references nothing,
+// or a channel that cannot carry an attachment, implements nothing and the
+// service asks it nothing.
+type ChromeInliner interface {
+	// Chrome returns the parts every body on this channel references. The
+	// slice is not retained or modified by the caller.
+	Chrome(channel Channel) []Inline
+}
+
 // Message is one rendered notification, addressed and ready to go out.
 type Message struct {
 	// To is the channel-specific destination: an email address today, a phone

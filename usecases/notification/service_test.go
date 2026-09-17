@@ -34,10 +34,21 @@ import (
 // one would receive.
 
 type sentEmail struct {
-	Subject string   `json:"subject"`
-	Html    string   `json:"html"`
-	To      []string `json:"to"`
-	From    string   `json:"from"`
+	Subject     string           `json:"subject"`
+	Html        string           `json:"html"`
+	To          []string         `json:"to"`
+	From        string           `json:"from"`
+	Attachments []sentAttachment `json:"attachments"`
+}
+
+// sentAttachment is the provider's view of an inline part, which is the only
+// view that matters: a part the body references but that never reached Resend
+// is a broken image in somebody's inbox.
+type sentAttachment struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	ContentID   string `json:"content_id"`
+	Content     []byte `json:"content"`
 }
 
 type harness struct {
@@ -87,7 +98,9 @@ func newHarness(t *testing.T) *harness {
 			LegalName:    "Vozko Tecnologia LTDA",
 			SiteURL:      "https://tickets.test",
 			SupportEmail: "suporte@tickets.test",
-			LogoURL:      "https://tickets.test/brand/logo.png",
+			// The shipped default, so this harness exercises what a
+			// deployment without BRAND_LOGO_URL actually sends.
+			LogoURL: config.EmbeddedLogoSrc,
 		},
 	}
 	renderer, err := notifications.NewRenderer(cfg.Brand)
@@ -450,5 +463,41 @@ func TestAReceiptSurvivesAMissingTier(t *testing.T) {
 	}
 	if !strings.Contains(sent[0].Html, "R$ 480,00") {
 		t.Error("the total is missing from the receipt")
+	}
+}
+
+// The header's wordmark has to leave the process attached to the message.
+//
+// Rendering it into the body is half the job; the regression that shipped was
+// an <img> pointing at http://localhost:3000, which every inbox drew as a
+// broken image. This asserts the two halves agree: the body references a cid:
+// and the provider was handed a part with that exact id.
+func TestTheWordmarkLeavesWithTheReceipt(t *testing.T) {
+	h := newHarness(t)
+	item, tier, happening := h.order(t)
+	job, err := h.purchases.OrderPaid(context.Background(), h.jobs, item, tier, happening)
+	if err != nil {
+		t.Fatalf("raise receipt: %v", err)
+	}
+	h.run(t, job.ID)
+
+	delivered := h.delivered()
+	if len(delivered) != 1 {
+		t.Fatalf("delivered %d messages, want 1", len(delivered))
+	}
+	if !strings.Contains(delivered[0].Html, `src="cid:brand-logo"`) {
+		t.Fatal("the receipt's header does not reference the inline wordmark")
+	}
+	var logo *sentAttachment
+	for index, part := range delivered[0].Attachments {
+		if part.ContentID == "brand-logo" {
+			logo = &delivered[0].Attachments[index]
+		}
+	}
+	if logo == nil {
+		t.Fatal("the wordmark the body references was not attached to the message")
+	}
+	if logo.ContentType != "image/png" || len(logo.Content) < 1024 {
+		t.Fatalf("attached wordmark looks wrong: %s, %d bytes", logo.ContentType, len(logo.Content))
 	}
 }

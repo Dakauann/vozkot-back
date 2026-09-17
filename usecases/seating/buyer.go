@@ -40,21 +40,33 @@ type SeatView struct {
 	Version   int64
 }
 
-// MarkerView is something in the room that holds no seats: the stage, the
-// floor a rodeo runs in.
+// MarkerView is a block of the room that holds no individual chairs: the
+// stage, the floor a rodeo runs in, a standing pista, a box sold whole.
 //
 // "Where is the stage" is the first question anybody asks of a seat map, and it
 // cannot be derived from the seats -- a theatre has one at an end, a rodeo has
 // an arena in the middle with a show stage beside it, a gala floor has neither.
 // Only the organiser knows, and they say so by placing it.
+//
+// It carries the counted sections too, and not only the scenery. Leaving them
+// out drew a map with holes in it: a concert hall with a 180 unit standing
+// floor between the stage and the chairs showed a large empty gap where the
+// pista is, and its two side boxes -- the widest things in the room -- were
+// missing entirely, which put them outside the bounding box as well, so the
+// map was not even showing the whole room. A buyer reading that map sees a
+// distance the plan does not have.
 type MarkerView struct {
-	ID     string
-	Name   string
-	Kind   domain.SectionKind
-	X      float64
-	Y      float64
-	Width  float64
-	Height float64
+	TicketID string
+	ID       string
+	Name     string
+	Kind     domain.SectionKind
+	// Capacity is how many people the block holds, for the counted sections
+	// that sell by the head. Zero for scenery, which sells nothing.
+	Capacity int
+	X        float64
+	Y        float64
+	Width    float64
+	Height   float64
 }
 
 // MapView is the whole map, or the part of it that changed.
@@ -107,17 +119,21 @@ func (s *Service) Map(ctx context.Context, eventID string, sinceVersion int64) (
 			if sections, err := s.layouts.SectionsOf(ctx, manifest.LayoutID); err == nil {
 				for index := range sections {
 					section := &sections[index]
-					if !section.Kind.Marker() {
+					// Everything that is not a block of individual chairs. The
+					// chairs arrive as seats; this is the rest of the room.
+					if section.Kind.Seated() {
 						continue
 					}
 					view.Markers = append(view.Markers, MarkerView{
-						ID:     section.ID,
-						Name:   section.Name,
-						Kind:   section.Kind,
-						X:      section.OffsetX,
-						Y:      section.OffsetY,
-						Width:  section.Width,
-						Height: section.Height,
+						TicketID: manifest.Areas[section.ID].TicketID,
+						ID:       section.ID,
+						Name:     section.Name,
+						Kind:     section.Kind,
+						Capacity: section.Capacity,
+						X:        section.OffsetX,
+						Y:        section.OffsetY,
+						Width:    section.Width,
+						Height:   section.Height,
 					})
 				}
 			}

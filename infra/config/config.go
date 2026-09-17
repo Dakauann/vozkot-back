@@ -213,8 +213,17 @@ type BrandConfig struct {
 	CNPJ         string
 	SiteURL      string
 	SupportEmail string
-	LogoURL      string
+	// LogoURL is what the email header's <img src> points at. It is either a
+	// hosted URL or EmbeddedLogoSrc, which asks for the embedded wordmark.
+	LogoURL string
 }
+
+const (
+	// EmbeddedLogoCID names the inline part carrying the wordmark.
+	EmbeddedLogoCID = "brand-logo"
+	// EmbeddedLogoSrc is the src that resolves to it inside a message.
+	EmbeddedLogoSrc = "cid:" + EmbeddedLogoCID
+)
 
 // PaymentsConfig is the Mercado Pago integration, using the same variable names
 // as Vozko's backend so one account's credentials serve both.
@@ -574,9 +583,12 @@ func loadNotifications(frontendOrigin string) (NotificationsConfig, error) {
 		SiteURL:      strings.TrimRight(value("BRAND_SITE_URL", frontendOrigin), "/"),
 		SupportEmail: strings.TrimSpace(os.Getenv("BRAND_SUPPORT_EMAIL")),
 	}
-	// The frontend serves the mark at a fixed path, so the default is right
-	// without configuration and still overridable when the logo moves to a CDN.
-	brand.LogoURL = value("BRAND_LOGO_URL", brand.SiteURL+"/brand/vozko-tickets-logo.png")
+	// Carried inside the message by default; see notifications.BrandLogo. The
+	// old default pointed at the frontend origin, which is localhost in
+	// development and unreachable from any inbox, so every header rendered as a
+	// broken image. A hosted URL here still wins, and is the right production
+	// setting once there is a CDN to put it on.
+	brand.LogoURL = value("BRAND_LOGO_URL", EmbeddedLogoSrc)
 
 	phone, err := loadPhoneDelivery()
 	if err != nil {

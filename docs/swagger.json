@@ -874,6 +874,54 @@
                 }
             }
         },
+        "/api/v1/events/{id}/seating/areas": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Configure individual admission for each standing area or box",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Event ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Area ticket bindings",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/seating.AreaTicketsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/events/{id}/seating/availability": {
             "get": {
                 "description": "Quantos assentos de cada lote estão livres, que é o número mostrado acima de cada setor na escolha.",
@@ -5325,6 +5373,17 @@
                 }
             }
         },
+        "seating.AreaTicketsRequest": {
+            "type": "object",
+            "properties": {
+                "ticketBySection": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "seating.AvailabilityEnvelope": {
             "type": "object",
             "properties": {
@@ -5356,8 +5415,8 @@
                 "layoutId": {
                     "type": "string"
                 },
-                "ticketBySection": {
-                    "description": "TicketBySection prices each setor: the section id mapped to the tier its\nseats sell at. A section left out is not sold at all, which is how a\nbalcony is closed for one night without editing the room.",
+                "ticketByCategory": {
+                    "description": "TicketByCategory prices each price band: the band's NAME mapped to the\ntier its seats sell at.\n\nA band and not a section, because where a seat is and what it costs change\non different clocks — the room is fixed for years and the price list\nchanges every night. A band defaults to its section's name, so an ordinary\nroom is priced exactly as it was before bands existed; setting one lets\ntwo wings share a price, or the front three rows carry their own without\nthe room being redrawn to say so.\n\nA band left out is not sold at all, which is how a balcony is closed for\none night without editing the room. A band named here that no seat is in\nis refused, because a typo would otherwise materialise half a house and\nlook like it worked.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -5449,6 +5508,13 @@
         "seating.LayoutDetailEnvelope": {
             "type": "object",
             "properties": {
+                "bands": {
+                    "description": "Bands are the room's price bands, in the order their colour is assigned.\n\nSlot one is the first hue of a fixed categorical palette, slot two the\nsecond, and so on — so the ORDER is the colour, and it is computed here\nrather than in each client. Two answers to \"what colour is Plateia\" is a\nroom that changes colour when somebody walks between screens.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "collisions": {
                     "description": "Collisions are the sections drawn on top of each other, by id.\n\nReported on a preview and REFUSED on a save, and computed by the same rule\nboth times. The preview has to be able to draw a collision — that is how\nan organiser sees the one they are making — so the editor marks these and\ndisables its own save, and the server refuses the request regardless.",
                     "type": "array",
@@ -5536,6 +5602,10 @@
                 "name": {
                     "type": "string"
                 },
+                "seatCount": {
+                    "description": "SeatCount is how many named chairs the plan holds. Present on a listing,\nso plans can be told apart without opening each one.",
+                    "type": "integer"
+                },
                 "status": {
                     "type": "string"
                 },
@@ -5567,14 +5637,14 @@
                     }
                 },
                 "markers": {
-                    "description": "Markers are the room's scenery, sent with a complete map and omitted from\na delta: the stage does not move between two polls.",
+                    "description": "Markers are every block of the room that holds no individual chair: the\nscenery, and the standing or boxed floor that sells by the head. Sent\nwith a complete map and omitted from a delta, because none of it moves\nbetween two polls.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/seating.MapMarkerResponse"
                     }
                 },
                 "version": {
-                    "description": "Version is the cursor to send back as `since` on the next poll.",
+                    "description": "The price bands are deliberately NOT here. By the time a room is on sale\na band has become a TIER — the seat carries its ticket id and the tier\ncarries the money — so the buyer's map colours by tier, in the order the\nprice list is given, and the legend it already has is the relief the\npalette requires. Sending a band list too would be a second answer.\nVersion is the cursor to send back as `since` on the next poll.",
                     "type": "integer"
                 }
             }
@@ -5582,6 +5652,10 @@
         "seating.MapMarkerResponse": {
             "type": "object",
             "properties": {
+                "capacity": {
+                    "description": "Capacity is how many people it holds, for the counted sections. Omitted\nfor scenery, which holds nobody.",
+                    "type": "integer"
+                },
                 "height": {
                     "type": "number"
                 },
@@ -5592,10 +5666,15 @@
                     "type": "string",
                     "enum": [
                         "stage",
-                        "arena"
+                        "arena",
+                        "standing",
+                        "booth"
                     ]
                 },
                 "name": {
+                    "type": "string"
+                },
+                "ticketId": {
                     "type": "string"
                 },
                 "width": {
@@ -5658,6 +5737,10 @@
         "seating.SeatResponse": {
             "type": "object",
             "properties": {
+                "category": {
+                    "description": "Category is the price band this chair sells in, already resolved from the\nseat's own band, its section's, and the section's name. The pricing screen\ngroups by this and needs nothing else.",
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -5710,6 +5793,11 @@
                 "capacity": {
                     "type": "integer",
                     "example": 0
+                },
+                "category": {
+                    "description": "Category is the price band this section's seats belong to by default.\nEmpty means the section's own name, which is what an ordinary room wants.",
+                    "type": "string",
+                    "example": "Plateia"
                 },
                 "curve": {
                     "type": "number",
@@ -5772,6 +5860,11 @@
                     "type": "number",
                     "example": 160
                 },
+                "rotation": {
+                    "description": "Rotation turns a block of seats, in degrees clockwise about its own\ncentre. It is how rows are made to run down the SIDE of a room, which\ndragging and resizing cannot express. Meaningless for a marker or a\ncounted area, which are resized instead.",
+                    "type": "number",
+                    "example": 0
+                },
                 "rowGap": {
                     "type": "number",
                     "example": 28
@@ -5796,6 +5889,13 @@
                 "rows": {
                     "type": "integer",
                     "example": 12
+                },
+                "seatCategories": {
+                    "description": "SeatCategories puts individual chairs in a different price band, keyed\n\"FILA/ASSENTO\". It is what prices the front three rows above the rest, and\nthe partial-view chair behind a pillar below it — neither of which is a\ncontiguous block that could be a sector of its own.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 },
                 "seatGap": {
                     "type": "number",
@@ -5870,6 +5970,10 @@
                 "capacity": {
                     "type": "integer"
                 },
+                "category": {
+                    "description": "Category is the band this section's seats belong to by default, as it was\nSET — empty when the section's own name is doing the work. The resolved\nband travels on each seat.",
+                    "type": "string"
+                },
                 "definition": {
                     "description": "Definition is the editor form this block was generated from. It is what\nmakes a saved room editable instead of only viewable.",
                     "type": "object"
@@ -5893,6 +5997,9 @@
                     "type": "number"
                 },
                 "offsetY": {
+                    "type": "number"
+                },
+                "rotation": {
                     "type": "number"
                 },
                 "shape": {

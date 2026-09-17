@@ -48,9 +48,9 @@ func newSeatedHarness(t *testing.T, rows, perRow int) *seatedHarness {
 
 	seats := seatingRepository.NewSeatRepository(base.db)
 	if _, err := seats.Materialise(ctx, seatingdomain.MaterialisePlan{
-		EventID:         base.eventID,
-		LayoutID:        layoutID,
-		TicketBySection: map[string]string{sectionID: base.ticketID},
+		EventID:          base.eventID,
+		LayoutID:         layoutID,
+		TicketByCategory: map[string]string{testsupport.SeatedRoomCategory: base.ticketID},
 	}); err != nil {
 		t.Fatalf("materialise: %v", err)
 	}
@@ -431,9 +431,9 @@ func TestMaterialisingTwiceIsRefused(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := seatingRepository.NewSeatRepository(h.db).Materialise(ctx, seatingdomain.MaterialisePlan{
-		EventID:         h.eventID,
-		LayoutID:        h.layoutID,
-		TicketBySection: map[string]string{h.sectionID: h.ticketID},
+		EventID:          h.eventID,
+		LayoutID:         h.layoutID,
+		TicketByCategory: map[string]string{testsupport.SeatedRoomCategory: h.ticketID},
 	})
 	if !errors.Is(err, seatingdomain.ErrAlreadyMaterialised) {
 		t.Fatalf("second Materialise error = %v, want ErrAlreadyMaterialised", err)
@@ -458,4 +458,111 @@ func seedSecondTier(t *testing.T, h *harness, priceCents int64) string {
 		h.db.Exec("DELETE FROM tickets WHERE id = ?", id)
 	})
 	return id
+}
+
+// Mixed orders hold every kind of admission together and release them together.
+func TestMixedOrderReservesAndCancelsSeatsAndCountedTickets(t *testing.T) {
+	h := newSeatedHarness(t, 2, 4)
+	ctx := context.Background()
+	pista := seedSecondTier(t, h.harness, 12000)
+	camarote := seedSecondTier(t, h.harness, 60000)
+	placed, err := h.service.Start(ctx, StartInput{
+		Items: []orderdomain.DraftItem{
+			{TicketID: h.ticketID, SeatIDs: []string{h.seatIDs[0]}},
+			{TicketID: pista, Quantity: 2},
+			{TicketID: camarote, Quantity: 1},
+		},
+		BuyerID:        h.ownerID,
+		IdempotencyKey: testsupport.Unique("mixed"),
+	})
+	if err != nil {
+		t.Fatalf("mixed checkout: %v", err)
+	}
+	if placed.SubtotalCents != h.priceCents+2*12000+60000 {
+		t.Fatalf("subtotal = %d", placed.SubtotalCents)
+	}
+	if len(placed.Items) != 3 {
+		t.Fatalf("items = %d, want 3", len(placed.Items))
+	}
+	if h.statusOf(t, h.seatIDs[0]) != seatingdomain.StatusHeld {
+		t.Fatal("chair was not held")
+	}
+	for id, want := range map[string]int{h.ticketID: 1, pista: 2, camarote: 1} {
+		stock, err := h.tickets.GetByID(ctx, id)
+		if err != nil || stock.Reserved != want {
+			t.Fatalf("reserved %s: %+v, %v", id, stock, err)
+		}
+	}
+	if _, err := h.service.Cancel(ctx, placed.ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if h.statusOf(t, h.seatIDs[0]) != seatingdomain.StatusAvailable {
+		t.Fatal("chair was not released")
+	}
+	for _, id := range []string{h.ticketID, pista, camarote} {
+		stock, err := h.tickets.GetByID(ctx, id)
+		if err != nil || stock.Reserved != 0 {
+			t.Fatalf("not released %s: %+v, %v", id, stock, err)
+		}
+	}
+}
+
+func TestMixedOrderRollsBackCountedStockWhenChairIsTaken(t *testing.T) {
+	h := newSeatedHarness(t, 2, 4)
+	ctx := context.Background()
+	pista := seedSecondTier(t, h.harness, 12000)
+	if _, err := h.buy([]string{h.seatIDs[0]}, testsupport.Unique("taken")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := h.service.Start(ctx, StartInput{
+		Items: []orderdomain.DraftItem{
+			{TicketID: pista, Quantity: 2},
+			{TicketID: h.ticketID, SeatIDs: []string{h.seatIDs[0]}},
+		},
+		BuyerID:        h.ownerID,
+		IdempotencyKey: testsupport.Unique("mixed-lost"),
+	})
+	if !errors.Is(err, seatingdomain.ErrSeatsUnavailable) {
+		t.Fatalf("error = %v", err)
+	}
+	stock, err := h.tickets.GetByID(ctx, pista)
+	if err != nil || stock.Reserved != 0 {
+		t.Fatalf("partial reservation: %+v, %v", stock, err)
+	}
+}
+
+func TestNumberedTierCannotBeBoughtWithoutASeat(t *testing.T) {
+	h := newSeatedHarness(t, 2, 4)
+	_, err := h.start(1, testsupport.Unique("missing-seat"))
+	if !errors.Is(err, orderdomain.ErrInvalidTicket) {
+		t.Fatalf("error = %v, want invalid ticket", err)
+	}
+	if stock := h.stock(t); stock.Reserved != 0 {
+		t.Fatalf("reserved = %d", stock.Reserved)
+	}
+}
+
+func TestMixedEventAllowsCountedOnlyPurchase(t *testing.T) {
+	h := newSeatedHarness(t, 2, 4)
+	pista := seedSecondTier(t, h.harness, 12000)
+	placed, err := h.service.Start(context.Background(), StartInput{
+		Items:   []orderdomain.DraftItem{{TicketID: pista, Quantity: 2}},
+		BuyerID: h.ownerID, IdempotencyKey: testsupport.Unique("mixed-counted-only"),
+	})
+	if err != nil {
+		t.Fatalf("counted-only checkout in a seated event: %v", err)
+	}
+	// This order has no line on the harness's primary tier, so clean it up explicitly.
+	t.Cleanup(func() {
+		h.db.Exec("DELETE FROM jobs WHERE payload->>'orderId' = ?", placed.ID)
+		h.db.Exec("DELETE FROM orders WHERE id = ?", placed.ID)
+	})
+	if len(placed.Items) != 1 || placed.Items[0].Quantity != 2 || placed.Items[0].Seated() {
+		t.Fatalf("unexpected lines: %+v", placed.Items)
+	}
+	for _, id := range h.seatIDs {
+		if h.statusOf(t, id) != seatingdomain.StatusAvailable {
+			t.Fatal("counted-only purchase claimed a chair")
+		}
+	}
 }

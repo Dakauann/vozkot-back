@@ -168,6 +168,10 @@ type RowSpec struct {
 	// a second editing pass: the generator's caller already knows which
 	// positions its room reserves.
 	KindByLabel map[string]SeatKind
+	// CategoryByLabel puts specific chairs in a different price band, keyed the
+	// same way. "A/1" through "C/16" priced as "Plateia Premium" is the front
+	// rows costing more without the room being redrawn to say so.
+	CategoryByLabel map[string]string
 }
 
 // PlaceAt shifts a generated block so its top-left corner sits at (x, y).
@@ -199,6 +203,42 @@ func PlaceAt(seats []Seat, x, y float64) {
 	for index := range seats {
 		seats[index].X += dx
 		seats[index].Y += dy
+	}
+}
+
+// RotateBy turns a generated block about the centre of its own chairs.
+//
+// Applied before PlaceAt, so turning and placing compose: the block spins on
+// the spot and is then set down by its top-left corner like any other.
+//
+// It moves coordinates and NOTHING else. RowOrder and SeatOrder are the only
+// definition of adjacency in this system — two seats are neighbours when they
+// share a row order and their seat orders differ by one — so a block turned on
+// its side still seats four people together, and the labels a ticket prints are
+// untouched. The per-seat Rotation is carried along so a client can orient the
+// chair it draws.
+func RotateBy(seats []Seat, degrees float64) {
+	if len(seats) == 0 || math.Mod(degrees, 360) == 0 {
+		return
+	}
+	minX, minY := seats[0].X, seats[0].Y
+	maxX, maxY := seats[0].X, seats[0].Y
+	for index := range seats {
+		minX = math.Min(minX, seats[index].X)
+		minY = math.Min(minY, seats[index].Y)
+		maxX = math.Max(maxX, seats[index].X)
+		maxY = math.Max(maxY, seats[index].Y)
+	}
+	centreX, centreY := (minX+maxX)/2, (minY+maxY)/2
+
+	radians := degrees * math.Pi / 180
+	sin, cos := math.Sin(radians), math.Cos(radians)
+	for index := range seats {
+		dx := seats[index].X - centreX
+		dy := seats[index].Y - centreY
+		seats[index].X = centreX + dx*cos - dy*sin
+		seats[index].Y = centreY + dx*sin + dy*cos
+		seats[index].Rotation += degrees
 	}
 }
 
@@ -310,9 +350,11 @@ func (s RowSpec) Generate(sectionID string) ([]Seat, error) {
 				}
 				kind = override
 			}
+			category := s.CategoryByLabel[SeatKindKey(rowLabel, seatLabel)]
 
 			seats = append(seats, Seat{
 				SectionID: sectionID,
+				Category:  category,
 				RowLabel:  rowLabel,
 				SeatLabel: seatLabel,
 				X:         s.OffsetX + offset,
@@ -438,9 +480,11 @@ func (s RowSpec) generateArc(sectionID string, start int, lettered bool) ([]Seat
 				}
 				kind = override
 			}
+			category := s.CategoryByLabel[SeatKindKey(rowLabel, seatLabel)]
 
 			seats = append(seats, Seat{
 				SectionID: sectionID,
+				Category:  category,
 				RowLabel:  rowLabel,
 				SeatLabel: seatLabel,
 				// Clockwise from the top, in screen coordinates where y grows

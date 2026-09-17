@@ -38,7 +38,7 @@ func (r *SeatRepository) Materialise(ctx context.Context, plan domain.Materialis
 	if plan.EventID == "" {
 		return domain.EventSeating{}, domain.ErrInvalidEvent
 	}
-	if len(plan.TicketBySection) == 0 {
+	if len(plan.TicketByCategory) == 0 {
 		return domain.EventSeating{}, domain.ErrInvalidTicket
 	}
 
@@ -59,30 +59,28 @@ func (r *SeatRepository) Materialise(ctx context.Context, plan domain.Materialis
 			"seating: layout %s is %s and cannot be sold from", layout.ID, layout.Status)
 	}
 
-	// Only the sections the plan priced. A section left out of the map is not
-	// sold at all, which is how an organiser closes the balcony for a night
-	// without editing the room.
-	sectionIDs := make([]string, 0, len(plan.TicketBySection))
-	for sectionID := range plan.TicketBySection {
-		sectionIDs = append(sectionIDs, sectionID)
-	}
-
+	// EVERY section of the layout, not only the priced ones.
+	//
+	// The plan is keyed by price band now, and a band is a property of the
+	// seats — a section can hold two of them. So which chairs are sold cannot
+	// be decided before the chairs are read, and the filtering happens below,
+	// per seat. It costs reading the layout's seats rather than a subset, on a
+	// write that happens once per event before anything is on sale.
 	var sections []schema.LayoutSection
 	if err := r.db.WithContext(ctx).
-		Where("layout_id = ? AND id IN ?", plan.LayoutID, sectionIDs).
+		Where("layout_id = ?", plan.LayoutID).
 		Find(&sections).Error; err != nil {
 		return domain.EventSeating{}, err
 	}
-	if len(sections) != len(sectionIDs) {
-		return domain.EventSeating{}, fmt.Errorf(
-			"seating: plan names %d section(s) of layout %s, %d exist",
-			len(sectionIDs), plan.LayoutID, len(sections))
-	}
 
-	nameOf := make(map[string]string, len(sections))
+	type sectionInfo struct {
+		name     string
+		category string
+	}
+	info := make(map[string]sectionInfo, len(sections))
 	seatedSections := make([]string, 0, len(sections))
 	for _, section := range sections {
-		nameOf[section.ID] = section.Name
+		info[section.ID] = sectionInfo{name: section.Name, category: section.Category}
 		// Standing and booth sections lay out no seats: Pista is a counter and
 		// a camarote is one unit admitting many. Both keep selling exactly as
 		// they do today, through the tier, which is what makes a mixed house
@@ -104,19 +102,34 @@ func (r *SeatRepository) Materialise(ctx context.Context, plan domain.Materialis
 
 	now := time.Now().UTC()
 	rows := make([]schema.EventSeat, 0, len(layoutSeats))
+	// Which bands the plan actually reached, so a price list naming a band the
+	// room does not have is refused rather than silently selling nothing. A
+	// typo in a band name is otherwise an event that materialises half a house
+	// and looks like it worked.
+	used := make(map[string]bool, len(plan.TicketByCategory))
 	for index := range layoutSeats {
 		seat := &layoutSeats[index]
+		section := info[seat.SectionID]
+		band := domain.Category(seat.Category, section.category, section.name)
+		ticketID, priced := plan.TicketByCategory[band]
+		if !priced {
+			// A band left out of the price list is not sold, and its chairs are
+			// never materialised. That is how a balcony is closed for one night
+			// without touching the room.
+			continue
+		}
+		used[band] = true
 		layoutSeatID := seat.ID
 		rows = append(rows, schema.EventSeat{
 			ID:       newID("ste"),
 			EventID:  plan.EventID,
-			TicketID: plan.TicketBySection[seat.SectionID],
+			TicketID: ticketID,
 			// Provenance, so an editor can trace a sold chair back to the room.
 			LayoutSeatID: &layoutSeatID,
 			// The snapshot. Everything a ticket, a door panel or an email ever
 			// says about this seat is copied here and never read back from the
 			// layout, so re-lettering the room next season cannot rewrite it.
-			SectionName: nameOf[seat.SectionID],
+			SectionName: section.name,
 			RowLabel:    seat.RowLabel,
 			SeatLabel:   seat.SeatLabel,
 			Kind:        seat.Kind,
@@ -129,6 +142,14 @@ func (r *SeatRepository) Materialise(ctx context.Context, plan domain.Materialis
 			SeatOrder: seat.SeatOrder,
 			UpdatedAt: now,
 		})
+	}
+
+	for band := range plan.TicketByCategory {
+		if !used[band] {
+			return domain.EventSeating{}, fmt.Errorf(
+				"seating: the price list names %q, which no seat of layout %s is in: %w",
+				band, plan.LayoutID, domain.ErrInvalidTicket)
+		}
 	}
 
 	manifest := schema.EventSeating{
@@ -170,12 +191,22 @@ func (r *SeatRepository) Materialise(ctx context.Context, plan domain.Materialis
 				return err
 			}
 		}
-		// Frozen from the moment an event binds to it, not from the first sale.
-		// Waiting for the sale leaves a window where an organiser edits the row
+		// Published AND frozen, in the transaction that writes the seats.
+		//
+		// Frozen from the moment an event binds rather than from the first sale:
+		// waiting for the sale leaves a window where an organiser edits the row
 		// letters of a layout an on-sale event is already quoting.
+		//
+		// Published because binding IS the organiser saying the room is
+		// finished. It used to be a step of its own that they had to perform
+		// first, which meant the pricing screen could tell somebody their venue
+		// had no published plan about the plan they had just drawn.
 		return tx.Model(&schema.VenueLayout{}).
-			Where("id = ? AND frozen = false", layout.ID).
-			Update("frozen", true).Error
+			Where("id = ?", layout.ID).
+			Updates(map[string]any{
+				"status": string(domain.LayoutPublished),
+				"frozen": true,
+			}).Error
 	})
 	if err != nil {
 		return domain.EventSeating{}, err

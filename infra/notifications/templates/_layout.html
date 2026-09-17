@@ -1,15 +1,21 @@
 {{- /*
   The shared email shell: brand header, content slot, legal footer.
 
-  Cloned from Vozko's transactional layout and re-inked in this box office's own
-  palette, so a buyer who just used the site recognises the mail as coming from
-  it. Every colour here is a literal: HTML mail has no CSS variables worth
-  relying on, and Outlook has no cascade worth arguing with.
+  INKED FROM THE FRONTEND'S OWN TOKENS, not by eye. Every literal below is one
+  of src/app/globals.css's light-theme values converted to hex, because HTML
+  mail has no CSS variables worth relying on and Outlook has no cascade worth
+  arguing with. Keep them in step with that file; a colour invented here is a
+  colour the product does not have.
 
-    canvas #eef2f4   card #ffffff   hairline #dce1e5
-    ink    #14171a   muted #58626a  signal #00c28f
-    on-signal #0e1011 (the site's primary-foreground: near-black on green, which
-    is what passes contrast; white on this green does not)
+    canvas    #f6f8f9  --background      card      #ffffff  --card
+    border    #dce1e5  --border          muted     #eaeef0  --muted
+    ink       #14171a  --foreground      muted-ink #58626a  --muted-foreground
+    primary   #00c28e  --primary         on-primary #0e1011 --primary-foreground
+    link      #007a5c  --primary-ink     edge      #009970  --primary-edge
+
+  RADIUS comes from the same place: --radius is 6px for controls, rounded-lg is
+  8px for cards. The shell sits one step above its own cards at 12px. Nothing in
+  this product is a 20px bubble or a pill, which is what this used to be.
 
   A content template supplies "title", "preheader" and "content".
 */ -}}
@@ -28,6 +34,14 @@
     <!--[if mso]>
     <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
     <![endif]-->
+    {{- /* The site's two faces, for the clients that honour a webfont: Apple
+           Mail, iOS Mail, Samsung Mail. Everywhere else the stack falls through
+           to Arial and the layout is unchanged, because nothing here depends on
+           a glyph width. Hidden from Outlook, which would download neither and
+           complain about both. */ -}}
+    <!--[if !mso]><!-->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oxanium:wght@600;700&display=swap" rel="stylesheet">
+    <!--<![endif]-->
     <style>
         html, body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
         * { -ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%; }
@@ -36,43 +50,49 @@
         a { color: #007a5c; }
         @media only screen and (max-width: 620px) {
             .vk-container { width: 100% !important; border-radius: 0 !important; }
-            .vk-pad { padding-left: 24px !important; padding-right: 24px !important; }
+            .vk-pad { padding-left: 22px !important; padding-right: 22px !important; }
         }
     </style>
 </head>
 
-<body style="margin:0; padding:0; background-color:#eef2f4; font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;">
+<body style="margin:0; padding:0; background-color:#f6f8f9; font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;">
 
     {{- /* The preview line inboxes show next to the subject. Padded with zero-width
            joiners so the client does not follow it with the first words of the body. */ -}}
-    <div style="display:none; max-height:0; overflow:hidden; mso-hide:all; line-height:0; font-size:0; color:#eef2f4;">{{block "preheader" .}}{{.Brand.Name}}{{end}}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
+    <div style="display:none; max-height:0; overflow:hidden; mso-hide:all; line-height:0; font-size:0; color:#f6f8f9;">{{block "preheader" .}}{{.Brand.Name}}{{end}}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eef2f4" style="background-color:#eef2f4;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f6f8f9" style="background-color:#f6f8f9;">
         <tr>
             <td align="center" style="padding:40px 16px 28px;">
 
-                <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="vk-container" style="width:600px; max-width:600px; background-color:#ffffff; border:1px solid #dce1e5; border-radius:20px; overflow:hidden; box-shadow:0px 1px 1px -0.7px rgba(19,26,29,0.07), 0px 3.6px 3.6px -2px rgba(19,26,29,0.06), 0px 13.6px 13.6px -3.3px rgba(19,26,29,0.05), 0px 30px 30px -4px rgba(19,26,29,0.02);">
+                {{- /* --elev-3, the resting depth of a card in the app: a real
+                       offset and a soft blur, never a zero-offset halo. */ -}}
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="vk-container" style="width:600px; max-width:600px; background-color:#ffffff; border:1px solid #dce1e5; border-radius:12px; overflow:hidden; box-shadow:0 2px 5px -1px rgba(38,53,63,0.10), 0 1px 3px -1px rgba(0,0,0,0.06);">
 
                     <tr>
-                        <td class="vk-pad" align="center" style="padding:34px 40px 26px; border-bottom:1px solid #eef2f4;">
-                            <a href="{{.Brand.SiteURL}}" style="text-decoration:none;"><img src="{{.Brand.LogoURL}}" alt="{{.Brand.Name}}" height="34" style="display:inline-block; border:0; max-height:34px; width:auto;" /></a>
+                        <td class="vk-pad" align="center" style="padding:32px 40px 24px; border-bottom:1px solid #dce1e5;">
+                            {{- /* The wordmark travels WITH the message as an
+                                   inline part; see infra/notifications/logo.go.
+                                   The alt text is the brand name, so a client
+                                   that blocks images still says who wrote. */ -}}
+                            <a href="{{.Brand.SiteURL}}" style="text-decoration:none;"><img src="{{.LogoSrc}}" alt="{{.Brand.Name}}" width="152" height="34" style="display:inline-block; border:0; width:152px; height:34px;" /></a>
                         </td>
                     </tr>
 
                     {{block "content" .}}{{end}}
 
                     <tr>
-                        <td style="font-size:0; line-height:0; height:20px;">&nbsp;</td>
+                        <td style="font-size:0; line-height:0; height:22px;">&nbsp;</td>
                     </tr>
 
                 </table>
 
                 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px;">
                     <tr>
-                        <td class="vk-pad" align="center" style="padding:26px 40px 0;">
-                            {{if .Brand.LegalName}}<p style="margin:0 0 4px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; color:#58626a; text-align:center; letter-spacing:0.03em;">{{.Brand.LegalName}}</p>{{end}}
-                            {{if .Brand.CNPJ}}<p style="margin:0 0 12px; font-family:Inter,Arial,sans-serif; font-size:12px; color:#8492a0; text-align:center;">CNPJ {{.Brand.CNPJ}}</p>{{end}}
-                            <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:12px; color:#8492a0; text-align:center; line-height:1.6;">
+                        <td class="vk-pad" align="center" style="padding:24px 40px 0;">
+                            {{if .Brand.LegalName}}<p style="margin:0 0 4px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; color:#58626a; text-align:center;">{{.Brand.LegalName}}</p>{{end}}
+                            {{if .Brand.CNPJ}}<p style="margin:0 0 12px; font-family:Inter,Arial,sans-serif; font-size:12px; color:#58626a; text-align:center;">CNPJ {{.Brand.CNPJ}}</p>{{end}}
+                            <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:12px; color:#58626a; text-align:center; line-height:1.6;">
                                 {{if .Brand.SiteURL}}<a href="{{.Brand.SiteURL}}" style="color:#007a5c; text-decoration:none;">{{.Brand.Name}}</a>{{end}}
                                 {{if and .Brand.SiteURL .Brand.SupportEmail}}&nbsp;&nbsp;&middot;&nbsp;&nbsp;{{end}}
                                 {{if .Brand.SupportEmail}}<a href="mailto:{{.Brand.SupportEmail}}" style="color:#007a5c; text-decoration:none;">{{.Brand.SupportEmail}}</a>{{end}}
@@ -81,7 +101,7 @@
                     </tr>
                     <tr>
                         <td class="vk-pad" align="center" style="padding:14px 40px 0;">
-                            <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:11px; color:#a3aeb8; text-align:center; line-height:1.6;">Você recebeu esta mensagem porque fez um pedido em {{.Brand.Name}}. Este é um e-mail transacional e não pode ser cancelado.</p>
+                            <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:11px; color:#58626a; text-align:center; line-height:1.6;">Você recebeu esta mensagem porque fez um pedido em {{.Brand.Name}}. Este é um e-mail transacional e não pode ser cancelado.</p>
                         </td>
                     </tr>
                 </table>

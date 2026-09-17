@@ -2,69 +2,92 @@
   Reusable email components, called with the dict helper:
       {{template "cta" dict "url" .OrderURL "label" "Ver meu pedido"}}
 
-  Cloned from Vozko's set and re-inked in this box office's palette. Everything
-  here is a table with inline styles, because the moment a component depends on
-  a class or a cascade it stops rendering in Outlook and nobody finds out until
-  a buyer forwards a screenshot.
+  Everything here is a table with inline styles, because the moment a component
+  depends on a class or a cascade it stops rendering in Outlook and nobody finds
+  out until a buyer forwards a screenshot.
+
+  THE ONE RULE THESE ALL FOLLOW, taken from globals.css's .notice and from
+  TicketStatusChip: a status changes the INK and nothing else. The ground stays
+  the same quiet neutral whatever the tone is. That is the frontend's own stated
+  reasoning — one tinted ground renders as several colours depending on what is
+  behind it — and these components used to contradict it with a tinted panel,
+  a tinted pill and a tinted border per tone.
+
+    canvas #f6f8f9   card #ffffff   muted #eaeef0   border #dce1e5
+    ink    #14171a   muted-ink #58626a
+    primary #00c28e  on-primary #0e1011  link/primary-ink #007a5c
+    healthy-ink #036d3c  warning-ink #8f4f04  danger-ink #ac1529  info-ink #0754a6
+
+  Radius: 6px controls (--radius), 8px cards (rounded-lg).
 */ -}}
 
-{{- /* heading: centred title plus optional subtitle. */ -}}
+{{- /* heading: centred title plus optional subtitle. Oxanium is the site's
+       display face; Inter carries the subtitle, exactly as on the web. */ -}}
 {{define "heading"}}
-<h1 style="margin:22px 0 0; font-family:Inter,Arial,sans-serif; font-size:24px; font-weight:600; color:#14171a; line-height:1.3; letter-spacing:-0.01em; text-align:center;">{{.title}}</h1>
-{{if .subtitle}}<p style="margin:9px 0 0; font-family:Inter,Arial,sans-serif; font-size:15px; color:#58626a; line-height:1.5; text-align:center;">{{.subtitle}}</p>{{end}}
+<h1 style="margin:18px 0 0; font-family:Oxanium,Inter,Arial,sans-serif; font-size:25px; font-weight:600; color:#14171a; line-height:1.25; letter-spacing:-0.01em; text-align:center;">{{.title}}</h1>
+{{if .subtitle}}<p style="margin:10px 0 0; font-family:Inter,Arial,sans-serif; font-size:15px; color:#58626a; line-height:1.55; text-align:center;">{{.subtitle}}</p>{{end}}
 {{end}}
 
-{{- /* amount: the one number the message is about, on the signal surface.
-       Near-black on green, which is the site's own primary/primary-foreground
-       pairing and the only one of the two that passes contrast. */ -}}
+{{- /* amount: the one number the message is about.
+
+       On the card's own neutral, not on a slab of signal green. The site shows
+       a total as `font-display ... text-foreground` beside its controls and
+       keeps green for the thing you click; a receipt that reversed that made
+       the amount louder than the action and looked like nothing in the app. */ -}}
 {{define "amount"}}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
-        <td align="center" bgcolor="#00c28f" style="padding:26px 20px; border-radius:18px; background-color:#00c28f; text-align:center;">
-            <p style="margin:0 0 8px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; color:#0e1011; text-transform:uppercase; letter-spacing:0.12em; opacity:0.75;">{{.label}}</p>
-            <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:34px; font-weight:700; color:#0e1011; line-height:1.15; letter-spacing:-0.02em;">{{.value}}</p>
+        <td align="center" bgcolor="#eaeef0" style="padding:22px 20px; border-radius:8px; background-color:#eaeef0; text-align:center;">
+            <p style="margin:0 0 6px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; color:#58626a;">{{.label}}</p>
+            <p style="margin:0; font-family:Oxanium,Inter,Arial,sans-serif; font-size:32px; font-weight:700; color:#14171a; line-height:1.15; letter-spacing:-0.02em;">{{.value}}</p>
         </td>
     </tr>
 </table>
 {{end}}
 
-{{- /* cta: the site's primary button, rebuilt bulletproof. Pill, signal green,
-       near-black label, with a VML twin so Outlook gets the same shape. */ -}}
+{{- /* cta: the site's primary button, rebuilt bulletproof. 6px corners and the
+       primary/primary-foreground pair, which is near-black on green because
+       that is the pairing that passes contrast; white on this green does not.
+       A VML twin gives Outlook the same rectangle. */ -}}
 {{define "cta"}}
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:8px auto 0;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:6px auto 0;">
     <tr>
-        <td align="center" bgcolor="#00c28f" style="border-radius:9999px;">
+        <td align="center" bgcolor="#00c28e" style="border-radius:6px;">
             <!--[if mso]>
-            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{.url}}" style="height:44px;v-text-anchor:middle;width:240px;" arcsize="50%" strokecolor="#00a87b" fillcolor="#00c28f">
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{.url}}" style="height:40px;v-text-anchor:middle;width:240px;" arcsize="15%" strokecolor="#009970" fillcolor="#00c28e">
             <w:anchorlock/><center style="color:#0e1011;font-family:Inter,Arial,sans-serif;font-size:14px;font-weight:600;">{{.label}}</center>
             </v:roundrect>
             <![endif]-->
             <!--[if !mso]><!-->
-            <a href="{{.url}}" style="display:inline-block; min-width:176px; background-color:#00c28f; color:#0e1011; font-family:Inter,Arial,sans-serif; font-size:14px; font-weight:600; line-height:44px; text-align:center; text-decoration:none; border-radius:9999px; padding:0 30px; box-shadow:0 1px 2px 0 rgba(19,26,29,0.08), 0 10px 22px -12px rgba(0,194,143,0.55);">{{.label}}</a>
+            <a href="{{.url}}" style="display:inline-block; min-width:176px; background-color:#00c28e; border:1px solid #009970; color:#0e1011; font-family:Inter,Arial,sans-serif; font-size:14px; font-weight:600; line-height:38px; text-align:center; text-decoration:none; border-radius:6px; padding:0 28px;">{{.label}}</a>
             <!--<![endif]-->
         </td>
     </tr>
 </table>
 {{end}}
 
-{{- /* panel: a notice surface. Hairline border plus tint, never a thick coloured
-       left stripe. tone: info|success|warning|danger. */ -}}
+{{- /* panel: the .notice surface. One neutral ground for every tone; only the
+       title's ink changes. tone: info|success|warning|danger. */ -}}
 {{define "panel"}}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
-        <td style="padding:17px 20px; border-radius:16px; border:1px solid {{if eq .tone "success"}}#baeedf{{else if eq .tone "warning"}}#f7e3b4{{else if eq .tone "danger"}}#f4ccd2{{else}}#d7e0e6{{end}}; background-color:{{if eq .tone "success"}}#e7f9f4{{else if eq .tone "warning"}}#fef6e6{{else if eq .tone "danger"}}#fdecee{{else}}#f2f6f8{{end}};">
-            {{if .title}}<p style="margin:0 0 6px; font-family:Inter,Arial,sans-serif; font-size:14px; font-weight:600; color:{{if eq .tone "success"}}#00654b{{else if eq .tone "warning"}}#904f04{{else if eq .tone "danger"}}#9a1c2b{{else}}#37464f{{end}};">{{.title}}</p>{{end}}
+        <td style="padding:16px 18px; border-radius:6px; border:1px solid #dce1e5; background-color:#eaeef0;">
+            {{if .title}}<p style="margin:0 0 6px; font-family:Inter,Arial,sans-serif; font-size:14px; font-weight:600; color:{{if eq .tone "success"}}#036d3c{{else if eq .tone "warning"}}#8f4f04{{else if eq .tone "danger"}}#ac1529{{else if eq .tone "info"}}#0754a6{{else}}#14171a{{end}};">{{.title}}</p>{{end}}
             <p style="margin:0; font-family:Inter,Arial,sans-serif; font-size:13px; color:#58626a; line-height:1.6;">{{.body}}</p>
         </td>
     </tr>
 </table>
 {{end}}
 
-{{- /* datarow: one label/value line inside a details card. */ -}}
+{{- /* datarow: one label/value line inside a details card.
+
+       The rule is BETWEEN rows, never after the last one: a trailing hairline
+       sitting a few pixels above the card's own border reads as a rendering
+       fault, and the web list this mirrors is divide-y, which does the same. */ -}}
 {{define "datarow"}}
 <tr>
-    <td style="padding:11px 0; border-bottom:1px solid #eaeff2; font-family:Inter,Arial,sans-serif; font-size:13px; color:#58626a;">{{.label}}</td>
-    <td align="right" style="padding:11px 0; border-bottom:1px solid #eaeff2; font-family:Inter,Arial,sans-serif; font-size:13px; font-weight:600; color:#14171a;">{{.value}}</td>
+    <td style="padding:11px 0;{{if not .last}} border-bottom:1px solid #dce1e5;{{end}} font-family:Inter,Arial,sans-serif; font-size:13px; color:#58626a;">{{.label}}</td>
+    <td align="right" style="padding:11px 0;{{if not .last}} border-bottom:1px solid #dce1e5;{{end}} font-family:Inter,Arial,sans-serif; font-size:13px; font-weight:600; color:#14171a;">{{.value}}</td>
 </tr>
 {{end}}
 
@@ -74,14 +97,17 @@
 {{define "details"}}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
-        <td style="padding:4px 22px 14px; border:1px solid #dce1e5; border-radius:16px; background-color:#fafcfc;">
-            {{if .title}}<p style="margin:0; padding:14px 0 2px; font-family:Inter,Arial,sans-serif; font-size:11px; font-weight:600; color:#48555e; text-transform:uppercase; letter-spacing:0.09em;">{{.title}}</p>{{end}}
+        <td style="padding:4px 20px 14px; border:1px solid #dce1e5; border-radius:8px; background-color:#ffffff;">
+            {{- /* The site's .legend: 12px, 600, muted ink, slightly tightened.
+                   Not an uppercase eyebrow with wide tracking, which is not a
+                   thing this product does anywhere. */ -}}
+            {{if .title}}<p style="margin:0; padding:14px 0 2px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; color:#58626a; letter-spacing:-0.005em;">{{.title}}</p>{{end}}
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                {{if .k1}}{{template "datarow" dict "label" .k1 "value" .v1}}{{end}}
-                {{if .k2}}{{template "datarow" dict "label" .k2 "value" .v2}}{{end}}
-                {{if .k3}}{{template "datarow" dict "label" .k3 "value" .v3}}{{end}}
-                {{if .k4}}{{template "datarow" dict "label" .k4 "value" .v4}}{{end}}
-                {{if .k5}}{{template "datarow" dict "label" .k5 "value" .v5}}{{end}}
+                {{if .k1}}{{template "datarow" dict "label" .k1 "value" .v1 "last" (not .k2)}}{{end}}
+                {{if .k2}}{{template "datarow" dict "label" .k2 "value" .v2 "last" (not .k3)}}{{end}}
+                {{if .k3}}{{template "datarow" dict "label" .k3 "value" .v3 "last" (not .k4)}}{{end}}
+                {{if .k4}}{{template "datarow" dict "label" .k4 "value" .v4 "last" (not .k5)}}{{end}}
+                {{if .k5}}{{template "datarow" dict "label" .k5 "value" .v5 "last" true}}{{end}}
             </table>
         </td>
     </tr>
@@ -89,21 +115,22 @@
 {{end}}
 
 {{- /* copybox: a long machine string the buyer has to copy; a PIX payload runs
-       to a couple of hundred characters. Its own component rather than Vozko's
-       codebox, which is built for a six-digit code at 40px and would render a
-       PIX key as an unreadable wall. Wrapping is forced: a client that does not
-       break the string shows the buyer a third of their payment code. */ -}}
+       to a couple of hundred characters. Its own component rather than a code
+       box built for a six-digit code at 40px, which would render a PIX key as
+       an unreadable wall. Wrapping is forced: a client that does not break the
+       string shows the buyer a third of their payment code. */ -}}
 {{define "copybox"}}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
-        <td style="padding:16px 18px; border-radius:16px; border:1px solid #baeedf; background-color:#e7f9f4;">
-            <p style="margin:0 0 8px; font-family:Inter,Arial,sans-serif; font-size:11px; font-weight:600; color:#00654b; text-transform:uppercase; letter-spacing:0.09em;">{{.label}}</p>
+        <td style="padding:15px 17px; border-radius:6px; border:1px solid #dce1e5; background-color:#eaeef0;">
+            <p style="margin:0 0 8px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; color:#58626a; letter-spacing:-0.005em;">{{.label}}</p>
             <p style="margin:0; font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace; font-size:12px; color:#14171a; line-height:1.65; word-break:break-all; word-wrap:break-word; -ms-word-break:break-all;">{{.value}}</p>
         </td>
     </tr>
 </table>
 {{end}}
 
-{{- /* badge: a status pill carrying meaning through tint and ink.
+{{- /* badge: a status, carried the way TicketStatusChip carries one — as ink on
+       the surface it sits on, with no pill and no tint behind it.
        tone: info|success|warning|danger|neutral. */ -}}
-{{define "badge"}}<span style="display:inline-block; padding:4px 12px; border-radius:9999px; font-family:Inter,Arial,sans-serif; font-size:12px; font-weight:600; background-color:{{if eq .tone "success"}}#e7f9f4{{else if eq .tone "warning"}}#fef6e6{{else if eq .tone "danger"}}#fdecee{{else if eq .tone "info"}}#f2f6f8{{else}}#f1f4f6{{end}}; color:{{if eq .tone "success"}}#00654b{{else if eq .tone "warning"}}#904f04{{else if eq .tone "danger"}}#9a1c2b{{else if eq .tone "info"}}#37464f{{else}}#48555e{{end}};">{{.text}}</span>{{end}}
+{{define "badge"}}<span style="font-family:Inter,Arial,sans-serif; font-size:13px; font-weight:600; letter-spacing:-0.005em; color:{{if eq .tone "success"}}#036d3c{{else if eq .tone "warning"}}#8f4f04{{else if eq .tone "danger"}}#ac1529{{else if eq .tone "info"}}#0754a6{{else}}#58626a{{end}};">{{.text}}</span>{{end}}

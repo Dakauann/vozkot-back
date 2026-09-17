@@ -68,6 +68,9 @@ type Repository interface {
 	// SeatingOf reports the manifest an event is selling, if any.
 	SeatingOf(ctx context.Context, eventID string) (*EventSeating, error)
 
+	// BindAreas assigns dedicated counted inventory to each area of the frozen plan.
+	BindAreas(ctx context.Context, eventID string, tickets map[string]string) error
+
 	// Block and Unblock withhold seats from sale and put them back. Neither
 	// touches a held or sold seat: an organiser blocking a broken chair must
 	// not silently cancel somebody's ticket, and the refusal is visible.
@@ -84,10 +87,17 @@ type Repository interface {
 type MaterialisePlan struct {
 	EventID  string
 	LayoutID string
-	// TicketBySection maps a section id to the tier its seats sell at. A
-	// section missing from the map is not sold at all and its seats are not
+	// TicketByCategory maps a price band to the tier its seats sell at.
+	//
+	// A band rather than a section, because where a seat is and what it costs
+	// change on different clocks: the room is fixed for years and the price
+	// list changes every night. A band is a NAME — see Category — so two wings
+	// of a plateia can share one price, and the front three rows can carry
+	// their own without the room being redrawn to express it.
+	//
+	// A band missing from the map is not sold at all and its seats are not
 	// materialised, which is how an organiser closes the balcony for a night.
-	TicketBySection map[string]string
+	TicketByCategory map[string]string
 }
 
 // LayoutRepository is the definition side: venues, layouts, sections, seats.

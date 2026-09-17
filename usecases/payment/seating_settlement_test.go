@@ -47,9 +47,9 @@ func seatFor(t *testing.T, h *harness, rows, perRow int) []seatingdomain.EventSe
 
 	seats := seatingRepository.NewSeatRepository(h.db)
 	if _, err := seats.Materialise(ctx, seatingdomain.MaterialisePlan{
-		EventID:         h.eventID,
-		LayoutID:        room.LayoutID,
-		TicketBySection: map[string]string{room.SectionID: h.ticketID},
+		EventID:          h.eventID,
+		LayoutID:         room.LayoutID,
+		TicketByCategory: map[string]string{room.Category: h.ticketID},
 	}); err != nil {
 		t.Fatalf("materialise: %v", err)
 	}

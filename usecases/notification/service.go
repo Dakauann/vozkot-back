@@ -85,6 +85,12 @@ func (s *Service) Deliver(ctx context.Context, payload domain.Payload) error {
 	// The tickets, loaded now rather than carried in the payload. See
 	// AdmissionTickets for why the codes must not be in the job row.
 	inline := s.attachTickets(ctx, &request)
+	// Whatever the layout itself references, such as the header's wordmark.
+	// Appended rather than prepended so a ticket's QR keeps its position in
+	// the part list, which is what some clients order the attachment tray by.
+	if chrome, ok := s.renderer.(domain.ChromeInliner); ok {
+		inline = append(inline, chrome.Chrome(request.Channel)...)
+	}
 
 	body, err := s.renderer.Render(request.Channel, request.Template, request.Data)
 	if err != nil {

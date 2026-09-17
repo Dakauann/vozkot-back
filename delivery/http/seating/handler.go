@@ -45,6 +45,7 @@ func (h *Handler) Register(router *http.ServeMux) {
 	router.HandleFunc("GET /api/v1/layouts/{id}/compliance", h.compliance)
 	router.HandleFunc("POST /api/v1/layouts/{id}/publish", h.publish)
 	router.HandleFunc("POST /api/v1/events/{id}/seating", h.bind)
+	router.HandleFunc("PUT /api/v1/events/{id}/seating/areas", h.bindAreas)
 	router.HandleFunc("POST /api/v1/events/{id}/seats/block", h.block)
 	router.HandleFunc("POST /api/v1/events/{id}/seats/unblock", h.unblock)
 }
@@ -143,6 +144,9 @@ type LayoutResponse struct {
 	Frozen        bool   `json:"frozen"`
 	ViewBoxWidth  int    `json:"viewBoxWidth"`
 	ViewBoxHeight int    `json:"viewBoxHeight"`
+	// SeatCount is how many named chairs the plan holds. Present on a listing,
+	// so plans can be told apart without opening each one.
+	SeatCount int `json:"seatCount,omitempty"`
 }
 
 type LayoutEnvelope struct {
@@ -216,10 +220,18 @@ type SectionRequest struct {
 	Capacity int    `json:"capacity" example:"0"`
 	// OffsetX and OffsetY are the object's TOP-LEFT corner, and what the canvas
 	// sets by dragging. Width and Height size a marker.
-	OffsetX      float64   `json:"offsetX" example:"0"`
-	OffsetY      float64   `json:"offsetY" example:"0"`
-	Width        float64   `json:"width" example:"0"`
-	Height       float64   `json:"height" example:"0"`
+	OffsetX float64 `json:"offsetX" example:"0"`
+	OffsetY float64 `json:"offsetY" example:"0"`
+	Width   float64 `json:"width" example:"0"`
+	Height  float64 `json:"height" example:"0"`
+	// Rotation turns a block of seats, in degrees clockwise about its own
+	// centre. It is how rows are made to run down the SIDE of a room, which
+	// dragging and resizing cannot express. Meaningless for a marker or a
+	// counted area, which are resized instead.
+	Rotation float64 `json:"rotation" example:"0"`
+	// Category is the price band this section's seats belong to by default.
+	// Empty means the section's own name, which is what an ordinary room wants.
+	Category     string    `json:"category" example:"Plateia"`
 	DisplayOrder int       `json:"displayOrder" example:"1"`
 	Shape        []float64 `json:"shape"`
 	// Definition is this same object as the editor described it, echoed back on
@@ -268,6 +280,11 @@ type SectionRequest struct {
 	TablesPerRow  int     `json:"tablesPerRow" example:"4"`
 	TableGap      float64 `json:"tableGap" example:"110"`
 	FirstTable    int     `json:"firstTable" example:"1"`
+	// SeatCategories puts individual chairs in a different price band, keyed
+	// "FILA/ASSENTO". It is what prices the front three rows above the rest, and
+	// the partial-view chair behind a pillar below it — neither of which is a
+	// contiguous block that could be a sector of its own.
+	SeatCategories map[string]string `json:"seatCategories,omitempty"`
 	// SeatKinds marks individual chairs, keyed "FILA/ASSENTO" — "K/12".
 	//
 	// This is where the accessibility seats the law requires get set, and the
@@ -287,19 +304,28 @@ type SeatResponse struct {
 	X         float64 `json:"x"`
 	Y         float64 `json:"y"`
 	Kind      string  `json:"kind"`
-	RowOrder  int     `json:"rowOrder"`
-	SeatOrder int     `json:"seatOrder"`
+	// Category is the price band this chair sells in, already resolved from the
+	// seat's own band, its section's, and the section's name. The pricing screen
+	// groups by this and needs nothing else.
+	Category  string `json:"category,omitempty"`
+	RowOrder  int    `json:"rowOrder"`
+	SeatOrder int    `json:"seatOrder"`
 }
 
 type SectionResponse struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Kind         string    `json:"kind"`
-	Capacity     int       `json:"capacity"`
-	OffsetX      float64   `json:"offsetX"`
-	OffsetY      float64   `json:"offsetY"`
-	Width        float64   `json:"width"`
-	Height       float64   `json:"height"`
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Kind     string  `json:"kind"`
+	Capacity int     `json:"capacity"`
+	OffsetX  float64 `json:"offsetX"`
+	OffsetY  float64 `json:"offsetY"`
+	Width    float64 `json:"width"`
+	Height   float64 `json:"height"`
+	// Category is the band this section's seats belong to by default, as it was
+	// SET — empty when the section's own name is doing the work. The resolved
+	// band travels on each seat.
+	Category     string    `json:"category,omitempty"`
+	Rotation     float64   `json:"rotation,omitempty"`
 	DisplayOrder int       `json:"displayOrder"`
 	Shape        []float64 `json:"shape,omitempty"`
 	// Definition is the editor form this block was generated from. It is what
@@ -323,6 +349,13 @@ type LayoutDetailEnvelope struct {
 	// missing, so the studio can offer to apply it in one action instead of
 	// telling the organiser to find them by hand.
 	SuggestedKinds map[string]string `json:"suggestedKinds,omitempty"`
+	// Bands are the room's price bands, in the order their colour is assigned.
+	//
+	// Slot one is the first hue of a fixed categorical palette, slot two the
+	// second, and so on — so the ORDER is the colour, and it is computed here
+	// rather than in each client. Two answers to "what colour is Plateia" is a
+	// room that changes colour when somebody walks between screens.
+	Bands []string `json:"bands,omitempty"`
 	// Collisions are the sections drawn on top of each other, by id.
 	//
 	// Reported on a preview and REFUSED on a save, and computed by the same rule
@@ -384,6 +417,8 @@ func toSpecs(sections []SectionRequest) []usecase.SectionSpec {
 		definition, _ := json.Marshal(section)
 		specs = append(specs, usecase.SectionSpec{
 			Definition:   definition,
+			Rotation:     section.Rotation,
+			Category:     strings.TrimSpace(section.Category),
 			Name:         section.Name,
 			Kind:         domain.SectionKind(strings.TrimSpace(section.Kind)),
 			Capacity:     section.Capacity,
@@ -394,21 +429,22 @@ func toSpecs(sections []SectionRequest) []usecase.SectionSpec {
 			DisplayOrder: section.DisplayOrder,
 			Shape:        section.Shape,
 			Rows: domain.RowSpec{
-				Shape:          domain.RowShape(strings.TrimSpace(section.RowShape)),
-				Rows:           section.Rows,
-				SeatsPerRow:    section.SeatsPerRow,
-				FirstRowLetter: section.FirstRowLetter,
-				RowLabels:      domain.RowLabelStyle(strings.TrimSpace(section.RowLabels)),
-				Numbering:      domain.Numbering(strings.TrimSpace(section.Numbering)),
-				Skips:          section.Skips,
-				Curve:          section.Curve,
-				SeatGap:        section.SeatGap,
-				RowGap:         section.RowGap,
-				SeatPitch:      section.SeatPitch,
-				Radius:         section.Radius,
-				StartAngle:     section.StartAngle,
-				SweepAngle:     section.SweepAngle,
-				KindByLabel:    kinds,
+				Shape:           domain.RowShape(strings.TrimSpace(section.RowShape)),
+				Rows:            section.Rows,
+				SeatsPerRow:     section.SeatsPerRow,
+				FirstRowLetter:  section.FirstRowLetter,
+				RowLabels:       domain.RowLabelStyle(strings.TrimSpace(section.RowLabels)),
+				Numbering:       domain.Numbering(strings.TrimSpace(section.Numbering)),
+				Skips:           section.Skips,
+				Curve:           section.Curve,
+				SeatGap:         section.SeatGap,
+				RowGap:          section.RowGap,
+				SeatPitch:       section.SeatPitch,
+				Radius:          section.Radius,
+				StartAngle:      section.StartAngle,
+				SweepAngle:      section.SweepAngle,
+				KindByLabel:     kinds,
+				CategoryByLabel: section.SeatCategories,
 			},
 			Tables: domain.TableSpec{
 				Tables:        section.Tables,
@@ -462,9 +498,10 @@ func (h *Handler) preview(response http.ResponseWriter, request *http.Request) {
 	httpx.WriteJSON(response, http.StatusOK, LayoutDetailEnvelope{
 		Data:           LayoutResponse{ID: layoutID},
 		Sections:       toSectionResponses(sections),
-		Seats:          toSeatResponses(seats),
+		Seats:          toSeatResponses(sections, seats),
 		Compliance:     &report,
 		SuggestedKinds: suggested,
+		Bands:          domain.BandsOf(sections, seats),
 		Collisions:     h.seating.Collisions(sections, seats),
 	})
 }
@@ -493,7 +530,8 @@ func (h *Handler) writeLayout(response http.ResponseWriter, request *http.Reques
 	httpx.WriteJSON(response, http.StatusOK, LayoutDetailEnvelope{
 		Data:     toLayout(&detail.Layout),
 		Sections: toSectionResponses(detail.Sections),
-		Seats:    toSeatResponses(detail.Seats),
+		Seats:    toSeatResponses(detail.Sections, detail.Seats),
+		Bands:    domain.BandsOf(detail.Sections, detail.Seats),
 	})
 }
 
@@ -511,6 +549,8 @@ func toSectionResponses(sections []domain.Section) []SectionResponse {
 			OffsetY:      section.OffsetY,
 			Width:        section.Width,
 			Height:       section.Height,
+			Category:     section.Category,
+			Rotation:     section.Rotation,
 			DisplayOrder: section.DisplayOrder,
 			Shape:        section.Shape,
 			Definition:   json.RawMessage(section.Definition),
@@ -519,9 +559,21 @@ func toSectionResponses(sections []domain.Section) []SectionResponse {
 	return out
 }
 
-func toSeatResponses(seats []domain.Seat) []SeatResponse {
+// toSeatResponses describes a room's chairs, each with its price band already
+// RESOLVED.
+//
+// Resolved here rather than handed over as three fields to combine, because the
+// fallback — the seat's band, then its section's, then the section's name — is
+// a rule, and a rule repeated in a browser is a rule with two answers. The
+// editor and the pricing screen both just read `category`.
+func toSeatResponses(sections []domain.Section, seats []domain.Seat) []SeatResponse {
+	bands := make(map[string]domain.Section, len(sections))
+	for _, section := range sections {
+		bands[section.ID] = section
+	}
 	out := make([]SeatResponse, 0, len(seats))
 	for _, seat := range seats {
+		section := bands[seat.SectionID]
 		out = append(out, SeatResponse{
 			ID:        seat.ID,
 			SectionID: seat.SectionID,
@@ -530,6 +582,7 @@ func toSeatResponses(seats []domain.Seat) []SeatResponse {
 			X:         seat.X,
 			Y:         seat.Y,
 			Kind:      string(seat.Kind),
+			Category:  domain.Category(seat.Category, section.Category, section.Name),
 			RowOrder:  seat.RowOrder,
 			SeatOrder: seat.SeatOrder,
 		})
@@ -605,10 +658,21 @@ func (h *Handler) publish(response http.ResponseWriter, request *http.Request) {
 
 type BindRequest struct {
 	LayoutID string `json:"layoutId"`
-	// TicketBySection prices each setor: the section id mapped to the tier its
-	// seats sell at. A section left out is not sold at all, which is how a
-	// balcony is closed for one night without editing the room.
-	TicketBySection map[string]string `json:"ticketBySection"`
+	// TicketByCategory prices each price band: the band's NAME mapped to the
+	// tier its seats sell at.
+	//
+	// A band and not a section, because where a seat is and what it costs change
+	// on different clocks — the room is fixed for years and the price list
+	// changes every night. A band defaults to its section's name, so an ordinary
+	// room is priced exactly as it was before bands existed; setting one lets
+	// two wings share a price, or the front three rows carry their own without
+	// the room being redrawn to say so.
+	//
+	// A band left out is not sold at all, which is how a balcony is closed for
+	// one night without editing the room. A band named here that no seat is in
+	// is refused, because a typo would otherwise materialise half a house and
+	// look like it worked.
+	TicketByCategory map[string]string `json:"ticketByCategory"`
 }
 
 type SeatingEnvelope struct {
@@ -637,9 +701,9 @@ func (h *Handler) bind(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	manifest, err := h.seating.Bind(request.Context(), actor(request), usecase.BindInput{
-		EventID:         pathID(request),
-		LayoutID:        payload.LayoutID,
-		TicketBySection: payload.TicketBySection,
+		EventID:          pathID(request),
+		LayoutID:         payload.LayoutID,
+		TicketByCategory: payload.TicketByCategory,
 	})
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
@@ -739,13 +803,21 @@ type MapSeatResponse struct {
 	SeatOrder int     `json:"seatOrder"`
 }
 
-// MapMarkerResponse is scenery: a stage, the floor a rodeo runs in. It holds no
-// seats and sells nothing; it is how a buyer tells which end of the room they
-// are looking at.
+// MapMarkerResponse is a block of the room that holds no individual chairs.
+//
+// Two sorts, and the client draws them differently. `stage` and `arena` are
+// scenery: they sell nothing and exist so a buyer can tell which end of the
+// room they are looking at. `standing` and `booth` are floor a buyer can
+// actually be on, sold by the head through their own tier rather than chair by
+// chair, and they carry a capacity.
 type MapMarkerResponse struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Kind string `json:"kind" enums:"stage,arena"`
+	TicketID string `json:"ticketId,omitempty"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind" enums:"stage,arena,standing,booth"`
+	// Capacity is how many people it holds, for the counted sections. Omitted
+	// for scenery, which holds nobody.
+	Capacity int `json:"capacity,omitempty"`
 	// X and Y are the marker's TOP-LEFT corner, in the same coordinate space as
 	// the seats. Width and Height are its size.
 	X      float64 `json:"x"`
@@ -756,9 +828,16 @@ type MapMarkerResponse struct {
 
 type MapEnvelope struct {
 	Data []MapSeatResponse `json:"data"`
-	// Markers are the room's scenery, sent with a complete map and omitted from
-	// a delta: the stage does not move between two polls.
+	// Markers are every block of the room that holds no individual chair: the
+	// scenery, and the standing or boxed floor that sells by the head. Sent
+	// with a complete map and omitted from a delta, because none of it moves
+	// between two polls.
 	Markers []MapMarkerResponse `json:"markers,omitempty"`
+	// The price bands are deliberately NOT here. By the time a room is on sale
+	// a band has become a TIER — the seat carries its ticket id and the tier
+	// carries the money — so the buyer's map colours by tier, in the order the
+	// price list is given, and the legend it already has is the relief the
+	// palette requires. Sending a band list too would be a second answer.
 	// Version is the cursor to send back as `since` on the next poll.
 	Version int64 `json:"version"`
 	// Complete distinguishes a whole map from a delta, so a client knows
@@ -878,13 +957,15 @@ func toMapMarkers(markers []usecase.MarkerView) []MapMarkerResponse {
 	for index := range markers {
 		marker := &markers[index]
 		out = append(out, MapMarkerResponse{
-			ID:     marker.ID,
-			Name:   marker.Name,
-			Kind:   string(marker.Kind),
-			X:      marker.X,
-			Y:      marker.Y,
-			Width:  marker.Width,
-			Height: marker.Height,
+			TicketID: marker.TicketID,
+			ID:       marker.ID,
+			Name:     marker.Name,
+			Kind:     string(marker.Kind),
+			Capacity: marker.Capacity,
+			X:        marker.X,
+			Y:        marker.Y,
+			Width:    marker.Width,
+			Height:   marker.Height,
 		})
 	}
 	return out
@@ -904,6 +985,7 @@ func toLayout(layout *domain.Layout) LayoutResponse {
 		Frozen:        layout.Frozen,
 		ViewBoxWidth:  layout.ViewBoxWidth,
 		ViewBoxHeight: layout.ViewBoxHeight,
+		SeatCount:     layout.SeatCount,
 	}
 }
 
@@ -969,4 +1051,35 @@ func statusFor(err error) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+// AreaTicketsRequest assigns a dedicated ticket tier to each counted section ID.
+type AreaTicketsRequest struct {
+	TicketBySection map[string]string `json:"ticketBySection"`
+}
+
+// @Summary Configure individual admission for each standing area or box
+// @Tags Assentos
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Event ID"
+// @Param request body AreaTicketsRequest true "Area ticket bindings"
+// @Success 204
+// @Failure 422 {object} ErrorResponse
+// @Router /api/v1/events/{id}/seating/areas [put]
+func (h *Handler) bindAreas(response http.ResponseWriter, request *http.Request) {
+	var payload AreaTicketsRequest
+	if !decode(response, request, &payload) {
+		return
+	}
+	if payload.TicketBySection == nil {
+		httpx.WriteError(response, http.StatusUnprocessableEntity, domain.ErrInvalidTicket)
+		return
+	}
+	if err := h.seating.BindAreas(request.Context(), actor(request), pathID(request), payload.TicketBySection); err != nil {
+		httpx.WriteError(response, statusFor(err), err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }

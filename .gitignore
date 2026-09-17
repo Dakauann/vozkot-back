@@ -2,5 +2,6 @@
 bin/
 coverage.out
 *.test
+*.exe
 .cache/
 storage/

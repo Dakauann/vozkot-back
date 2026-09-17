@@ -71,7 +71,10 @@ type Renderer struct {
 	templates map[domain.Template]*template.Template
 }
 
-var _ domain.Renderer = (*Renderer)(nil)
+var (
+	_ domain.Renderer      = (*Renderer)(nil)
+	_ domain.ChromeInliner = (*Renderer)(nil)
+)
 
 // files maps a template name onto the file that renders it for email. A name
 // with no entry cannot be sent, which is why domain.Template.Valid and this map
@@ -119,6 +122,17 @@ func (r *Renderer) Render(channel domain.Channel, name domain.Template, data map
 		values[key] = value
 	}
 	values["Brand"] = r.brand
+	// The header's image source, marked trusted.
+	//
+	// html/template will not emit a cid: URL into a src attribute: the scheme
+	// is not on its allowlist, so it rewrites the whole attribute to
+	// #ZgotmplZ and the wordmark disappears — which is a silent, inbox-only
+	// failure of exactly the kind this package has had once already. The value
+	// is operator configuration read at boot, never user input or anything
+	// from a job payload, so trusting it here is a statement about where it
+	// came from rather than a hole. It is the only value in this package that
+	// bypasses escaping.
+	values["LogoSrc"] = template.URL(r.brand.LogoURL)
 
 	var rendered bytes.Buffer
 	if err := parsed.ExecuteTemplate(&rendered, layoutFile, values); err != nil {

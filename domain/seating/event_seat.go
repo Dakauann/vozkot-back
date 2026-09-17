@@ -55,12 +55,20 @@ func (s *EventSeat) Held() bool { return s.Status == StatusHeld }
 
 // EventSeating binds one event to one layout version: the manifest.
 type EventSeating struct {
+	Areas          map[string]AreaBinding
 	EventID        string
 	LayoutID       string
 	LayoutVersion  int
 	SeatCount      int
 	BlockedCount   int
 	MaterialisedAt time.Time
+}
+
+// AreaBinding gives a counted area its own inventory and immutable receipt name.
+type AreaBinding struct {
+	TicketID string `json:"ticketId"`
+	Name     string `json:"name"`
+	Capacity int    `json:"capacity"`
 }
 
 // ClaimRequest is one line of a basket asking for named seats.

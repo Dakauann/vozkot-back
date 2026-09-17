@@ -51,8 +51,15 @@ type Layout struct {
 	// Unitless on purpose: the client scales it to whatever screen it has.
 	ViewBoxWidth  int
 	ViewBoxHeight int
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// SeatCount is how many named chairs this plan holds.
+	//
+	// Filled by a listing and left at zero elsewhere, because it is a derived
+	// number rather than a property: the seats are the authority and this is
+	// what a list shows so that telling two plans apart does not require
+	// opening both.
+	SeatCount int
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Where the stage is, and what sits in the middle, used to live here as a
@@ -72,7 +79,18 @@ const (
 )
 
 // Sellable reports whether an event may bind to this layout.
-func (s LayoutStatus) Sellable() bool { return s == LayoutPublished }
+//
+// A DRAFT is sellable, and that is deliberate. Requiring a publish first read
+// as prudence and worked as a trap: an organiser drew a room, reached the
+// pricing screen, and was told the venue had no published plan — about the plan
+// they had just finished. The step was protecting against an event binding a
+// room somebody was still moving around, and the bind already freezes the
+// layout in the same transaction that writes the seats. The freeze was always
+// the protection; the publish was a second lock on a self-locking door.
+//
+// Archived is the one refusal left, because that is an organiser saying the
+// room is retired.
+func (s LayoutStatus) Sellable() bool { return s != LayoutArchived }
 
 // Section is a named block of a layout: Plateia A, Balcão, Camarote 3.
 type Section struct {
@@ -103,6 +121,19 @@ type Section struct {
 	// Shape is the polygon the client paints, as flattened x,y pairs in the
 	// layout's coordinate space. Stored, never interpreted here.
 	Shape []float64
+	// Rotation turns the block, in degrees clockwise about its own centre.
+	//
+	// The one arrangement dragging and resizing cannot reach: a block of rows
+	// runs along x, and VIP wings down the sides of a room need one running
+	// along y. A marker or a counted area has no need of it — a tall camarote
+	// is a resize.
+	Rotation float64
+	// Category is the price band this section's seats belong to by default.
+	//
+	// Empty means the section's own NAME, which is the case for every room that
+	// does not need sub-sector pricing. Set it to share a band between two
+	// sections: two wings of a plateia priced as one "Plateia".
+	Category string
 	// Definition is the form that generated this block, stored verbatim and
 	// never interpreted here.
 	//
@@ -132,6 +163,14 @@ type Seat struct {
 	// Rotation orients a seat in a curved row, in degrees.
 	Rotation float64
 	Kind     SeatKind
+	// Category is the price band THIS chair belongs to, overriding its
+	// section's.
+	//
+	// Empty for almost every seat. It exists for the two cases a sector cannot
+	// express: the front three rows that cost more, and the partial-view seat
+	// behind a pillar that costs less — which is not a contiguous block of
+	// anything and so can never be a sector of its own.
+	Category string
 	// RowOrder and SeatOrder are the authoritative ordering.
 	//
 	// The labels cannot be sorted: "A" through "P" skips I in most houses, seat

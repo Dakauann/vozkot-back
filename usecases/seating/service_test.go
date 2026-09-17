@@ -96,7 +96,11 @@ func (h *harness) emptyRoom(t *testing.T) string {
 	return layout.ID
 }
 
-func (h *harness) room(t *testing.T, rows, perRow int) (string, string) {
+// roomCategory is the price band h.room's section falls in: a band defaults to
+// its section's NAME, and that section is called "Plateia A".
+const roomCategory = "Plateia A"
+
+func (h *harness) room(t *testing.T, rows, perRow int) string {
 	t.Helper()
 	ctx := context.Background()
 
@@ -118,7 +122,7 @@ func (h *harness) room(t *testing.T, rows, perRow int) (string, string) {
 		h.db.Exec("DELETE FROM venues WHERE id = ?", venue.ID)
 	})
 
-	sections, _, err := h.service.GenerateLayout(ctx, h.actor, layout.ID, []SectionSpec{{
+	_, _, err = h.service.GenerateLayout(ctx, h.actor, layout.ID, []SectionSpec{{
 		Name: "Plateia A",
 		Kind: domain.SectionSeated,
 		Rows: domain.RowSpec{Rows: rows, SeatsPerRow: perRow},
@@ -129,7 +133,7 @@ func (h *harness) room(t *testing.T, rows, perRow int) (string, string) {
 	if err := h.service.PublishLayout(ctx, h.actor, layout.ID); err != nil {
 		t.Fatalf("PublishLayout(): %v", err)
 	}
-	return layout.ID, sections[0].ID
+	return layout.ID
 }
 
 // A stranger may not read or edit somebody else's room.
@@ -139,7 +143,7 @@ func (h *harness) room(t *testing.T, rows, perRow int) (string, string) {
 func TestARoomIsReachableOnlyByItsOwner(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	layoutID, _ := h.room(t, 2, 4)
+	layoutID := h.room(t, 2, 4)
 
 	if _, err := h.service.Layout(ctx, h.other, layoutID); !errors.Is(err, authdomain.ErrForbidden) {
 		t.Errorf("Layout() for a stranger = %v, want ErrForbidden", err)
@@ -167,7 +171,7 @@ func TestARoomIsReachableOnlyByItsOwner(t *testing.T) {
 func TestAnAdminReachesAnyRoom(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	layoutID, _ := h.room(t, 2, 4)
+	layoutID := h.room(t, 2, 4)
 
 	admin := authdomain.Actor{ID: testsupport.Unique("usr"), Role: userdomain.RoleAdmin}
 	if _, err := h.service.Layout(ctx, admin, layoutID); err != nil {
@@ -180,14 +184,14 @@ func TestAnAdminReachesAnyRoom(t *testing.T) {
 func TestBindingALayoutFreezesIt(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	layoutID, sectionID := h.room(t, 2, 4)
+	layoutID := h.room(t, 2, 4)
 	ticketID := seedTier(t, h, 8)
 	testsupport.CleanupEventSeats(t, h.db, h.eventID)
 
 	if _, err := h.service.Bind(ctx, h.actor, BindInput{
-		EventID:         h.eventID,
-		LayoutID:        layoutID,
-		TicketBySection: map[string]string{sectionID: ticketID},
+		EventID:          h.eventID,
+		LayoutID:         layoutID,
+		TicketByCategory: map[string]string{roomCategory: ticketID},
 	}); err != nil {
 		t.Fatalf("Bind(): %v", err)
 	}
@@ -205,12 +209,12 @@ func TestBindingALayoutFreezesIt(t *testing.T) {
 func TestBestAvailableReturnsAdjacentSeats(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	layoutID, sectionID := h.room(t, 4, 6)
+	layoutID := h.room(t, 4, 6)
 	ticketID := seedTier(t, h, 24)
 	testsupport.CleanupEventSeats(t, h.db, h.eventID)
 	if _, err := h.service.Bind(ctx, h.actor, BindInput{
 		EventID: h.eventID, LayoutID: layoutID,
-		TicketBySection: map[string]string{sectionID: ticketID},
+		TicketByCategory: map[string]string{roomCategory: ticketID},
 	}); err != nil {
 		t.Fatalf("Bind(): %v", err)
 	}
@@ -244,12 +248,12 @@ func TestBestAvailableReturnsNothingRatherThanSplitAParty(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	// Rows of two, so no row can seat three.
-	layoutID, sectionID := h.room(t, 4, 2)
+	layoutID := h.room(t, 4, 2)
 	ticketID := seedTier(t, h, 8)
 	testsupport.CleanupEventSeats(t, h.db, h.eventID)
 	if _, err := h.service.Bind(ctx, h.actor, BindInput{
 		EventID: h.eventID, LayoutID: layoutID,
-		TicketBySection: map[string]string{sectionID: ticketID},
+		TicketByCategory: map[string]string{roomCategory: ticketID},
 	}); err != nil {
 		t.Fatalf("Bind(): %v", err)
 	}
@@ -291,7 +295,7 @@ func TestBestAvailableWithholdsAccessibleSeatsUnlessAsked(t *testing.T) {
 
 	// One row of four, the first two of which are a wheelchair space and its
 	// companion seat.
-	sections, _, err := h.service.GenerateLayout(ctx, h.actor, layout.ID, []SectionSpec{{
+	if _, _, err := h.service.GenerateLayout(ctx, h.actor, layout.ID, []SectionSpec{{
 		Name: "Plateia A",
 		Kind: domain.SectionSeated,
 		Rows: domain.RowSpec{
@@ -301,8 +305,7 @@ func TestBestAvailableWithholdsAccessibleSeatsUnlessAsked(t *testing.T) {
 				domain.SeatKindKey("A", "2"): domain.SeatCompanion,
 			},
 		},
-	}})
-	if err != nil {
+	}}); err != nil {
 		t.Fatalf("GenerateLayout(): %v", err)
 	}
 	if err := h.service.PublishLayout(ctx, h.actor, layout.ID); err != nil {
@@ -313,7 +316,7 @@ func TestBestAvailableWithholdsAccessibleSeatsUnlessAsked(t *testing.T) {
 	testsupport.CleanupEventSeats(t, h.db, h.eventID)
 	if _, err := h.service.Bind(ctx, h.actor, BindInput{
 		EventID: h.eventID, LayoutID: layout.ID,
-		TicketBySection: map[string]string{sections[0].ID: ticketID},
+		TicketByCategory: map[string]string{roomCategory: ticketID},
 	}); err != nil {
 		t.Fatalf("Bind(): %v", err)
 	}
@@ -348,12 +351,12 @@ func TestBestAvailableWithholdsAccessibleSeatsUnlessAsked(t *testing.T) {
 func TestMapReturnsOnlyWhatChanged(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	layoutID, sectionID := h.room(t, 2, 4)
+	layoutID := h.room(t, 2, 4)
 	ticketID := seedTier(t, h, 8)
 	testsupport.CleanupEventSeats(t, h.db, h.eventID)
 	if _, err := h.service.Bind(ctx, h.actor, BindInput{
 		EventID: h.eventID, LayoutID: layoutID,
-		TicketBySection: map[string]string{sectionID: ticketID},
+		TicketByCategory: map[string]string{roomCategory: ticketID},
 	}); err != nil {
 		t.Fatalf("Bind(): %v", err)
 	}
@@ -400,12 +403,12 @@ func TestMapReturnsOnlyWhatChanged(t *testing.T) {
 func TestTheMapNeverPublishesTheHolder(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	layoutID, sectionID := h.room(t, 2, 4)
+	layoutID := h.room(t, 2, 4)
 	ticketID := seedTier(t, h, 8)
 	testsupport.CleanupEventSeats(t, h.db, h.eventID)
 	if _, err := h.service.Bind(ctx, h.actor, BindInput{
 		EventID: h.eventID, LayoutID: layoutID,
-		TicketBySection: map[string]string{sectionID: ticketID},
+		TicketByCategory: map[string]string{roomCategory: ticketID},
 	}); err != nil {
 		t.Fatalf("Bind(): %v", err)
 	}

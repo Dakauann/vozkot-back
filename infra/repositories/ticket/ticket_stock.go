@@ -28,6 +28,19 @@ func (r *TicketRepository) Reserve(ctx context.Context, ticketID string, quantit
 	result := r.db.WithContext(ctx).Model(&schema.Ticket{}).
 		Where("id = ? AND status = ? AND quantity - sold - reserved >= ?",
 			ticketID, string(domain.StatusOnSale), quantity).
+		// A tier bound to a standing floor or a box is also capped by the room
+		// itself, so raising the tier's quantity can never sell an eleventh
+		// place in a ten-person box. MIN, not LIMIT 1: if the one-tier-per-area
+		// rule were ever broken by hand, the smallest capacity is the safe read.
+		// Unbound tiers fall back to `quantity`, which is the column, so this
+		// restates the guard above and changes nothing for them.
+		Where(`sold + reserved + ? <= COALESCE((
+			SELECT MIN((area.value->>'capacity')::int)
+			FROM event_seatings manifest,
+			     LATERAL jsonb_each(COALESCE(manifest.areas, '{}'::jsonb)) area
+			WHERE manifest.event_id = tickets.event_id
+			  AND area.value->>'ticketId' = tickets.id
+		), quantity)`, quantity).
 		Updates(map[string]any{
 			"reserved":   gorm.Expr("reserved + ?", quantity),
 			"updated_at": time.Now().UTC(),

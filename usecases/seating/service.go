@@ -169,6 +169,11 @@ type SectionSpec struct {
 	Height       float64
 	DisplayOrder int
 	Shape        []float64
+	// Rotation turns the block, in degrees clockwise about its own centre.
+	Rotation float64
+	// Category is the price band this section's seats belong to by default.
+	// Empty means the section's own name.
+	Category string
 	// Definition is the editor's own description of this block, passed through
 	// to storage untouched so the editor can reopen it. This package does not
 	// read it.
@@ -312,6 +317,8 @@ func (s *Service) buildSections(
 			OffsetY:      spec.OffsetY,
 			Width:        spec.Width,
 			Height:       spec.Height,
+			Rotation:     spec.Rotation,
+			Category:     spec.Category,
 			Shape:        spec.Shape,
 			Definition:   spec.Definition,
 			DisplayOrder: spec.DisplayOrder,
@@ -355,6 +362,10 @@ func generateSeats(spec *SectionSpec, sectionID string) ([]domain.Seat, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Turned first, then placed. Rotating about the block's own centre and
+	// THEN setting its corner down means the two compose without the rotation
+	// dragging the block across the room as a side effect.
+	domain.RotateBy(seats, spec.Rotation)
 	// The SECTION owns where the block sits, and it is applied here rather than
 	// inside either generator: two places holding a position is one place too
 	// many, and the section is the one a canvas drags.
@@ -457,9 +468,10 @@ func (s *Service) Layout(ctx context.Context, actor authdomain.Actor, layoutID s
 type BindInput struct {
 	EventID  string
 	LayoutID string
-	// TicketBySection is the join between geometry and money. A section left
-	// out is not sold, which is how an organiser closes the balcony.
-	TicketBySection map[string]string
+	// TicketByCategory is the join between geometry and money: a price band
+	// mapped to the tier it sells at. A band left out is not sold, which is how
+	// an organiser closes the balcony for one night.
+	TicketByCategory map[string]string
 }
 
 func (s *Service) Bind(ctx context.Context, actor authdomain.Actor, input BindInput) (domain.EventSeating, error) {
@@ -470,10 +482,19 @@ func (s *Service) Bind(ctx context.Context, actor authdomain.Actor, input BindIn
 		return domain.EventSeating{}, err
 	}
 	return s.seats.Materialise(ctx, domain.MaterialisePlan{
-		EventID:         input.EventID,
-		LayoutID:        input.LayoutID,
-		TicketBySection: input.TicketBySection,
+		EventID:          input.EventID,
+		LayoutID:         input.LayoutID,
+		TicketByCategory: input.TicketByCategory,
 	})
+}
+
+// BindAreas gives each standing floor and box its own ticket inventory, so a
+// buyer choosing one side cannot consume the other's places.
+func (s *Service) BindAreas(ctx context.Context, actor authdomain.Actor, eventID string, tickets map[string]string) error {
+	if _, err := s.ownedEvent(ctx, actor, eventID); err != nil {
+		return err
+	}
+	return s.seats.BindAreas(ctx, eventID, tickets)
 }
 
 // Block and Unblock withhold an event's seats from sale.

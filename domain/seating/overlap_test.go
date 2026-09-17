@@ -206,3 +206,57 @@ func TestFootprintOfUsesChairsForABlockAndSizeForAMarker(t *testing.T) {
 		t.Errorf("a stage came back as %+v, want the box %+v", stage, want)
 	}
 }
+
+// The band order is the colour, so it has to be stable.
+//
+// Slot one is the first hue of a fixed palette, slot two the second. A band that
+// changed slots when another was added would repaint a room somebody had just
+// learned to read, so the order is first appearance walking the sections as they
+// are displayed and then their chairs as an usher reads them.
+func TestBandsOfIsOrderedByFirstAppearance(t *testing.T) {
+	sections := []seating.Section{
+		{ID: "b", Name: "Balcão", Kind: seating.SectionSeated, DisplayOrder: 2},
+		{ID: "p", Name: "Plateia", Kind: seating.SectionSeated, DisplayOrder: 1},
+		{ID: "s", Name: "Palco", Kind: seating.SectionStage, DisplayOrder: 0},
+	}
+	seats := []seating.Seat{
+		{SectionID: "p", RowOrder: 2, SeatOrder: 1},
+		{SectionID: "p", RowOrder: 1, SeatOrder: 1, Category: "Plateia Premium"},
+		{SectionID: "b", RowOrder: 1, SeatOrder: 1},
+	}
+
+	bands := seating.BandsOf(sections, seats)
+	want := []string{"Plateia", "Plateia Premium", "Balcão"}
+	if len(bands) != len(want) {
+		t.Fatalf("BandsOf() = %v, want %v", bands, want)
+	}
+	for index := range want {
+		if bands[index] != want[index] {
+			t.Fatalf("BandsOf() = %v, want %v", bands, want)
+		}
+	}
+}
+
+// Scenery sells nothing, so it is not a price band.
+func TestBandsOfSkipsScenery(t *testing.T) {
+	bands := seating.BandsOf([]seating.Section{
+		{ID: "s", Name: "Palco", Kind: seating.SectionStage, DisplayOrder: 0},
+		{ID: "a", Name: "Arena", Kind: seating.SectionArena, DisplayOrder: 1},
+		{ID: "p", Name: "Pista", Kind: seating.SectionStanding, DisplayOrder: 2},
+	}, nil)
+	if len(bands) != 1 || bands[0] != "Pista" {
+		t.Errorf("BandsOf() = %v, want just the Pista", bands)
+	}
+}
+
+// Two sections sharing a band are one band, which is the whole point of a band
+// being a name.
+func TestBandsOfMergesSectionsThatShareABand(t *testing.T) {
+	bands := seating.BandsOf([]seating.Section{
+		{ID: "l", Name: "Plateia Esquerda", Category: "Plateia", Kind: seating.SectionSeated, DisplayOrder: 1},
+		{ID: "r", Name: "Plateia Direita", Category: "Plateia", Kind: seating.SectionSeated, DisplayOrder: 2},
+	}, nil)
+	if len(bands) != 1 || bands[0] != "Plateia" {
+		t.Errorf("BandsOf() = %v, want one Plateia", bands)
+	}
+}
