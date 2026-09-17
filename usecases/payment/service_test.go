@@ -18,6 +18,7 @@ import (
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
 	queuedomain "vozkot/domain/queue"
+	refunddomain "vozkot/domain/refund"
 	ticketdomain "vozkot/domain/ticket"
 	"vozkot/infra/mercadopago"
 	orderRepository "vozkot/infra/repositories/order"
@@ -240,6 +241,7 @@ func (h *harness) pendingOrder(t *testing.T, quantity int) *orderdomain.Order {
 			Quantity:       quantity,
 			UnitPriceCents: 24000,
 		}},
+		RefundPolicyVersion: refunddomain.CurrentPolicyVersion,
 	}, 30*time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("build order: %v", err)

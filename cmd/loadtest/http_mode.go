@@ -230,7 +230,7 @@ func newHTTPFleet(
 	router := delivery.NewRouter(delivery.Dependencies{
 		Auth:           authHTTP.NewHandler(authService, authHTTP.CookieConfig{}, nil, clients.From),
 		Tickets:        ticketHTTP.NewHandler(ticketService),
-		Checkout:       checkoutHTTP.NewHandler(checkout, payments, nil, keys, idempotencydomain.DefaultLease),
+		Checkout:       checkoutHTTP.NewHandler(checkout, payments, nil, nil, keys, idempotencydomain.DefaultLease),
 		AuthMiddleware: authMiddleware.NewAuth(tokens, sessions),
 		// The bulkhead is the point of this mode; the per-account limiter is
 		// not, and would refuse the storm before the bulkhead ever saw it.

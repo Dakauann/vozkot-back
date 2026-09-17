@@ -21,6 +21,7 @@ import (
 	authdomain "vozkot/domain/auth"
 	domain "vozkot/domain/event"
 	mediadomain "vozkot/domain/media"
+	"vozkot/domain/pricing"
 	usecase "vozkot/usecases/event"
 )
 
@@ -34,10 +35,18 @@ const cityOptions = 60
 
 type Handler struct {
 	service *usecase.Service
+	// fee is the service charge the box office adds on top of a tier price.
+	//
+	// Carried here so the public event page can quote what a buyer will
+	// actually pay. It is the SAME value the checkout service was built with;
+	// two sources for one number is how a page ends up promising a price the
+	// charge then contradicts. The zero value adds nothing, which is what a
+	// deployment with no fee configured gets.
+	fee pricing.Fee
 }
 
-func NewHandler(service *usecase.Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *usecase.Service, fee pricing.Fee) *Handler {
+	return &Handler{service: service, fee: fee}
 }
 
 // RegisterPublic mounts the buyer-facing routes. No session required.
@@ -81,11 +90,10 @@ func (h *Handler) RegisterProtected(router *http.ServeMux) {
 // @Router		/api/v1/public/events [get]
 func (h *Handler) listPublic(response http.ResponseWriter, request *http.Request) {
 	filter := parseFilter(request)
-	// Pinned here, not read from the query. A client that could choose the
-	// status could list every unannounced line-up in the catalogue.
-	filter.Status = domain.StatusPublished
-	filter.OwnerID = ""
-	h.writeList(response, request, filter)
+	// The catalogue is asked for BY NAME. The status used to be pinned here,
+	// which meant transport was the thing keeping unannounced line-ups out of
+	// a public response; ListPublic pins it where it cannot be widened.
+	h.writeList(response, request, filter, audiencePublic)
 }
 
 // @Summary		Listar meus eventos
@@ -97,26 +105,38 @@ func (h *Handler) listPublic(response http.ResponseWriter, request *http.Request
 // @Failure		401 {object} ErrorResponse
 // @Router		/api/v1/events [get]
 func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
-	claims, ok := authdomain.ClaimsFromContext(request.Context())
-	if !ok || claims == nil {
-		httpx.WriteError(response, http.StatusUnauthorized, authdomain.ErrUnauthorized)
-		return
-	}
 	filter := parseFilter(request)
-	// Scoped to the operator unless they are an administrator, so one box
-	// office cannot read another's drafts.
-	if claims.Role != adminRole {
-		filter.OwnerID = claims.UserID
-	}
 	if status := strings.TrimSpace(request.URL.Query().Get("status")); status != "" {
 		filter.Status = domain.Status(status)
 	}
-	h.writeList(response, request, filter)
+	h.writeList(response, request, filter, audienceOperator)
 }
 
-func (h *Handler) writeList(response http.ResponseWriter, request *http.Request, filter domain.Filter) {
+// audience says which listing is being served, so writeList asks the use case
+// for that one by name instead of assembling a filter that could mean either.
+type audience int
+
+const (
+	audiencePublic audience = iota
+	audienceOperator
+)
+
+func (h *Handler) writeList(
+	response http.ResponseWriter,
+	request *http.Request,
+	filter domain.Filter,
+	who audience,
+) {
 	filter = filter.Normalize()
-	page, err := h.service.List(request.Context(), filter)
+
+	var page domain.Page
+	var err error
+	switch who {
+	case audiencePublic:
+		page, err = h.service.ListPublic(request.Context(), filter)
+	default:
+		page, err = h.service.List(request.Context(), actor(request), filter)
+	}
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
@@ -194,7 +214,7 @@ func (h *Handler) publicTiers(response http.ResponseWriter, request *http.Reques
 		httpx.WriteError(response, statusFor(err), err)
 		return
 	}
-	httpx.WriteJSON(response, http.StatusOK, TierListEnvelope{Data: toTierResponses(tiers)})
+	httpx.WriteJSON(response, http.StatusOK, TierListEnvelope{Data: toTierResponses(tiers, h.fee)})
 }
 
 // @Summary		Opções de filtro
@@ -256,6 +276,7 @@ func (h *Handler) create(response http.ResponseWriter, request *http.Request) {
 		StartsAt:    body.StartsAt,
 		EndsAt:      body.EndsAt,
 		Status:      domain.Status(strings.TrimSpace(body.Status)),
+		SalesMode:   domain.SalesMode(strings.TrimSpace(body.SalesMode)),
 	})
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
@@ -274,7 +295,7 @@ func (h *Handler) create(response http.ResponseWriter, request *http.Request) {
 // @Failure		404 {object} ErrorResponse
 // @Router		/api/v1/events/{id} [get]
 func (h *Handler) get(response http.ResponseWriter, request *http.Request) {
-	item, err := h.owned(request)
+	item, err := h.service.Get(request.Context(), actor(request), eventID(request))
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
@@ -300,12 +321,8 @@ func (h *Handler) update(response http.ResponseWriter, request *http.Request) {
 		httpx.WriteError(response, http.StatusBadRequest, err)
 		return
 	}
-	if _, err := h.owned(request); err != nil {
-		httpx.WriteError(response, statusFor(err), err)
-		return
-	}
 
-	item, err := h.service.Update(request.Context(), eventID(request), usecase.UpdateInput{
+	item, err := h.service.Update(request.Context(), actor(request), eventID(request), usecase.UpdateInput{
 		Name:        body.Name,
 		Description: body.Description,
 		Category:    domain.Category(strings.TrimSpace(body.Category)),
@@ -313,6 +330,7 @@ func (h *Handler) update(response http.ResponseWriter, request *http.Request) {
 		StartsAt:    body.StartsAt,
 		EndsAt:      body.EndsAt,
 		Status:      domain.Status(strings.TrimSpace(body.Status)),
+		SalesMode:   domain.SalesMode(strings.TrimSpace(body.SalesMode)),
 	})
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
@@ -330,11 +348,7 @@ func (h *Handler) update(response http.ResponseWriter, request *http.Request) {
 // @Failure		409 {object} ErrorResponse
 // @Router		/api/v1/events/{id} [delete]
 func (h *Handler) delete(response http.ResponseWriter, request *http.Request) {
-	if _, err := h.owned(request); err != nil {
-		httpx.WriteError(response, statusFor(err), err)
-		return
-	}
-	if err := h.service.Delete(request.Context(), eventID(request)); err != nil {
+	if err := h.service.Delete(request.Context(), actor(request), eventID(request)); err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
 	}
@@ -349,11 +363,7 @@ func (h *Handler) delete(response http.ResponseWriter, request *http.Request) {
 // @Success		200 {object} EventEnvelope
 // @Router		/api/v1/events/{id}/publish [post]
 func (h *Handler) publish(response http.ResponseWriter, request *http.Request) {
-	if _, err := h.owned(request); err != nil {
-		httpx.WriteError(response, statusFor(err), err)
-		return
-	}
-	item, err := h.service.Publish(request.Context(), eventID(request))
+	item, err := h.service.Publish(request.Context(), actor(request), eventID(request))
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
@@ -369,11 +379,7 @@ func (h *Handler) publish(response http.ResponseWriter, request *http.Request) {
 // @Success		200 {object} EventEnvelope
 // @Router		/api/v1/events/{id}/unpublish [post]
 func (h *Handler) unpublish(response http.ResponseWriter, request *http.Request) {
-	if _, err := h.owned(request); err != nil {
-		httpx.WriteError(response, statusFor(err), err)
-		return
-	}
-	item, err := h.service.Unpublish(request.Context(), eventID(request))
+	item, err := h.service.Unpublish(request.Context(), actor(request), eventID(request))
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
@@ -398,11 +404,7 @@ func (h *Handler) pin(response http.ResponseWriter, request *http.Request) {
 		httpx.WriteError(response, http.StatusBadRequest, err)
 		return
 	}
-	if _, err := h.owned(request); err != nil {
-		httpx.WriteError(response, statusFor(err), err)
-		return
-	}
-	item, err := h.service.PlacePin(request.Context(), eventID(request), body.Latitude, body.Longitude)
+	item, err := h.service.PlacePin(request.Context(), actor(request), eventID(request), body.Latitude, body.Longitude)
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
@@ -423,10 +425,6 @@ func (h *Handler) pin(response http.ResponseWriter, request *http.Request) {
 // @Failure		422 {object} ErrorResponse
 // @Router		/api/v1/events/{id}/media [post]
 func (h *Handler) uploadMedia(response http.ResponseWriter, request *http.Request) {
-	if _, err := h.owned(request); err != nil {
-		httpx.WriteError(response, statusFor(err), err)
-		return
-	}
 
 	request.Body = http.MaxBytesReader(response, request.Body, maxMultipartBytes)
 	if err := request.ParseMultipartForm(8 << 20); err != nil {
@@ -446,7 +444,7 @@ func (h *Handler) uploadMedia(response http.ResponseWriter, request *http.Reques
 		return
 	}
 
-	item, err := h.service.AttachMedia(request.Context(), eventID(request), mediadomain.Upload{
+	item, err := h.service.AttachMedia(request.Context(), actor(request), eventID(request), mediadomain.Upload{
 		FileName: header.Filename,
 		// The browser's declared type is a hint; the use case sniffs the bytes.
 		ContentType: header.Header.Get("Content-Type"),
@@ -467,11 +465,7 @@ func (h *Handler) uploadMedia(response http.ResponseWriter, request *http.Reques
 // @Success		204 "Removido"
 // @Router		/api/v1/events/{id}/media/{mediaId} [delete]
 func (h *Handler) deleteMedia(response http.ResponseWriter, request *http.Request) {
-	if _, err := h.owned(request); err != nil {
-		httpx.WriteError(response, statusFor(err), err)
-		return
-	}
-	err := h.service.RemoveMedia(request.Context(), eventID(request), strings.TrimSpace(request.PathValue("mediaId")))
+	err := h.service.RemoveMedia(request.Context(), actor(request), eventID(request), strings.TrimSpace(request.PathValue("mediaId")))
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
@@ -479,27 +473,14 @@ func (h *Handler) deleteMedia(response http.ResponseWriter, request *http.Reques
 	response.WriteHeader(http.StatusNoContent)
 }
 
-const adminRole = "admin"
-
-var errForbidden = errors.New("this event belongs to another operator")
-
-// owned loads the event and refuses one belonging to somebody else.
+// actor is who is asking, as the use case needs it.
 //
-// Every operator route goes through it. Checking ownership in one place is what
-// keeps a new route from being the one that forgot.
-func (h *Handler) owned(request *http.Request) (*domain.Event, error) {
-	claims, ok := authdomain.ClaimsFromContext(request.Context())
-	if !ok || claims == nil {
-		return nil, authdomain.ErrUnauthorized
-	}
-	item, err := h.service.Get(request.Context(), eventID(request))
-	if err != nil {
-		return nil, err
-	}
-	if claims.Role != adminRole && item.OwnerID != claims.UserID {
-		return nil, errForbidden
-	}
-	return item, nil
+// This package's entire involvement in authorisation: translate the session
+// into a value and pass it down. The ownership rule lives in usecases/event,
+// where every caller reaches it — including the seeder, which never builds an
+// http.Request.
+func actor(request *http.Request) authdomain.Actor {
+	return authdomain.ActorFromContext(request.Context())
 }
 
 func eventID(request *http.Request) string {
@@ -527,7 +508,7 @@ func statusFor(err error) int {
 		return http.StatusOK
 	case errors.Is(err, authdomain.ErrUnauthorized):
 		return http.StatusUnauthorized
-	case errors.Is(err, errForbidden):
+	case errors.Is(err, authdomain.ErrForbidden):
 		return http.StatusForbidden
 	case errors.Is(err, domain.ErrNotFound), errors.Is(err, mediadomain.ErrNotFound):
 		return http.StatusNotFound

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	domain "vozkot/domain/notification"
 	"vozkot/domain/queue"
@@ -19,6 +20,10 @@ import (
 type Service struct {
 	renderer domain.Renderer
 	senders  map[domain.Channel]domain.Sender
+	// tickets attaches admissions to the receipt. Nil is supported and means
+	// the receipt goes out without them, which is what every deployment
+	// without an encryption keyring gets: a receipt, never a failed send.
+	tickets Tickets
 }
 
 func NewService(renderer domain.Renderer, senders ...domain.Sender) *Service {
@@ -30,6 +35,15 @@ func NewService(renderer domain.Renderer, senders ...domain.Sender) *Service {
 		registered[sender.Channel()] = sender
 	}
 	return &Service{renderer: renderer, senders: registered}
+}
+
+// WithTickets attaches the admissions source used to put a QR and a printed
+// code into a confirmation.
+func (s *Service) WithTickets(tickets Tickets) *Service {
+	if s != nil {
+		s.tickets = tickets
+	}
+	return s
 }
 
 // Channels lists what this service can actually deliver, so the container can
@@ -68,6 +82,10 @@ func (s *Service) Deliver(ctx context.Context, payload domain.Payload) error {
 			domain.ErrUndeliverable, domain.ErrNoSender, request.Channel))
 	}
 
+	// The tickets, loaded now rather than carried in the payload. See
+	// AdmissionTickets for why the codes must not be in the job row.
+	inline := s.attachTickets(ctx, &request)
+
 	body, err := s.renderer.Render(request.Channel, request.Template, request.Data)
 	if err != nil {
 		// Templates are parsed at boot, so reaching here means the DATA is
@@ -89,6 +107,7 @@ func (s *Service) Deliver(ctx context.Context, payload domain.Payload) error {
 		// stale sweep and sent again; the key is what makes that second send
 		// arrive zero times instead of twice.
 		IdempotencyKey: request.DedupeKey,
+		Inline:         inline,
 	}
 	if err := sender.Send(ctx, message); err != nil {
 		if errors.Is(err, domain.ErrUndeliverable) {
@@ -97,4 +116,39 @@ func (s *Service) Deliver(ctx context.Context, payload domain.Payload) error {
 		return err
 	}
 	return nil
+}
+
+// attachTickets puts the order's admissions into the render data and returns
+// the images they reference.
+//
+// Only for the confirmation: the pending-payment message has nothing to attach
+// because nothing has been issued yet, and the sign-in code has no order.
+//
+// A failure here is logged and swallowed. A receipt without its QR still
+// carries the printed code and the order reference, and is a far better
+// outcome than a paid buyer receiving nothing because an image could not be
+// drawn.
+func (s *Service) attachTickets(ctx context.Context, request *domain.Request) []domain.Inline {
+	if s.tickets == nil || request.Template != domain.TemplateOrderConfirmed {
+		return nil
+	}
+	orderID, _ := request.Data["OrderID"].(string)
+	if orderID == "" {
+		return nil
+	}
+
+	tickets, err := s.tickets.ForReceipt(ctx, orderID)
+	if err != nil {
+		log.Printf("notification: could not load the tickets for order %s: %v", orderID, err)
+		return nil
+	}
+	if len(tickets) == 0 {
+		return nil
+	}
+
+	if request.Data == nil {
+		request.Data = map[string]any{}
+	}
+	request.Data["Tickets"] = templateData(tickets)
+	return inlineFor(tickets)
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	paymentdomain "vozkot/domain/payment"
+	"vozkot/domain/pricing"
 )
 
 type Config struct {
@@ -37,6 +38,14 @@ type Config struct {
 	// keep reserved and unpaid. Zero disables that dimension.
 	CheckoutMaxOpenOrders  int
 	CheckoutMaxHeldPerTier int
+	// ServiceFee is the commission added ON TOP of a tier's price: the buyer
+	// pays face + fee, the organiser is owed the face value, and the fee is
+	// ours. Held as basis points so no float ever reaches a price.
+	//
+	// Its value comes from pricing.PlatformBasisPoints, in code. There is no
+	// environment variable for it, so every environment charges the same rate
+	// and no deployment can silently charge nothing.
+	ServiceFee pricing.Fee
 	// TrustedProxyCIDRs are the networks whose X-Forwarded-For header may be
 	// believed. Everything else is rate limited by the address it connected
 	// from, because the header is otherwise client-controlled text.
@@ -390,6 +399,11 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	serviceFee, err := serviceFee()
+	if err != nil {
+		return Config{}, err
+	}
+
 	maxHeldPerTier, err := integer("CHECKOUT_MAX_HELD_PER_TIER", 10)
 	if err != nil {
 		return Config{}, err
@@ -440,6 +454,7 @@ func Load() (Config, error) {
 		CheckoutMaxInFlight:    checkoutMaxInFlight,
 		CheckoutMaxOpenOrders:  maxOpenOrders,
 		CheckoutMaxHeldPerTier: maxHeldPerTier,
+		ServiceFee:             serviceFee,
 		TrustedProxyCIDRs:      trustedProxies(),
 		MediaProcessors:        mediaProcessors,
 		Database:               database,
@@ -905,6 +920,25 @@ func boolean(key string, fallback bool) (bool, error) {
 		return false, fmt.Errorf("%s: %w", key, err)
 	}
 	return parsed, nil
+}
+
+// serviceFee is the commission, taken from code rather than from the
+// environment.
+//
+// There is deliberately no variable to set. The rate lives in
+// pricing.PlatformBasisPoints and reaches every caller through here, so a
+// deployment cannot forget it and cannot mistype it; see the comment on that
+// constant for why neither failure is recoverable once money has moved.
+//
+// It is still validated rather than trusted. The check costs nothing and turns
+// an out-of-range edit of the constant into a process that refuses to start
+// instead of a buyer who is overcharged.
+func serviceFee() (pricing.Fee, error) {
+	fee, err := pricing.PlatformFee()
+	if err != nil {
+		return pricing.Fee{}, fmt.Errorf("pricing.PlatformBasisPoints=%d: %w", pricing.PlatformBasisPoints, err)
+	}
+	return fee, nil
 }
 
 func integer(key string, fallback int) (int, error) {

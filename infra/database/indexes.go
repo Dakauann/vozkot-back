@@ -60,6 +60,53 @@ var schemaConstraintIndexes = []indexDefinition{
 		CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_provider_payment_present
 		ON orders (payment_provider, payment_id)
 		WHERE payment_id <> ''`},
+	// One OPEN refund request per order. This is what stops a buyer
+	// double-tapping "cancelar" into two refunds, decided by the database
+	// rather than by a read-then-write that both requests would pass.
+	//
+	// PARTIAL, and it has to be: a total unique index would let one rejected
+	// request block every future one on that order, so somebody refused once
+	// could never ask again. The statuses here are the same set
+	// infra/repositories/refund calls open.
+	{"idx_refund_requests_open", `
+		CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_refund_requests_open
+		ON refund_requests (order_id)
+		WHERE status IN ('pending', 'approved')`},
+	// One event seat per layout seat per event. This is the rule that makes
+	// materialising a seat map safe to attempt twice: the second run cannot
+	// duplicate a chair, whatever the application believes.
+	{"idx_event_seats_unique_layout_seat", `
+		CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_event_seats_unique_layout_seat
+		ON event_seats (event_id, layout_seat_id)
+		WHERE layout_seat_id IS NOT NULL`},
+	// And one seat per label per event, which is the rule a HUMAN can check.
+	// Two chairs both called "Plateia A, fila K, assento 12" are two tickets
+	// for one chair, and no amount of correct id handling upstream makes that
+	// sellable.
+	{"idx_event_seats_unique_label", `
+		CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_event_seats_unique_label
+		ON event_seats (event_id, section_name, row_label, seat_label)`},
+	// One tier, one line — for COUNTED lines only.
+	//
+	// This is the surviving half of the old UNIQUE (order_id, ticket_id), and
+	// it is what still makes a merged retry impossible to persist as two holds
+	// on the same tier. Partial on seat_id IS NULL because a seated line is one
+	// row per chair and four seats of one tier are four legitimate rows.
+	{"idx_order_items_counted_line", `
+		CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_order_items_counted_line
+		ON order_items (order_id, ticket_id)
+		WHERE seat_id IS NULL`},
+	// One line per seat, which is stronger than the tier version it replaces:
+	// the same chair cannot appear twice on one order at all, whatever tier it
+	// was sold under.
+	{"idx_order_items_seated_line", `
+		CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_order_items_seated_line
+		ON order_items (order_id, seat_id)
+		WHERE seat_id IS NOT NULL`},
+	// A layout cannot have the same chair twice either.
+	{"idx_layout_seats_unique_label", `
+		CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_layout_seats_unique_label
+		ON layout_seats (section_id, row_label, seat_label)`},
 }
 
 // performanceIndexes are the sweeps' and the hot path's reading order. Each one
@@ -90,12 +137,61 @@ var performanceIndexes = []indexDefinition{
 		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_buyer_open_holds
 		ON orders (buyer_id)
 		WHERE status = 'pending_payment'`},
+	// The seat map: every seat of one event, and the per-status counts the
+	// reconciliation sweep compares against the tier counters.
+	{"idx_event_seats_event_status", `
+		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_event_seats_event_status
+		ON event_seats (event_id, status)`},
+	// Per-tier availability, which is what "how many of Plateia Premium are
+	// left" reads and what the picker shows above each sector.
+	{"idx_event_seats_event_ticket_status", `
+		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_event_seats_event_ticket_status
+		ON event_seats (event_id, ticket_id, status)`},
+	// Which seats does this order hold. Partial, because the answer is only
+	// ever asked about a seat somebody has, and without the predicate this
+	// index would carry every available chair in the house.
+	{"idx_event_seats_order", `
+		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_event_seats_order
+		ON event_seats (order_id)
+		WHERE order_id IS NOT NULL`},
+	// The map delta: "what changed since version 417". Read on every poll of
+	// every open picker during an onsale, which makes it the hottest read this
+	// feature adds.
+	{"idx_event_seats_event_version", `
+		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_event_seats_event_version
+		ON event_seats (event_id, version)`},
+	// The lapsed-hold sweep, which finds seats by their own deadline rather
+	// than joining every order. Partial on the only status that can lapse.
+	{"idx_event_seats_lapsed_holds", `
+		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_event_seats_lapsed_holds
+		ON event_seats (hold_expires_at)
+		WHERE status = 'held'`},
 	// The settled-order audit pages oldest-checked-first through paid orders,
 	// exactly as reconciliation does for pending ones.
 	{"idx_orders_paid_audit", `
 		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_paid_audit
 		ON orders (updated_at, id)
 		WHERE status = 'paid'`},
+	// The organiser's audience report groups an event's SOLD orders six ways.
+	// Partial on the two statuses that count as a sale, so the index carries
+	// what the report reads and not the holds and expiries that outnumber it on
+	// a busy onsale.
+	{"idx_orders_event_sold", `
+		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_event_sold
+		ON orders (event_id, paid_at)
+		WHERE status IN ('paid', 'refunded')`},
+	// The organiser's inbox: what is waiting on me for this event. Partial on
+	// the open statuses, because a decided request is history and an inbox does
+	// not page through history.
+	{"idx_refund_requests_event_open", `
+		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_refund_requests_event_open
+		ON refund_requests (event_id, created_at)
+		WHERE status IN ('pending', 'approved')`},
+	// The buyer's own refund history, and the per-page lookup the orders
+	// listing does to draw its buttons.
+	{"idx_refund_requests_buyer", `
+		CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_refund_requests_buyer
+		ON refund_requests (buyer_id, created_at)`},
 }
 
 // supersededIndexes were declared by an earlier revision of this schema and are

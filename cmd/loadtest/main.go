@@ -450,7 +450,15 @@ func run(cfg config.Config, opts options) error {
 	// measuring; the limit's own behaviour is tested where it lives.
 	perBuyer := opts.orders/max(opts.buyers, 1) + 1
 	holdLimits := orderdomain.HoldLimits{Orders: perBuyer * 2}
-	checkout := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, 30*time.Minute, 30*time.Minute, holdLimits)
+	// nil buyers: the harness has no profiles to snapshot, and the audience
+	// report is not what it measures. No fee either — the harness audits that
+	// every centavo charged is a centavo owed, and a commission on top would
+	// be a second number to reconcile for no gain.
+	checkout := checkoutUsecase.NewService(unit, orders, tickets, nil, dispatcher, checkoutUsecase.Settings{
+		HoldFor:     30 * time.Minute,
+		CartHoldFor: 30 * time.Minute,
+		HoldLimits:  holdLimits,
+	})
 	// nil notifications: the harness measures the purchase path, and mailing a
 	// hundred thousand synthetic buyers is neither wanted nor free.
 	payments := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, nil)

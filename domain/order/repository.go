@@ -14,8 +14,20 @@ type Filter struct {
 	EventID string
 	BuyerID string
 	Status  Status
-	Limit   int
-	Offset  int
+	// Statuses selects several at once, for a caller asking a question that no
+	// single status answers.
+	//
+	// The buyer's own list is the one that needs it: an abandoned checkout is
+	// persisted here as an `expired` order, so a list of everything is mostly
+	// carts nobody finished, and the orders that are actually alive -- paid,
+	// still awaiting payment, owed a refund -- are buried among them. Three
+	// separate requests could not be paged as one list.
+	//
+	// Applied together with Status, not instead of it, so a caller that sets
+	// both gets the intersection rather than a silent winner.
+	Statuses []Status
+	Limit    int
+	Offset   int
 	// OldestUpdatedFirst is used by recovery sweeps. Successful reconciliation
 	// refreshes UpdatedAt, rotating still-pending orders behind work that has
 	// not been checked yet instead of starving the oldest payment forever.

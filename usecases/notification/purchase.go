@@ -55,7 +55,7 @@ func (p *Purchases) ChargeIssued(ctx context.Context, jobs queue.Queue, item *or
 		Channel:   domain.ChannelEmail,
 		Template:  domain.TemplateOrderPending,
 		Recipient: recipient(item),
-		Subject:   "Falta pouco: conclua o pagamento do pedido " + reference(item.ID),
+		Subject:   "Falta pouco: conclua o pagamento do pedido " + orderdomain.Reference(item.ID),
 		Data:      data,
 		// Once per order, for the life of the order. A charge is created once
 		// and reconciled many times; only the first crossing sends.
@@ -80,7 +80,7 @@ func (p *Purchases) OrderPaid(ctx context.Context, jobs queue.Queue, item *order
 		Channel:   domain.ChannelEmail,
 		Template:  domain.TemplateOrderConfirmed,
 		Recipient: recipient(item),
-		Subject:   "Pagamento confirmado: pedido " + reference(item.ID),
+		Subject:   "Pagamento confirmado: pedido " + orderdomain.Reference(item.ID),
 		Data:      data,
 		DedupeKey: dedupeKey(domain.TemplateOrderConfirmed, item.ID),
 	})
@@ -103,7 +103,7 @@ func (p *Purchases) orderData(item *orderdomain.Order, tier *ticketdomain.Ticket
 	// a tier that vanished costs a row rather than a support ticket.
 	data := map[string]any{
 		"OrderID":        item.ID,
-		"OrderReference": reference(item.ID),
+		"OrderReference": orderdomain.Reference(item.ID),
 		"BuyerName":      firstName(item.BuyerName),
 		"BuyerFullName":  item.BuyerName,
 		"BuyerEmail":     item.BuyerEmail,
@@ -157,16 +157,6 @@ func recipient(item *orderdomain.Order) domain.Recipient {
 // "the same message" means the same thing in the job table and at Resend.
 func dedupeKey(template domain.Template, orderID string) string {
 	return queue.TypeSendNotification + ":" + string(template) + ":" + orderID
-}
-
-// reference is the order id a buyer reads out to support: short, uppercase and
-// without the internal prefix, but still enough of the id to find the row.
-func reference(orderID string) string {
-	trimmed := strings.TrimPrefix(orderID, "ord_")
-	if len(trimmed) > 8 {
-		trimmed = trimmed[:8]
-	}
-	return strings.ToUpper(trimmed)
 }
 
 // firstName is what a greeting uses. "Olá, Maria" reads as a person writing;

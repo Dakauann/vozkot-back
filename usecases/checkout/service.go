@@ -27,14 +27,21 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
+	"strings"
 	"time"
 
+	authdomain "vozkot/domain/auth"
 	orderdomain "vozkot/domain/order"
 	"vozkot/domain/payment"
+	"vozkot/domain/pricing"
 	"vozkot/domain/queue"
+	refunddomain "vozkot/domain/refund"
+	seatingdomain "vozkot/domain/seating"
 	ticketdomain "vozkot/domain/ticket"
 	"vozkot/domain/uow"
+	userdomain "vozkot/domain/user"
 	queueUsecase "vozkot/usecases/queue"
 )
 
@@ -64,56 +71,88 @@ const DefaultHoldFor = 30 * time.Minute
 // event as little as possible.
 const DefaultCartHoldFor = 10 * time.Minute
 
+// Settings are the box office's policies for a purchase: how long stock is
+// held, how much of it one account may hold, and what the buyer is charged on
+// top of the tier price.
+//
+// A struct rather than five more positional parameters. The constructor was at
+// seven and every one of them was a duration, an int or a struct of ints, which
+// is the shape where swapping two arguments compiles cleanly and silently
+// halves a hold window. The zero value is a working configuration: default
+// windows, no caps, no fee.
+type Settings struct {
+	HoldFor     time.Duration
+	CartHoldFor time.Duration
+	// HoldLimits caps what one account may keep reserved and unpaid at once.
+	// The zero value caps nothing, which is what the load harness wants.
+	HoldLimits orderdomain.HoldLimits
+	// Fee is the service charge added on top of the face value. The zero value
+	// charges nothing, so a deployment that has not configured one sells at the
+	// tier price exactly as it did before fees existed.
+	Fee pricing.Fee
+}
+
+func (s Settings) normalize() Settings {
+	if s.HoldFor <= 0 {
+		s.HoldFor = DefaultHoldFor
+	}
+	if s.CartHoldFor <= 0 {
+		s.CartHoldFor = DefaultCartHoldFor
+	}
+	if s.CartHoldFor > s.HoldFor {
+		// A cart window longer than the payment window would mean confirming an
+		// order SHORTENED its hold, which is the opposite of what confirming
+		// is for. Clamping is better than refusing to start over a
+		// misconfiguration with an obvious right answer.
+		s.CartHoldFor = s.HoldFor
+	}
+	return s
+}
+
 type Service struct {
 	unit uow.Runner
 	// dispatcher announces committed jobs to the broker. Nil is supported and
 	// means the poller is the only delivery path.
-	dispatcher  *queueUsecase.Dispatcher
-	orders      orderdomain.Repository
-	tickets     ticketdomain.Repository
-	holdFor     time.Duration
-	cartHoldFor time.Duration
-	// holdLimits caps what one account may keep reserved and unpaid at once.
-	// The zero value caps nothing, which is what the load harness wants.
-	holdLimits orderdomain.HoldLimits
-	now        func() time.Time
-	newID      func() string
+	dispatcher *queueUsecase.Dispatcher
+	orders     orderdomain.Repository
+	tickets    ticketdomain.Repository
+	// buyers is read for the optional demographics frozen onto an order. Nil is
+	// supported and means every order is created with none of them, which is
+	// what the load harness and any deployment without an encryption keyring
+	// get: a missing audience report, never a missing sale.
+	buyers   userdomain.Repository
+	settings Settings
+	now      func() time.Time
+	newID    func() string
 }
 
 func NewService(
 	unit uow.Runner,
 	orders orderdomain.Repository,
 	tickets ticketdomain.Repository,
+	buyers userdomain.Repository,
 	dispatcher *queueUsecase.Dispatcher,
-	holdFor time.Duration,
-	cartHoldFor time.Duration,
-	holdLimits orderdomain.HoldLimits,
+	settings Settings,
 ) *Service {
-	if holdFor <= 0 {
-		holdFor = DefaultHoldFor
-	}
-	if cartHoldFor <= 0 {
-		cartHoldFor = DefaultCartHoldFor
-	}
-	if cartHoldFor > holdFor {
-		// A cart window longer than the payment window would mean confirming an
-		// order SHORTENED its hold, which is the opposite of what confirming
-		// is for. Clamping is better than refusing to start over a
-		// misconfiguration with an obvious right answer.
-		cartHoldFor = holdFor
-	}
 	return &Service{
-		unit:        unit,
-		dispatcher:  dispatcher,
-		orders:      orders,
-		tickets:     tickets,
-		holdFor:     holdFor,
-		cartHoldFor: cartHoldFor,
-		holdLimits:  holdLimits,
-		now:         time.Now,
-		newID:       randomID,
+		unit:       unit,
+		dispatcher: dispatcher,
+		orders:     orders,
+		tickets:    tickets,
+		buyers:     buyers,
+		settings:   settings.normalize(),
+		now:        time.Now,
+		newID:      randomID,
 	}
 }
+
+// Fee is the commission this box office is charging, so a catalogue endpoint
+// can quote a buyer the real price before they reach the checkout.
+//
+// Exposed from here rather than read from configuration a second time: the
+// number the event page promises and the number the order charges have to be
+// the same number, and the only way to guarantee that is for there to be one.
+func (s *Service) Fee() pricing.Fee { return s.settings.Fee }
 
 // StartInput is one purchase attempt: one event, one or more of its tiers.
 type StartInput struct {
@@ -150,8 +189,37 @@ func (s *Service) Start(ctx context.Context, input StartInput) (*orderdomain.Ord
 		return nil, err
 	}
 
+	// Read OUTSIDE the transaction, and before it. The demographics are a
+	// snapshot for a report, not something stock or money depends on, so
+	// holding a transaction open across this read would add a query to the
+	// hottest path in the system to buy consistency nothing needs.
+	audience := s.audienceFor(ctx, input.BuyerID)
+
 	var created *orderdomain.Order
 	var announce []*queue.Job
+
+	// Minted before the transaction, not inside it, because a claimed SEAT
+	// names the order holding it and the claim happens before the order row is
+	// written. There is no foreign key between the two for exactly this reason:
+	// the seat is inventory and the order is a record of a sale, and the
+	// inventory has to be takeable first.
+	orderID := s.newID()
+	now := s.now()
+	holdFor := s.settings.CartHoldFor
+	if input.Confirm {
+		holdFor = s.settings.HoldFor
+	}
+	holdExpiresAt := now.Add(holdFor)
+
+	// Which chairs each tier was asked for, keyed by tier, from the normalised
+	// draft. Read here so the reservation loop below does not have to carry the
+	// draft around beside the priced lines.
+	requestedSeats := make(map[string][]string, len(requested))
+	for _, wanted := range requested {
+		if wanted.Seated() {
+			requestedSeats[wanted.TicketID] = wanted.SeatIDs
+		}
+	}
 
 	err = s.unit.Run(ctx, func(ctx context.Context, repositories uow.Repositories) error {
 		// Read every tier first, before anything is reserved. The prices, the
@@ -205,7 +273,28 @@ func (s *Service) Start(ctx context.Context, input StartInput) (*orderdomain.Ord
 
 		// In the order NormalizeItems sorted them into, which is what keeps two
 		// orders over the same two tiers from deadlocking against each other.
+		//
+		// Both kinds of stock move here. A counted line moves the tier's
+		// counter and nothing else, exactly as it always has. A SEATED line
+		// claims its named chairs AND moves the same counter, because the
+		// counter is a projection the catalogue, the tier picker and the
+		// sold-out transition all read, and because the CHECK constraint on it
+		// is the one guard the application cannot bypass.
+		seatsByTier := make(map[string][]seatingdomain.EventSeat, len(lines))
 		for _, line := range lines {
+			if seats := requestedSeats[line.TicketID]; len(seats) > 0 {
+				claimed, err := claimSeats(ctx, repositories, seatingdomain.ClaimRequest{
+					EventID:       eventID,
+					TicketID:      line.TicketID,
+					OrderID:       orderID,
+					SeatIDs:       seats,
+					HoldExpiresAt: holdExpiresAt,
+				})
+				if err != nil {
+					return err
+				}
+				seatsByTier[line.TicketID] = claimed
+			}
 			reserved, err := repositories.Tickets().Reserve(ctx, line.TicketID, line.Quantity)
 			if err != nil {
 				return err
@@ -220,28 +309,42 @@ func (s *Service) Start(ctx context.Context, input StartInput) (*orderdomain.Ord
 			}
 		}
 
-		holdFor := s.cartHoldFor
-		if input.Confirm {
-			holdFor = s.holdFor
-		}
-		item, err := orderdomain.New(s.newID(), orderdomain.Draft{
-			EventID:        eventID,
-			BuyerID:        input.BuyerID,
-			BuyerName:      input.BuyerName,
-			BuyerEmail:     input.BuyerEmail,
-			BuyerDocument:  input.BuyerDocument,
-			Items:          lines,
+		// One row per chair, now that the claim has told us which chairs and
+		// what they are called. Done after the claim rather than before it
+		// because the labels are a SNAPSHOT and the only honest source for them
+		// is the row that was actually claimed.
+		lines = expandSeatedLines(lines, seatsByTier, s.newItemID)
+
+		item, err := orderdomain.New(orderID, orderdomain.Draft{
+			EventID:       eventID,
+			BuyerID:       input.BuyerID,
+			BuyerName:     input.BuyerName,
+			BuyerEmail:    input.BuyerEmail,
+			BuyerDocument: input.BuyerDocument,
+			BuyerGender:   audience.Gender,
+			BuyerAgeYears: audience.AgeYears,
+			BuyerCity:     audience.City,
+			BuyerUF:       audience.UF,
+			Items:         lines,
+			// The fee is applied HERE, once, from the box office's own
+			// configuration. Never from the request: a client that could name
+			// the commission could name zero.
+			Fee:            s.settings.Fee,
 			Currency:       currency,
 			Method:         input.Method,
 			IdempotencyKey: input.IdempotencyKey,
-		}, holdFor, s.now())
+			// The cancellation rules are frozen onto the order at the moment of
+			// purchase, so tightening the policy later cannot tighten it for
+			// somebody who already bought.
+			RefundPolicyVersion: refunddomain.CurrentPolicyVersion,
+		}, holdFor, now)
 		if err != nil {
 			return err
 		}
 		if input.Confirm {
 			if _, err := item.Confirm(
 				input.BuyerName, input.BuyerEmail, input.BuyerDocument,
-				input.Method, s.holdFor, s.now(),
+				input.Method, s.settings.HoldFor, s.now(),
 			); err != nil {
 				return err
 			}
@@ -319,7 +422,7 @@ func (s *Service) Confirm(ctx context.Context, input ConfirmInput) (*orderdomain
 
 		extended, err := item.Confirm(
 			input.BuyerName, input.BuyerEmail, input.BuyerDocument,
-			input.Method, s.holdFor, s.now(),
+			input.Method, s.settings.HoldFor, s.now(),
 		)
 		if err != nil {
 			return err
@@ -354,6 +457,49 @@ func (s *Service) Confirm(ctx context.Context, input ConfirmInput) (*orderdomain
 	return result, nil
 }
 
+// audience is the coarse, non-identifying snapshot frozen onto an order.
+type audience struct {
+	Gender   string
+	AgeYears int
+	City     string
+	UF       string
+}
+
+// audienceFor reads the optional demographics off the buyer's profile.
+//
+// It NEVER fails a checkout, and that is the whole contract. Every field it
+// reads is optional, the thing it feeds is a report, and the worst outcome of
+// this read going wrong is one order counted as "not informed" in a breakdown.
+// Weighed against that, a buyer being told their purchase failed because the
+// users table was briefly unavailable is not a trade anybody would make — so a
+// failure is logged and the sale proceeds.
+//
+// An anonymous sale (an operator at the door, the load harness) has no profile
+// to read and returns the zero value, which is exactly "not informed".
+func (s *Service) audienceFor(ctx context.Context, buyerID string) audience {
+	if s.buyers == nil || strings.TrimSpace(buyerID) == "" {
+		return audience{}
+	}
+	account, err := s.buyers.FindByID(ctx, buyerID)
+	if err != nil {
+		if !errors.Is(err, userdomain.ErrNotFound) {
+			log.Printf("checkout: could not read the profile for buyer %s; the order is counted as not informed: %v",
+				buyerID, err)
+		}
+		return audience{}
+	}
+	profile := account.Profile
+	return audience{
+		Gender: string(profile.Gender),
+		// Computed at the moment of purchase and stored as a number, so the
+		// report never has to hold a date of birth and never has to re-age
+		// anybody: a buyer who turns 29 next week was 28 when they bought.
+		AgeYears: profile.AgeOn(s.now()),
+		City:     profile.City,
+		UF:       profile.UF,
+	}
+}
+
 // withinHoldLimits refuses a buyer already holding more unpaid inventory than
 // the box office allows.
 //
@@ -368,7 +514,7 @@ func (s *Service) withinHoldLimits(
 	buyerID string,
 	lines []orderdomain.Item,
 ) error {
-	if s.holdLimits.Unlimited() || buyerID == "" {
+	if s.settings.HoldLimits.Unlimited() || buyerID == "" {
 		// No limits configured, or a sale with no account behind it: nothing to
 		// count against, and no reason to pay for the lock.
 		return nil
@@ -381,11 +527,28 @@ func (s *Service) withinHoldLimits(
 	if err != nil {
 		return err
 	}
-	return s.holdLimits.Allows(current, lines)
+	return s.settings.HoldLimits.Allows(current, lines)
 }
 
-func (s *Service) Get(ctx context.Context, id string) (*orderdomain.Order, error) {
-	return s.orders.GetByID(ctx, id)
+// Get returns one order to the buyer it belongs to, or to an operator.
+func (s *Service) Get(ctx context.Context, actor authdomain.Actor, id string) (*orderdomain.Order, error) {
+	return s.owned(ctx, actor, id)
+}
+
+// owned loads an order and refuses one belonging to another buyer.
+//
+// The single authorisation point for reading an order. An order with NO buyer
+// — a door sale taken by an operator — is reachable only by an operator:
+// MayReach refuses an empty owner rather than treating it as everybody's.
+func (s *Service) owned(ctx context.Context, actor authdomain.Actor, id string) (*orderdomain.Order, error) {
+	item, err := s.orders.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !actor.MayReach(item.BuyerID) {
+		return nil, fmt.Errorf("%w: this order belongs to another buyer", authdomain.ErrForbidden)
+	}
+	return item, nil
 }
 
 // FindByIdempotencyKey returns the order a checkout key produced, if it
@@ -406,7 +569,18 @@ type Page struct {
 	Total int64
 }
 
-func (s *Service) List(ctx context.Context, filter orderdomain.Filter) (Page, error) {
+// List is a buyer's own orders, or the whole box office for an operator.
+//
+// The narrowing is here and not in the handler: an order carries a name, an
+// email and a document, so an unscoped listing is a customer database.
+func (s *Service) List(ctx context.Context, actor authdomain.Actor, filter orderdomain.Filter) (Page, error) {
+	if !actor.IsAdmin() {
+		if !actor.Authenticated() {
+			return Page{}, authdomain.ErrUnauthorized
+		}
+		filter.BuyerID = actor.ID
+	}
+
 	items, err := s.orders.List(ctx, filter)
 	if err != nil {
 		return Page{}, err
@@ -525,7 +699,14 @@ func releaseAll(ctx context.Context, repositories uow.Repositories, item *orderd
 			return err
 		}
 	}
-	return nil
+	// And the chairs, if this order named any. One call rather than one per
+	// line, because a seat is released by the ORDER holding it; the repository
+	// scopes it to held, so this can never take a seat from an order that paid.
+	//
+	// A counted order matches no rows here and costs one indexed statement
+	// against a partial index. Skipping it on a flag would mean trusting a flag
+	// to be right about inventory, which is the trade this system does not make.
+	return releaseSeats(ctx, repositories, item.ID)
 }
 
 func (s *Service) enqueueCharge(ctx context.Context, jobs queue.Queue, item *orderdomain.Order) (*queue.Job, error) {

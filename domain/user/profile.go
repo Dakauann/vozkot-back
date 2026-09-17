@@ -22,6 +22,53 @@ import (
 // DocumentType is which of Brazil's identifiers a buyer gave.
 type DocumentType string
 
+// Gender is what a buyer says about themselves, and it is OPTIONAL in a way
+// the document is not.
+//
+// The document exists because a sale cannot lawfully proceed without it. This
+// exists because an organiser planning next year's line-up wants to know who
+// came, and that is a good reason to ASK and never a reason to require: a buyer
+// who does not want to answer must still be able to buy a ticket. Hence
+// GenderUndisclosed, which is a real answer and not a missing one, and hence
+// the empty value staying valid throughout.
+type Gender string
+
+const (
+	GenderFemale    Gender = "female"
+	GenderMale      Gender = "male"
+	GenderNonBinary Gender = "non_binary"
+	// GenderOther is for someone whose answer is none of the above and who is
+	// willing to say so, which is a different fact from declining to answer.
+	GenderOther Gender = "other"
+	// GenderUndisclosed is "prefiro não informar", chosen deliberately. A
+	// report counts it beside the blanks, because to a count of an audience
+	// they mean the same thing, but storing it distinctly is what stops the
+	// form asking again every time.
+	GenderUndisclosed Gender = "undisclosed"
+)
+
+// Genders is the whole set, in the order a form should offer it.
+func Genders() []Gender {
+	return []Gender{GenderFemale, GenderMale, GenderNonBinary, GenderOther, GenderUndisclosed}
+}
+
+// Valid accepts the empty value: gender is optional, and "not answered" is a
+// legitimate state of this field rather than a validation failure.
+func (g Gender) Valid() bool {
+	if g == "" {
+		return true
+	}
+	for _, known := range Genders() {
+		if g == known {
+			return true
+		}
+	}
+	return false
+}
+
+// Known reports whether a report can count this as an answer.
+func (g Gender) Known() bool { return g != "" && g != GenderUndisclosed }
+
 const (
 	// DocumentCPF is the individual taxpayer number: eleven digits.
 	DocumentCPF DocumentType = "cpf"
@@ -47,8 +94,13 @@ var (
 	ErrInvalidDocument     = errors.New("document number is invalid")
 	ErrInvalidLegalName    = errors.New("full name is required")
 	ErrInvalidBirthDate    = errors.New("date of birth is invalid")
-	ErrUnderage            = errors.New("you must be at least 16 to buy tickets")
+	ErrUnderage            = errors.New("you must be at least 18 to buy tickets")
 	ErrInvalidPhone        = errors.New("phone number is invalid")
+	ErrInvalidGender       = errors.New("gender is not one of the supported values")
+	// ErrInvalidUF is a two-letter state that is not one of Brazil's 27. A
+	// free-text state is the field that turns an audience report into "SP",
+	// "sp", "São Paulo" and "Sao Paulo" counted as four places.
+	ErrInvalidUF = errors.New("state must be one of Brazil's 27 federal units")
 	// ErrDocumentInUse is one document already attached to another account.
 	// It is what stops the per-document purchase caps being sidestepped by
 	// making a second account with the same CPF.
@@ -57,10 +109,17 @@ var (
 
 // MinimumAge is the floor for holding an account that can buy.
 //
-// Sixteen, which is where Brazilian consumer practice sits for a purchase made
-// in one's own name. It is a real check rather than a checkbox: a date of birth
-// that is being collected anyway should be used for the one thing it is for.
-const MinimumAge = 16
+// Eighteen, which is civil capacity to contract under Código Civil art. 5. It
+// is a real check rather than a checkbox: a date of birth that is being
+// collected anyway should be used for the one thing it is for.
+//
+// The floor is eighteen rather than sixteen because an account held by an
+// adolescent is adolescent data, and that pulls in LGPD art. 14's best-interest
+// duty, GDPR art. 8's consent age and the ECA Digital's guardian-linked-account
+// rules for the under-sixteens. A ticket for a minor is bought by an adult on
+// their behalf, which is how the door works anyway, and the whole regime stays
+// out of the product.
+const MinimumAge = 18
 
 // Profile is the identity block on a user.
 //
@@ -79,12 +138,53 @@ type Profile struct {
 	BirthDate string
 	Phone     string
 
+	// --- what the buyer volunteers, for the organiser's audience report ---
+	//
+	// None of the three is required and none of them gates a purchase. They
+	// exist because an organiser deciding where to take a tour next needs to
+	// know who bought this one, and because asking is the only honest way to
+	// find out: the alternative is inferring it from an IP address or from a
+	// first name, which is both worse data and a worse thing to do.
+	//
+	// They are sealed at rest like everything else on this struct. Not because
+	// a city identifies anybody on its own, but because the report never reads
+	// them from here — it reads the coarse snapshot copied onto the order at
+	// purchase — so there is no query that encryption costs anything, and a
+	// rule of "everything a person told us about themselves is encrypted" is
+	// one nobody has to relitigate per field.
+	Gender Gender
+	City   string
+	// UF is the two-letter state code, upper-cased.
+	UF string
+
 	PhoneVerifiedAt *time.Time
 	CompletedAt     *time.Time
 }
 
 // Complete reports whether the legally required block is filled in.
+//
+// The optional demographic fields deliberately do not count. "Can this account
+// buy a ticket" is a question about the document, and answering it with "have
+// they told us their city" would put an optional field in front of a sale.
 func (p Profile) Complete() bool { return p.CompletedAt != nil }
+
+// AgeOn is the buyer's age in whole years at a given instant, or 0 when there
+// is no usable date of birth.
+//
+// Exported because the order snapshot needs exactly this number and must not
+// compute it a second way: an age the profile screen and the audience report
+// disagree about is a report nobody trusts.
+func (p Profile) AgeOn(now time.Time) int {
+	birth, err := time.Parse("2006-01-02", strings.TrimSpace(p.BirthDate))
+	if err != nil {
+		return 0
+	}
+	years := ageOn(birth, now.UTC())
+	if years < 0 {
+		return 0
+	}
+	return years
+}
 
 // PhoneVerified reports whether the number was proven, not merely typed.
 func (p Profile) PhoneVerified() bool { return p.PhoneVerifiedAt != nil }
@@ -95,6 +195,12 @@ type ProfileDraft struct {
 	Document     string
 	LegalName    string
 	BirthDate    string
+	// Gender, City and UF are optional. An empty string means "not answered"
+	// and is carried through as one, never defaulted to a value that would
+	// make a report count somebody as something they never said.
+	Gender string
+	City   string
+	UF     string
 }
 
 // NormalizeProfile validates a draft and returns the storable form.
@@ -137,12 +243,57 @@ func NormalizeProfile(draft ProfileDraft, now time.Time) (Profile, error) {
 		return Profile{}, ErrUnderage
 	}
 
+	gender := Gender(strings.ToLower(strings.TrimSpace(draft.Gender)))
+	if !gender.Valid() {
+		return Profile{}, ErrInvalidGender
+	}
+
+	// A blank state is fine; a state that is not a state is not. The two are
+	// different mistakes and only the second is worth refusing over.
+	uf := strings.ToUpper(strings.TrimSpace(draft.UF))
+	if uf != "" && !ValidUF(uf) {
+		return Profile{}, ErrInvalidUF
+	}
+	// The city is free text and stays free text: Brazil has 5,570 municipalities
+	// and a fixed list of them is a list that is wrong the first time one is
+	// created. It is collapsed to single spaces so "Rio  de Janeiro" and
+	// "Rio de Janeiro" are one city to a report that groups by it.
+	city := strings.Join(strings.Fields(draft.City), " ")
+	if len([]rune(city)) > 120 {
+		city = string([]rune(city)[:120])
+	}
+
 	return Profile{
 		DocumentType: documentType,
 		Document:     document,
 		LegalName:    legalName,
 		BirthDate:    birth.Format("2006-01-02"),
+		Gender:       gender,
+		City:         city,
+		UF:           uf,
 	}, nil
+}
+
+// UFs is Brazil's 27 federal units, alphabetically, which is the order a form
+// should offer them in.
+var ufs = []string{
+	"AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
+	"MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC",
+	"SP", "SE", "TO",
+}
+
+// UFs returns a copy of the state list, so a caller cannot reorder the original
+// for everybody else.
+func UFs() []string { return append([]string(nil), ufs...) }
+
+// ValidUF reports whether an upper-cased two-letter code is a real state.
+func ValidUF(uf string) bool {
+	for _, known := range ufs {
+		if uf == known {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeDocument strips formatting and checks the shape of each type.
@@ -202,9 +353,17 @@ func NormalizePhone(raw string) (string, error) {
 }
 
 // ageOn is whole years, counting the birthday rather than dividing by 365.25.
+// ageOn is whole years elapsed, counted by the calendar date.
+//
+// Month and day rather than YearDay: the ordinal of a date shifts by one
+// across a leap year, so comparing ordinals denies somebody born on
+// 13 September 2008 on their eighteenth birthday in 2026. Comparing the date
+// itself is what a door does, and it has no such day.
 func ageOn(birth, today time.Time) int {
 	years := today.Year() - birth.Year()
-	if today.YearDay() < birth.YearDay() {
+	birthMonth, birthDay := birth.Month(), birth.Day()
+	month, day := today.Month(), today.Day()
+	if month < birthMonth || (month == birthMonth && day < birthDay) {
 		years--
 	}
 	return years

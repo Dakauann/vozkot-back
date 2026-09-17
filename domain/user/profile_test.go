@@ -173,22 +173,49 @@ func TestBirthDateIsBoundedAtBothEnds(t *testing.T) {
 
 // TestAgeIsCountedByBirthdayNotByDivision.
 //
-// Somebody who turns sixteen tomorrow is fifteen today. Dividing elapsed days
-// by 365.25 gets this wrong for a few days a year, and those are exactly the
-// days the check exists for.
+// Somebody who turns eighteen tomorrow is seventeen today. Dividing elapsed
+// days by 365.25 gets this wrong for a few days a year, and those are exactly
+// the days the check exists for.
 func TestAgeIsCountedByBirthdayNotByDivision(t *testing.T) {
 	input := draft()
 
-	// Sixteen tomorrow.
-	input.BirthDate = "2010-09-14"
+	// Eighteen tomorrow.
+	input.BirthDate = "2008-09-14"
 	if _, err := NormalizeProfile(input, today); !errors.Is(err, ErrUnderage) {
-		t.Fatalf("someone who turns 16 tomorrow was allowed: %v", err)
+		t.Fatalf("someone who turns 18 tomorrow was allowed: %v", err)
 	}
 
-	// Sixteen today.
-	input.BirthDate = "2010-09-13"
+	// Eighteen today.
+	input.BirthDate = "2008-09-13"
 	if _, err := NormalizeProfile(input, today); err != nil {
-		t.Fatalf("someone who turns 16 today was refused: %v", err)
+		t.Fatalf("someone who turns 18 today was refused: %v", err)
+	}
+}
+
+// TestAgeIsNotThrownOffByALeapYear.
+//
+// A date's ordinal in the year shifts by one between a leap year and a common
+// one, so counting age by ordinal refuses people on their own birthday. Every
+// birth date below is a leap-year date on or after 1 March, which is exactly
+// the half of the calendar the shift applies to.
+func TestAgeIsNotThrownOffByALeapYear(t *testing.T) {
+	input := draft()
+
+	for _, birth := range []string{"2008-03-01", "2008-09-13", "2008-12-31"} {
+		input.BirthDate = birth
+		parsed, err := time.Parse("2006-01-02", birth)
+		if err != nil {
+			t.Fatalf("birth date %q does not parse: %v", birth, err)
+		}
+		eighteenth := time.Date(2026, parsed.Month(), parsed.Day(), 12, 0, 0, 0, time.UTC)
+
+		if _, err := NormalizeProfile(input, eighteenth); err != nil {
+			t.Fatalf("someone born %s was refused on their 18th birthday: %v", birth, err)
+		}
+		// And still refused the day before it.
+		if _, err := NormalizeProfile(input, eighteenth.AddDate(0, 0, -1)); !errors.Is(err, ErrUnderage) {
+			t.Fatalf("someone born %s was allowed the day before turning 18: %v", birth, err)
+		}
 	}
 }
 

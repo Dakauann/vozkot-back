@@ -6,6 +6,7 @@ import (
 	"time"
 
 	orderdomain "vozkot/domain/order"
+	refunddomain "vozkot/domain/refund"
 	ticketdomain "vozkot/domain/ticket"
 	"vozkot/infra/mercadopago"
 	"vozkot/infra/testsupport"
@@ -36,7 +37,16 @@ func (h *harness) secondTier(t *testing.T, title string, price int64, stock int)
 		t.Fatalf("create %s: %v", title, err)
 	}
 	t.Cleanup(func() {
-		h.db.Exec("DELETE FROM order_items WHERE ticket_id = ?", item.ID)
+		// Whole orders, not their lines. order_items cascades from orders, so
+		// deleting the parent takes the lines with it; deleting the lines on
+		// their own leaves an order with a total and nothing in it, which the
+		// charge path logs as "(0 items)" and the admission issuer issues
+		// nothing for.
+		h.db.Exec(`DELETE FROM jobs WHERE payload->>'orderId' IN
+			(SELECT order_id FROM order_items WHERE ticket_id = ?)`, item.ID)
+		h.db.Exec(`DELETE FROM admissions WHERE ticket_id = ?`, item.ID)
+		h.db.Exec(`DELETE FROM orders WHERE id IN
+			(SELECT order_id FROM order_items WHERE ticket_id = ?)`, item.ID)
 		h.db.Exec("DELETE FROM tickets WHERE id = ?", item.ID)
 	})
 	return item.ID
@@ -68,6 +78,7 @@ func (h *harness) basketOrder(t *testing.T, secondTierID string, first, second i
 			{ID: testsupport.Unique("oi"), TicketID: h.ticketID, TicketTitle: "Pista", Quantity: first, UnitPriceCents: 24000},
 			{ID: testsupport.Unique("oi"), TicketID: secondTierID, TicketTitle: "Camarote", Quantity: second, UnitPriceCents: 50000},
 		},
+		RefundPolicyVersion: refunddomain.CurrentPolicyVersion,
 	}, 30*time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("build order: %v", err)

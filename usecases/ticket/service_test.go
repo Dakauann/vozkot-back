@@ -7,7 +7,9 @@ import (
 
 	"gorm.io/gorm"
 
+	authdomain "vozkot/domain/auth"
 	domain "vozkot/domain/ticket"
+	userdomain "vozkot/domain/user"
 	ticketRepository "vozkot/infra/repositories/ticket"
 	"vozkot/infra/testsupport"
 )
@@ -107,7 +109,7 @@ func TestListReturnsTheEventsTiersWithATotal(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	page, err := h.service.List(ctx, domain.Filter{OwnerID: h.ownerID})
+	page, err := h.service.List(ctx, h.actor(), domain.Filter{})
 
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
@@ -134,15 +136,15 @@ func TestSearchMatchesTheTiersOwnWords(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	byTitle, err := h.service.List(ctx, domain.Filter{OwnerID: h.ownerID, Query: "open bar"})
+	byTitle, err := h.service.List(ctx, h.actor(), domain.Filter{OwnerID: h.ownerID, Query: "open bar"})
 	if err != nil || len(byTitle.Items) != 1 {
 		t.Fatalf("search by title: items=%d err=%v", len(byTitle.Items), err)
 	}
-	byDescription, err := h.service.List(ctx, domain.Filter{OwnerID: h.ownerID, Query: "welcome"})
+	byDescription, err := h.service.List(ctx, h.actor(), domain.Filter{OwnerID: h.ownerID, Query: "welcome"})
 	if err != nil || len(byDescription.Items) != 1 {
 		t.Fatalf("search by description: items=%d err=%v", len(byDescription.Items), err)
 	}
-	none, err := h.service.List(ctx, domain.Filter{OwnerID: h.ownerID, Query: "camarote-que-nao-existe"})
+	none, err := h.service.List(ctx, h.actor(), domain.Filter{OwnerID: h.ownerID, Query: "camarote-que-nao-existe"})
 	if err != nil || len(none.Items) != 0 {
 		t.Fatalf("search for nothing: items=%d err=%v", len(none.Items), err)
 	}
@@ -156,7 +158,7 @@ func TestUpdateRewritesTheEditableFields(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	updated, err := h.service.Update(ctx, item.ID, UpdateInput{
+	updated, err := h.service.Update(ctx, h.actor(), item.ID, UpdateInput{
 		Title:       "Camarote",
 		Description: "Vista para o palco",
 		PriceCents:  35000,
@@ -190,7 +192,7 @@ func TestUpdateRefusesToShrinkBelowSoldAndHeld(t *testing.T) {
 		t.Fatalf("set stock: %v", err)
 	}
 
-	_, err = h.service.Update(ctx, item.ID, UpdateInput{
+	_, err = h.service.Update(ctx, h.actor(), item.ID, UpdateInput{
 		Title:      item.Title,
 		PriceCents: item.PriceCents,
 		Quantity:   49,
@@ -233,7 +235,7 @@ func TestDeleteRefusesATierWithOrders(t *testing.T) {
 	}
 	t.Cleanup(func() { h.db.Exec("DELETE FROM orders WHERE id = ?", orderID) })
 
-	err = h.service.Delete(ctx, item.ID)
+	err = h.service.Delete(ctx, h.actor(), item.ID)
 
 	if !errors.Is(err, domain.ErrHasOrders) {
 		t.Fatalf("Delete() error = %v, want %v: the orders are the record of money that changed hands", err, domain.ErrHasOrders)
@@ -248,11 +250,168 @@ func TestDeleteRemovesATierWithNoOrders(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	if err := h.service.Delete(ctx, item.ID); err != nil {
+	if err := h.service.Delete(ctx, h.actor(), item.ID); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
 
-	if _, err := h.service.Get(ctx, item.ID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := h.service.Get(ctx, h.actor(), item.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Get() after delete error = %v, want %v", err, domain.ErrNotFound)
+	}
+}
+
+// actor is the harness's owner, as the use case now expects it.
+//
+// The ownership rule moved from the HTTP handler into the use case, so a test
+// that drives the service directly has to say who it is — which is exactly the
+// property that makes the rule reachable from a CLI or a job.
+func (h *harness) actor() authdomain.Actor {
+	return authdomain.Actor{ID: h.ownerID, Role: userdomain.RoleUser}
+}
+
+// stranger is a second operator with nothing of their own.
+func (h *harness) stranger(t *testing.T) authdomain.Actor {
+	t.Helper()
+	id := testsupport.Unique("usr")
+	if err := h.db.Exec(`
+		INSERT INTO users (id, name, email, password_hash, role, token_version, created_at, updated_at)
+		VALUES (?, 'Other Operator', ?, 'x', 'user', 0, NOW(), NOW())`, id, id+"@vozkot.test").Error; err != nil {
+		t.Fatalf("seed stranger: %v", err)
+	}
+	t.Cleanup(func() { h.db.Exec("DELETE FROM users WHERE id = ?", id) })
+	return authdomain.Actor{ID: id, Role: userdomain.RoleUser}
+}
+
+// onSaleTier creates one tier owned by the harness's operator, on sale.
+func (h *harness) onSaleTier(t *testing.T) *domain.Ticket {
+	t.Helper()
+	item, err := h.service.Create(context.Background(), h.createInput())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	live, err := h.service.ChangeStatus(context.Background(), h.actor(), item.ID, domain.StatusOnSale)
+	if err != nil {
+		t.Fatalf("ChangeStatus() error = %v", err)
+	}
+	return live
+}
+
+// One operator must never see, edit or delete another's tiers.
+//
+// This is the leak that prompted the refactor: an account that had never
+// created an event opened the Ingressos tab and saw 601 tiers, every row
+// reading "Evento não encontrado" because they belonged to box offices whose
+// events it could not read. The listing was unscoped — the HTTP handler was the
+// only thing that could have narrowed it, and it did not — and the by-id routes
+// had no ownership check at all, so a price could be rewritten and an on-sale
+// tier cancelled by anybody signed in.
+//
+// The rule now lives in this package, which is why this test drives it without
+// an http.Request.
+func TestOneOperatorCannotReachAnothersTiers(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	tier := h.onSaleTier(t)
+	stranger := h.stranger(t)
+
+	t.Run("the listing shows them nothing", func(t *testing.T) {
+		page, err := h.service.List(ctx, stranger, domain.Filter{})
+		if err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+		if len(page.Items) != 0 || page.Total != 0 {
+			t.Fatalf("a stranger saw %d of %d tiers; an unscoped listing is every box office's prices and stock",
+				len(page.Items), page.Total)
+		}
+	})
+
+	// A filter is a request, not an authorisation.
+	t.Run("naming the owner in the filter does not help", func(t *testing.T) {
+		page, err := h.service.List(ctx, stranger, domain.Filter{OwnerID: h.ownerID})
+		if err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+		if len(page.Items) != 0 {
+			t.Fatalf("a stranger listed %d tiers by naming the owner", len(page.Items))
+		}
+	})
+
+	t.Run("reading one is refused", func(t *testing.T) {
+		if _, err := h.service.Get(ctx, stranger, tier.ID); !errors.Is(err, authdomain.ErrForbidden) {
+			t.Fatalf("Get() error = %v, want ErrForbidden", err)
+		}
+	})
+
+	t.Run("repricing is refused", func(t *testing.T) {
+		_, err := h.service.Update(ctx, stranger, tier.ID, UpdateInput{
+			Title:      "Owned",
+			PriceCents: 1,
+			Quantity:   300,
+			Status:     domain.StatusOnSale,
+		})
+		if !errors.Is(err, authdomain.ErrForbidden) {
+			t.Fatalf("Update() error = %v, want ErrForbidden", err)
+		}
+	})
+
+	t.Run("cancelling somebody else's sale is refused", func(t *testing.T) {
+		if _, err := h.service.ChangeStatus(ctx, stranger, tier.ID, domain.StatusCancelled); !errors.Is(err, authdomain.ErrForbidden) {
+			t.Fatalf("ChangeStatus() error = %v, want ErrForbidden", err)
+		}
+	})
+
+	t.Run("deleting is refused", func(t *testing.T) {
+		if err := h.service.Delete(ctx, stranger, tier.ID); !errors.Is(err, authdomain.ErrForbidden) {
+			t.Fatalf("Delete() error = %v, want ErrForbidden", err)
+		}
+	})
+
+	// The refusals protected the row rather than failing after it was written.
+	t.Run("the tier is untouched", func(t *testing.T) {
+		item, err := h.service.Get(ctx, h.actor(), tier.ID)
+		if err != nil {
+			t.Fatalf("the owner can no longer read their own tier: %v", err)
+		}
+		if item.PriceCents != tier.PriceCents {
+			t.Errorf("price is now %d, want %d", item.PriceCents, tier.PriceCents)
+		}
+		if item.Status != domain.StatusOnSale {
+			t.Errorf("status is now %q, want on_sale", item.Status)
+		}
+		if item.Title != tier.Title {
+			t.Errorf("title is now %q, want %q", item.Title, tier.Title)
+		}
+	})
+}
+
+// An operator of the platform supports everybody, which is what makes the
+// scoping above safe to be strict.
+func TestAnAdministratorReachesEveryTier(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	tier := h.onSaleTier(t)
+
+	operator := h.stranger(t)
+	operator.Role = userdomain.RoleAdmin
+
+	page, err := h.service.List(ctx, operator, domain.Filter{OwnerID: h.ownerID})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(page.Items) == 0 {
+		t.Fatal("an administrator saw none of the owner's tiers")
+	}
+	if _, err := h.service.Get(ctx, operator, tier.ID); err != nil {
+		t.Fatalf("an administrator could not read a tier: %v", err)
+	}
+}
+
+// A caller with no session must not be treated as an owner of the rows that
+// have no owner.
+func TestAnUnauthenticatedCallerListsNothing(t *testing.T) {
+	h := newHarness(t)
+
+	_, err := h.service.List(context.Background(), authdomain.Actor{}, domain.Filter{})
+	if !errors.Is(err, authdomain.ErrUnauthorized) {
+		t.Fatalf("List() with no session = %v, want ErrUnauthorized", err)
 	}
 }

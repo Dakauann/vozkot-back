@@ -8,9 +8,11 @@ import (
 
 	"gorm.io/gorm"
 
+	authdomain "vozkot/domain/auth"
 	domain "vozkot/domain/event"
 	mediadomain "vozkot/domain/media"
 	ticketdomain "vozkot/domain/ticket"
+	userdomain "vozkot/domain/user"
 	eventRepository "vozkot/infra/repositories/event"
 	mediaRepository "vozkot/infra/repositories/media"
 	ticketRepository "vozkot/infra/repositories/ticket"
@@ -133,10 +135,21 @@ func (h *harness) seed(t *testing.T, item seed) *domain.Event {
 	return created
 }
 
+// actor is the harness's owner, as the use case now expects it.
+//
+// The ownership rule moved from the HTTP handler into the use case, so a test
+// that drives the service directly has to say who it is — which is exactly the
+// property that makes the rule reachable from a CLI or a job.
+func (h *harness) actor() authdomain.Actor {
+	return authdomain.Actor{ID: h.ownerID, Role: userdomain.RoleUser}
+}
+
 func (h *harness) list(t *testing.T, filter domain.Filter) domain.Page {
 	t.Helper()
-	filter.OwnerID = h.ownerID
-	page, err := h.service.List(context.Background(), filter)
+	// The owner is the ACTOR now, not a filter field: the use case narrows the
+	// query itself, which is the whole point of moving the rule out of the
+	// handler.
+	page, err := h.service.List(context.Background(), h.actor(), filter)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -482,7 +495,7 @@ func TestPublishingMakesAnEventReachable(t *testing.T) {
 	ctx := context.Background()
 	draft := h.seed(t, seed{name: "Rascunho " + testsupport.Unique("r"), status: domain.StatusDraft, category: domain.CategoryFestasShows})
 
-	if _, err := h.service.Publish(ctx, draft.ID); err != nil {
+	if _, err := h.service.Publish(ctx, h.actor(), draft.ID); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
 
@@ -500,7 +513,7 @@ func TestListHydratesEveryCardsGallery(t *testing.T) {
 	withArt := h.seed(t, seed{name: "Com arte " + testsupport.Unique("a"), category: domain.CategoryFestasShows})
 	h.seed(t, seed{name: "Sem arte " + testsupport.Unique("b"), category: domain.CategoryFestasShows})
 
-	if _, err := h.service.AttachMedia(ctx, withArt.ID, mediadomain.Upload{
+	if _, err := h.service.AttachMedia(ctx, h.actor(), withArt.ID, mediadomain.Upload{
 		FileName: "capa.png", ContentType: "image/png", Data: onePixelPNG,
 	}); err != nil {
 		t.Fatalf("AttachMedia() error = %v", err)
@@ -529,7 +542,7 @@ func TestDeletingAnEventWithTiersIsRefused(t *testing.T) {
 	h := newHarness(t)
 	item := h.seed(t, seed{name: "Com lotes " + testsupport.Unique("l"), prices: []int64{9000}, category: domain.CategoryFestasShows})
 
-	err := h.service.Delete(context.Background(), item.ID)
+	err := h.service.Delete(context.Background(), h.actor(), item.ID)
 
 	if !errors.Is(err, domain.ErrHasTickets) {
 		t.Fatalf("Delete() error = %v, want %v", err, domain.ErrHasTickets)

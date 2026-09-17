@@ -53,6 +53,16 @@ type User struct {
 	BirthDate  piigorm.EncryptedString `gorm:"type:bytea"`
 	Phone      piigorm.EncryptedString `gorm:"type:bytea"`
 	PhoneBlind piigorm.BlindIndex      `gorm:"type:bytea;index:idx_users_phone_blind"`
+	// The optional demographics, sealed like everything else the buyer told us.
+	//
+	// Encrypting a city buys little on its own and costs nothing here: this copy
+	// is only ever read one row at a time, by the account that owns it, to
+	// re-render the form. The copy a report GROUPs BY lives on the order, in the
+	// clear, frozen at purchase. Keeping the rule "everything a person told us
+	// about themselves is encrypted" whole is worth more than the exception.
+	Gender piigorm.EncryptedString `gorm:"type:bytea"`
+	City   piigorm.EncryptedString `gorm:"type:bytea"`
+	UF     piigorm.EncryptedString `gorm:"type:bytea"`
 	// PhoneVerifiedAt separates a number that was typed from one that was
 	// proven. Only the second is worth anything.
 	PhoneVerifiedAt *time.Time

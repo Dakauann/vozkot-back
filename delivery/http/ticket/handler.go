@@ -37,7 +37,7 @@ func (h *Handler) Register(router *http.ServeMux) {
 }
 
 // @Summary		Listar ingressos
-// @Description	Lista os lotes de ingressos. Aceita filtro de status, busca por título ou descrição do lote, ordenação e paginação.
+// @Description	Lista os lotes de ingressos DO OPERADOR AUTENTICADO, incluindo rascunhos. Um administrador vê os de todos. Aceita filtro de status, busca por título ou descrição do lote, ordenação e paginação. O parâmetro `eventId` restringe a um evento; ele não amplia o escopo, que é sempre o do chamador.
 // @Tags			Ingressos
 // @Produce		json
 // @Security		BearerAuth
@@ -59,7 +59,7 @@ func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
 	}
 	offset := intQuery(query.Get("offset"), 0)
 
-	page, err := h.service.List(request.Context(), domain.Filter{
+	filter := domain.Filter{
 		Status: domain.Status(strings.TrimSpace(query.Get("status"))),
 		Query:  query.Get("q"),
 		// One event's tiers, which is what managing an event asks for. The
@@ -70,7 +70,8 @@ func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
 		Sort:    domain.Sort(strings.TrimSpace(query.Get("sort"))),
 		Limit:   limit,
 		Offset:  offset,
-	})
+	}
+	page, err := h.service.List(request.Context(), actor(request), filter)
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
@@ -110,7 +111,14 @@ func (h *Handler) create(response http.ResponseWriter, request *http.Request) {
 	item, err := h.service.Create(request.Context(), usecase.CreateInput{
 		// The owner comes from the session, never from the body: a client that
 		// could name the owner could create listings in someone else's name.
-		OwnerID:     claims.UserID,
+		OwnerID: claims.UserID,
+		// The event DOES come from the body. It was missing here, and the
+		// symptom was total: every tier creation answered 422 "a ticket tier
+		// must belong to an event" while the client was sending a perfectly
+		// good one, because the field was read off the request and then never
+		// passed on. The usecase tests all construct CreateInput directly, so
+		// nothing in the suite crossed this line.
+		EventID:     body.EventID,
 		Title:       body.Title,
 		Description: body.Description,
 		PriceCents:  body.PriceCents,
@@ -136,7 +144,7 @@ func (h *Handler) create(response http.ResponseWriter, request *http.Request) {
 // @Failure		404 {object} ErrorResponse
 // @Router		/api/v1/tickets/{id} [get]
 func (h *Handler) get(response http.ResponseWriter, request *http.Request) {
-	item, err := h.service.Get(request.Context(), strings.TrimSpace(request.PathValue("id")))
+	item, err := h.service.Get(request.Context(), actor(request), ticketID(request))
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
@@ -164,7 +172,7 @@ func (h *Handler) update(response http.ResponseWriter, request *http.Request) {
 		httpx.WriteError(response, http.StatusBadRequest, err)
 		return
 	}
-	item, err := h.service.Update(request.Context(), strings.TrimSpace(request.PathValue("id")), usecase.UpdateInput{
+	item, err := h.service.Update(request.Context(), actor(request), ticketID(request), usecase.UpdateInput{
 		Title:       body.Title,
 		Description: body.Description,
 		PriceCents:  body.PriceCents,
@@ -189,7 +197,7 @@ func (h *Handler) update(response http.ResponseWriter, request *http.Request) {
 // @Failure		404 {object} ErrorResponse
 // @Router		/api/v1/tickets/{id} [delete]
 func (h *Handler) delete(response http.ResponseWriter, request *http.Request) {
-	if err := h.service.Delete(request.Context(), strings.TrimSpace(request.PathValue("id"))); err != nil {
+	if err := h.service.Delete(request.Context(), actor(request), ticketID(request)); err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
 	}
@@ -216,12 +224,25 @@ func (h *Handler) changeStatus(response http.ResponseWriter, request *http.Reque
 		httpx.WriteError(response, http.StatusBadRequest, err)
 		return
 	}
-	item, err := h.service.ChangeStatus(request.Context(), strings.TrimSpace(request.PathValue("id")), domain.Status(body.Status))
+	item, err := h.service.ChangeStatus(request.Context(), actor(request), ticketID(request), domain.Status(body.Status))
 	if err != nil {
 		httpx.WriteError(response, statusFor(err), err)
 		return
 	}
 	httpx.WriteJSON(response, http.StatusOK, TicketEnvelope{Data: toTicketResponse(item)})
+}
+
+// actor is who is asking, as the use case needs it.
+//
+// The whole of this package's involvement in authorisation: translate the
+// session into a value and pass it down. Deciding anything here would put the
+// rule in the one layer a CLI or a job never goes through.
+func actor(request *http.Request) authdomain.Actor {
+	return authdomain.ActorFromContext(request.Context())
+}
+
+func ticketID(request *http.Request) string {
+	return strings.TrimSpace(request.PathValue("id"))
 }
 
 func intQuery(raw string, fallback int) int {
@@ -236,6 +257,10 @@ func intQuery(raw string, fallback int) int {
 // the use cases return plain errors and stay unaware that HTTP exists.
 func statusFor(err error) int {
 	switch {
+	case errors.Is(err, authdomain.ErrUnauthorized):
+		return http.StatusUnauthorized
+	case errors.Is(err, authdomain.ErrForbidden):
+		return http.StatusForbidden
 	case errors.Is(err, domain.ErrNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, domain.ErrHasOrders):

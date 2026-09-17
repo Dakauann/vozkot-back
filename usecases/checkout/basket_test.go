@@ -94,9 +94,13 @@ func newBasketWithLimits(t *testing.T, pistaStock, camaroteStock int, limits ord
 	})
 
 	return &basket{
-		db:      db,
-		service: NewService(uow.NewRunner(db), orders, tickets, queueUsecase.NewDispatcher(nil), 30*time.Minute, 10*time.Minute, limits),
-		orders:  orders, tickets: tickets, jobs: jobs,
+		db: db,
+		service: NewService(uow.NewRunner(db), orders, tickets, nil, queueUsecase.NewDispatcher(nil), Settings{
+			HoldFor:     30 * time.Minute,
+			CartHoldFor: 10 * time.Minute,
+			HoldLimits:  limits,
+		}),
+		orders: orders, tickets: tickets, jobs: jobs,
 		ownerID: ownerID, eventID: eventID,
 		pista: pista, camarote: camarote, elsewhere: elsewhere,
 	}

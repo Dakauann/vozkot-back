@@ -9,6 +9,7 @@ import (
 
 	domain "vozkot/domain/order"
 	"vozkot/domain/payment"
+	seatingdomain "vozkot/domain/seating"
 	"vozkot/infra/database/schema"
 
 	"gorm.io/gorm"
@@ -370,6 +371,15 @@ func (r *OrderRepository) attachItems(ctx context.Context, orders []*domain.Orde
 			Quantity:       record.Quantity,
 			UnitPriceCents: record.UnitPriceCents,
 			TotalCents:     record.TotalCents,
+			UnitFeeCents:   record.UnitFeeCents,
+			FeeCents:       record.FeeCents,
+			SeatID:         seatIDOf(record.SeatID),
+			Seat: seatingdomain.Label{
+				Section: record.SeatSection,
+				Row:     record.SeatRow,
+				Seat:    record.SeatLabel,
+			},
+			SeatKind: seatingdomain.SeatKind(record.SeatKind),
 		})
 	}
 	for _, item := range orders {
@@ -410,6 +420,24 @@ func applyFilter(query *gorm.DB, filter domain.Filter) *gorm.DB {
 	if filter.Status != "" {
 		query = query.Where("status = ?", string(filter.Status))
 	}
+	if len(filter.Statuses) > 0 {
+		values := make([]string, 0, len(filter.Statuses))
+		for _, status := range filter.Statuses {
+			// Trimmed HERE, not only where the query string was parsed. This is
+			// the layer that builds the SQL, and a blank that reaches it
+			// becomes `IN ('')`, which matches nothing and tells a buyer they
+			// have no orders at all. It must not depend on a caller upstream
+			// having tidied the value first.
+			if trimmed := strings.TrimSpace(string(status)); trimmed != "" {
+				values = append(values, trimmed)
+			}
+		}
+		// Only when something survived. A caller who passed nothing but blanks
+		// asked for no constraint, not for no results.
+		if len(values) > 0 {
+			query = query.Where("status IN ?", values)
+		}
+	}
 	if !filter.EventNotBefore.IsZero() {
 		// Straight to the event the order names. It used to have to go through
 		// the tier, because the order only knew a price; it now knows the
@@ -442,23 +470,48 @@ func toSchema(item *domain.Order) schema.Order {
 		BuyerName:       item.BuyerName,
 		BuyerEmail:      item.BuyerEmail,
 		BuyerDocument:   item.BuyerDocument,
+		BuyerGender:     item.BuyerGender,
+		BuyerAgeYears:   item.BuyerAgeYears,
+		BuyerCity:       item.BuyerCity,
+		BuyerUF:         item.BuyerUF,
+		SubtotalCents:   item.SubtotalCents,
+		ServiceFeeCents: item.BuyerFeeCents,
 		TotalCents:      item.TotalCents,
 		Currency:        item.Currency,
-		Status:          string(item.Status),
-		HoldExpiresAt:   item.HoldExpiresAt,
-		Confirmed:       item.Confirmed,
-		PaymentProvider: string(item.PaymentProvider),
-		PaymentID:       item.PaymentID,
-		PaymentStatus:   string(item.PaymentStatus),
-		PaymentMethod:   string(item.PaymentMethod),
-		PixCopyPaste:    item.PixCopyPaste,
-		PixQRCodeBase64: item.PixQRCodeBase64,
-		IdempotencyKey:  key,
-		PaidAt:          item.PaidAt,
-		ClosedAt:        item.ClosedAt,
-		CreatedAt:       item.CreatedAt,
-		UpdatedAt:       item.UpdatedAt,
+
+		RefundPolicyVersion: item.RefundPolicyVersion,
+		Status:              string(item.Status),
+		HoldExpiresAt:       item.HoldExpiresAt,
+		Confirmed:           item.Confirmed,
+		PaymentProvider:     string(item.PaymentProvider),
+		PaymentID:           item.PaymentID,
+		PaymentStatus:       string(item.PaymentStatus),
+		PaymentMethod:       string(item.PaymentMethod),
+		PixCopyPaste:        item.PixCopyPaste,
+		PixQRCodeBase64:     item.PixQRCodeBase64,
+		IdempotencyKey:      key,
+		PaidAt:              item.PaidAt,
+		ClosedAt:            item.ClosedAt,
+		CreatedAt:           item.CreatedAt,
+		UpdatedAt:           item.UpdatedAt,
 	}
+}
+
+// seatIDColumn maps an empty seat id to SQL NULL; see OrderItem.SeatID.
+func seatIDColumn(seatID string) *string {
+	trimmed := strings.TrimSpace(seatID)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+// seatIDOf is the read direction of seatIDColumn.
+func seatIDOf(seatID *string) string {
+	if seatID == nil {
+		return ""
+	}
+	return *seatID
 }
 
 func itemsToSchema(item *domain.Order) []schema.OrderItem {
@@ -472,7 +525,17 @@ func itemsToSchema(item *domain.Order) []schema.OrderItem {
 			Quantity:       line.Quantity,
 			UnitPriceCents: line.UnitPriceCents,
 			TotalCents:     line.TotalCents,
-			CreatedAt:      item.CreatedAt,
+			UnitFeeCents:   line.UnitFeeCents,
+			FeeCents:       line.FeeCents,
+			// NULL and not "" for a counted line: the partial unique indexes
+			// on this table tell the two kinds of line apart by IS NULL, and an
+			// empty string would make every counted line collide with the next.
+			SeatID:      seatIDColumn(line.SeatID),
+			SeatSection: line.Seat.Section,
+			SeatRow:     line.Seat.Row,
+			SeatLabel:   line.Seat.Seat,
+			SeatKind:    string(line.SeatKind),
+			CreatedAt:   item.CreatedAt,
 		})
 	}
 	return lines
@@ -484,27 +547,35 @@ func toDomain(record *schema.Order) *domain.Order {
 		key = *record.IdempotencyKey
 	}
 	return &domain.Order{
-		ID:              record.ID,
-		EventID:         record.EventID,
-		BuyerID:         record.BuyerID,
-		BuyerName:       record.BuyerName,
-		BuyerEmail:      record.BuyerEmail,
-		BuyerDocument:   record.BuyerDocument,
-		TotalCents:      record.TotalCents,
-		Currency:        record.Currency,
-		Status:          domain.Status(record.Status),
-		HoldExpiresAt:   record.HoldExpiresAt,
-		Confirmed:       record.Confirmed,
-		PaymentProvider: payment.Provider(record.PaymentProvider),
-		PaymentID:       record.PaymentID,
-		PaymentStatus:   payment.Status(record.PaymentStatus),
-		PaymentMethod:   payment.Method(record.PaymentMethod),
-		PixCopyPaste:    record.PixCopyPaste,
-		PixQRCodeBase64: record.PixQRCodeBase64,
-		IdempotencyKey:  key,
-		PaidAt:          record.PaidAt,
-		ClosedAt:        record.ClosedAt,
-		CreatedAt:       record.CreatedAt,
-		UpdatedAt:       record.UpdatedAt,
+		ID:            record.ID,
+		EventID:       record.EventID,
+		BuyerID:       record.BuyerID,
+		BuyerName:     record.BuyerName,
+		BuyerEmail:    record.BuyerEmail,
+		BuyerDocument: record.BuyerDocument,
+		BuyerGender:   record.BuyerGender,
+		BuyerAgeYears: record.BuyerAgeYears,
+		BuyerCity:     record.BuyerCity,
+		BuyerUF:       record.BuyerUF,
+		SubtotalCents: record.SubtotalCents,
+		BuyerFeeCents: record.ServiceFeeCents,
+		TotalCents:    record.TotalCents,
+		Currency:      record.Currency,
+
+		RefundPolicyVersion: record.RefundPolicyVersion,
+		Status:              domain.Status(record.Status),
+		HoldExpiresAt:       record.HoldExpiresAt,
+		Confirmed:           record.Confirmed,
+		PaymentProvider:     payment.Provider(record.PaymentProvider),
+		PaymentID:           record.PaymentID,
+		PaymentStatus:       payment.Status(record.PaymentStatus),
+		PaymentMethod:       payment.Method(record.PaymentMethod),
+		PixCopyPaste:        record.PixCopyPaste,
+		PixQRCodeBase64:     record.PixQRCodeBase64,
+		IdempotencyKey:      key,
+		PaidAt:              record.PaidAt,
+		ClosedAt:            record.ClosedAt,
+		CreatedAt:           record.CreatedAt,
+		UpdatedAt:           record.UpdatedAt,
 	}
 }

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	authdomain "vozkot/domain/auth"
 	orderdomain "vozkot/domain/order"
 	queuedomain "vozkot/domain/queue"
+	userdomain "vozkot/domain/user"
 	"vozkot/infra/mercadopago"
 )
 
@@ -147,7 +149,7 @@ func TestRequestRefundSchedulesInsteadOfCalling(t *testing.T) {
 	h := newHarness(t, 20)
 	item := h.paid(t, 2)
 
-	returned, err := h.service.RequestRefund(context.Background(), item.ID)
+	returned, err := h.service.RequestRefund(context.Background(), authdomain.Actor{ID: "usr_ops", Role: userdomain.RoleAdmin}, item.ID)
 
 	if err != nil {
 		t.Fatalf("RequestRefund() error = %v", err)
@@ -171,7 +173,7 @@ func TestPressingRefundTwiceRefundsOnce(t *testing.T) {
 	item := h.paid(t, 1)
 
 	for round := 0; round < 3; round++ {
-		if _, err := h.service.RequestRefund(context.Background(), item.ID); err != nil {
+		if _, err := h.service.RequestRefund(context.Background(), authdomain.Actor{ID: "usr_ops", Role: userdomain.RoleAdmin}, item.ID); err != nil {
 			t.Fatalf("RequestRefund() round %d error = %v", round, err)
 		}
 	}
@@ -223,7 +225,7 @@ func TestRefundingAnUnpaidOrderIsRefusedImmediately(t *testing.T) {
 	h := newHarness(t, 20)
 	item := h.pendingOrder(t, 1)
 
-	_, err := h.service.RequestRefund(context.Background(), item.ID)
+	_, err := h.service.RequestRefund(context.Background(), authdomain.Actor{ID: "usr_ops", Role: userdomain.RoleAdmin}, item.ID)
 
 	if !errors.Is(err, ErrNotRefundable) {
 		t.Fatalf("RequestRefund() error = %v, want %v", err, ErrNotRefundable)
@@ -236,7 +238,7 @@ func TestRefundingAnUnpaidOrderIsRefusedImmediately(t *testing.T) {
 func TestRefundingAnUnknownOrderIsRefusedImmediately(t *testing.T) {
 	h := newHarness(t, 20)
 
-	_, err := h.service.RequestRefund(context.Background(), "ord_does_not_exist")
+	_, err := h.service.RequestRefund(context.Background(), authdomain.Actor{ID: "usr_ops", Role: userdomain.RoleAdmin}, "ord_does_not_exist")
 
 	if !errors.Is(err, orderdomain.ErrNotFound) {
 		t.Fatalf("RequestRefund() error = %v, want %v", err, orderdomain.ErrNotFound)
@@ -266,7 +268,7 @@ func TestARefundRequiredOrderCanStillBeRefunded(t *testing.T) {
 		t.Fatalf("set refund_required: %v", err)
 	}
 
-	if _, err := h.service.RequestRefund(context.Background(), item.ID); err != nil {
+	if _, err := h.service.RequestRefund(context.Background(), authdomain.Actor{ID: "usr_ops", Role: userdomain.RoleAdmin}, item.ID); err != nil {
 		t.Fatalf("RequestRefund() error = %v, want an order owing a refund to be refundable", err)
 	}
 	if got := h.openJobs(t, queuedomain.TypeRefundCharge, item.ID); got != 1 {

@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	authdomain "vozkot/domain/auth"
 	domainevent "vozkot/domain/event"
 	"vozkot/domain/media"
 	"vozkot/domain/ticket"
+	userdomain "vozkot/domain/user"
 	"vozkot/infra/config"
 	"vozkot/infra/geocoding"
 	"vozkot/infra/imaging"
@@ -171,7 +173,7 @@ func seedMockEvents(
 				}
 				coverData[draft.CoverPath] = data
 			}
-			if _, err := events.AttachMedia(ctx, item.ID, media.Upload{
+			if _, err := events.AttachMedia(ctx, seedActor(ownerID), item.ID, media.Upload{
 				FileName:    strings.TrimPrefix(draft.CoverPath, "assets/events/"),
 				ContentType: "image/png",
 				Data:        data,
@@ -303,6 +305,17 @@ func mockTiers(category mockCategory, eventIndex int) []mockTier {
 	}
 }
 
+// seedActor is the identity the seeder acts under: the owner of the events it
+// is seeding, and deliberately NOT an administrator.
+//
+// The seeder is the caller that proves the ownership check belongs in the use
+// case rather than in the HTTP handler — it never touches one. Giving it an
+// operator actor would have let it edit anybody's tiers, so it gets exactly the
+// rights of the account it is seeding for.
+func seedActor(ownerID string) authdomain.Actor {
+	return authdomain.Actor{ID: ownerID, Role: userdomain.RoleUser}
+}
+
 func reconcileMockTiers(
 	ctx context.Context,
 	service *ticketusecase.Service,
@@ -316,7 +329,7 @@ func reconcileMockTiers(
 	// migrate only when it is the event's sole tier and carries one of those
 	// exact seed titles; operator-created tiers are otherwise left alone.
 	if len(existing) == 1 && isLegacyMockTier(existing[0].Title) && !hasDesiredTitle(desired, existing[0].Title) {
-		updated, err := service.Update(ctx, existing[0].ID, ticketusecase.UpdateInput{
+		updated, err := service.Update(ctx, seedActor(ownerID), existing[0].ID, ticketusecase.UpdateInput{
 			Title:       desired[0].Title,
 			Description: desired[0].Description,
 			PriceCents:  desired[0].PriceCents,
@@ -358,7 +371,7 @@ func reconcileMockTiers(
 			summary.TiersSkipped++
 			continue
 		}
-		if _, err := service.Update(ctx, current.ID, ticketusecase.UpdateInput{
+		if _, err := service.Update(ctx, seedActor(ownerID), current.ID, ticketusecase.UpdateInput{
 			Title:       wanted.Title,
 			Description: wanted.Description,
 			PriceCents:  wanted.PriceCents,

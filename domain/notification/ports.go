@@ -39,6 +39,29 @@ type Message struct {
 	// twice. It is the same key the job was deduplicated on, which is what
 	// makes the two layers agree on what "the same message" means.
 	IdempotencyKey string
+	// Inline are images the body references by content id.
+	//
+	// A ticket has to carry a QR into an inbox, and there are only two ways to
+	// do that. A data: URI does not work — Gmail strips it out of an img src,
+	// so the buyer sees a broken image where their ticket should be. A hosted
+	// URL works but puts the code into Google's image proxy and its cache. So
+	// the image travels WITH the message, as a multipart/related part the body
+	// points at with cid:, which is what every airline boarding pass does.
+	//
+	// Adapters for channels that cannot carry an attachment ignore this; the
+	// body is written so that dropping the image still leaves a usable message,
+	// because the printed code is in the text beside it.
+	Inline []Inline
+}
+
+// Inline is one image carried inside the message.
+type Inline struct {
+	// ContentID is what the body references: <img src="cid:THIS">.
+	ContentID string
+	Filename  string
+	// ContentType is the media type, for example image/png.
+	ContentType string
+	Content     []byte
 }
 
 // Sender delivers messages over exactly one channel.

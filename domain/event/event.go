@@ -19,15 +19,54 @@ package event
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
 
+	"vozkot/domain/auth"
 	"vozkot/domain/media"
 )
 
 // Status is where an event stands in its own life, independent of whether any
 // particular tier still has stock.
+// SalesMode is how an event sells: by the number, or by the chair.
+//
+// It is the organiser's DECLARATION, and deliberately not the authority on
+// anything. Whether a night actually has seats is answered by the seats
+// themselves, and that has to stay the single answer — two sources of truth
+// about what is on sale is how a room gets sold twice.
+//
+// It exists because the interface has to know before any of that is decidable.
+// Binding a plan needs an event that already exists and tiers to price the
+// sectors with, so a create form cannot do it; but a create form can ASK, and
+// without the answer every screen afterwards has to guess where to send
+// somebody. It guessed wrong: an organiser could create an event and three
+// tiers without the product mentioning seating once.
+type SalesMode string
+
+const (
+	// SalesCounted is stock measured as a number: a party, a pista, a festival.
+	// The tier's own quantity is the whole inventory. The default, because most
+	// events are this and a default that matches the majority is a question
+	// most people never have to think about.
+	SalesCounted SalesMode = "counted"
+	// SalesSeated is stock with an identity — fila K, poltrona 12. A theatre, a
+	// rodeo, an arena, a circus.
+	SalesSeated SalesMode = "seated"
+)
+
+// Seated reports whether this event is meant to sell named chairs.
+func (m SalesMode) Seated() bool { return m == SalesSeated }
+
+func (m SalesMode) Valid() bool {
+	switch m {
+	case SalesCounted, SalesSeated, "":
+		return true
+	}
+	return false
+}
+
 type Status string
 
 const (
@@ -136,6 +175,7 @@ var (
 	ErrInvalidStartsAt  = errors.New("event start is required")
 	ErrEndsBeforeStarts = errors.New("event cannot end before it starts")
 	ErrInvalidStatus    = errors.New("event status is invalid")
+	ErrInvalidSalesMode = errors.New("event sales mode is invalid")
 	ErrInvalidLocation  = errors.New("latitude and longitude are outside the valid range")
 	// ErrHasTickets refuses to delete an event that still has tiers. The tiers
 	// may have orders against them, and those orders are the record of money
@@ -211,7 +251,10 @@ type Event struct {
 	EndsAt *time.Time
 
 	Status Status
-	Media  []media.Media
+	// SalesMode is how this event means to sell. See SalesMode: a declaration,
+	// not a fact about inventory.
+	SalesMode SalesMode
+	Media     []media.Media
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -227,6 +270,7 @@ type Draft struct {
 	StartsAt    time.Time
 	EndsAt      *time.Time
 	Status      Status
+	SalesMode   SalesMode
 }
 
 // New builds an event. It starts as a draft unless the caller asks otherwise,
@@ -242,6 +286,12 @@ func New(id, ownerID string, draft Draft, now time.Time) (*Event, error) {
 	if !normalized.Status.Valid() {
 		return nil, ErrInvalidStatus
 	}
+	if normalized.SalesMode == "" {
+		normalized.SalesMode = SalesCounted
+	}
+	if !normalized.SalesMode.Valid() {
+		return nil, ErrInvalidSalesMode
+	}
 
 	timestamp := now.UTC()
 	return &Event{
@@ -255,6 +305,7 @@ func New(id, ownerID string, draft Draft, now time.Time) (*Event, error) {
 		StartsAt:    normalized.StartsAt,
 		EndsAt:      normalized.EndsAt,
 		Status:      normalized.Status,
+		SalesMode:   normalized.SalesMode,
 		CreatedAt:   timestamp,
 		UpdatedAt:   timestamp,
 	}, nil
@@ -276,6 +327,15 @@ func (e *Event) Apply(draft Draft, now time.Time) error {
 	if !normalized.Status.Valid() {
 		return ErrInvalidStatus
 	}
+	// An edit that says nothing about the mode leaves it alone. It is a
+	// structural choice made once, and a form that omitted the field must not
+	// silently move a seated event back to selling by the number.
+	if normalized.SalesMode == "" {
+		normalized.SalesMode = e.SalesMode
+	}
+	if !normalized.SalesMode.Valid() {
+		return ErrInvalidSalesMode
+	}
 
 	e.Name = normalized.Name
 	e.Description = normalized.Description
@@ -284,6 +344,7 @@ func (e *Event) Apply(draft Draft, now time.Time) error {
 	e.StartsAt = normalized.StartsAt
 	e.EndsAt = normalized.EndsAt
 	e.Status = normalized.Status
+	e.SalesMode = normalized.SalesMode
 	e.UpdatedAt = now.UTC()
 	return nil
 }
@@ -369,4 +430,22 @@ var folding = map[rune]rune{
 func fold(char rune) (rune, bool) {
 	folded, ok := folding[char]
 	return folded, ok
+}
+
+// AuthorizeReach refuses an actor who may not act on this event.
+//
+// The composition every operator-facing use case needs — load the event, check
+// the caller against its owner — written once. Three use cases ask this
+// question: the sales report, the refund inbox and the door. The RULE is
+// Actor.MayReach in domain/auth; this is the two lines around it, and having
+// them here is what keeps the refusal message and the semantics identical
+// wherever the question is asked.
+func (e *Event) AuthorizeReach(actor auth.Actor) error {
+	if e == nil {
+		return ErrNotFound
+	}
+	if !actor.MayReach(e.OwnerID) {
+		return fmt.Errorf("%w: this event belongs to another operator", auth.ErrForbidden)
+	}
+	return nil
 }

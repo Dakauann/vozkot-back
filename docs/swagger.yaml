@@ -1,5 +1,158 @@
 basePath: /
 definitions:
+  admission.DoorEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/admission.DoorResponse'
+    type: object
+  admission.DoorResponse:
+    properties:
+      admittedCount:
+        example: 682
+        type: integer
+      remaining:
+        example: 318
+        type: integer
+    type: object
+  admission.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  admission.ScanEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/admission.ScanResponse'
+    type: object
+  admission.ScanRequest:
+    properties:
+      code:
+        description: |-
+          Code is whatever the scanner or the keyboard produced. It is normalised
+          and check-verified by the domain, so the grouped form, lower case and
+          the usual O-for-zero substitutions are all accepted.
+        example: 7QP5-2NFX-W78H
+        type: string
+    type: object
+  admission.ScanResponse:
+    properties:
+      admitted:
+        description: Admitted is the one boolean the screen needs to pick green or
+          red.
+        example: true
+        type: boolean
+      admittedAt:
+        description: |-
+          AdmittedAt is when the code was FIRST used, which is what the holder is
+          told when it is refused as already used.
+        example: "2026-09-16T21:14:03Z"
+        type: string
+      admittedCount:
+        example: 682
+        type: integer
+      orderReference:
+        example: A1B2C3D4
+        type: string
+      outcome:
+        description: |-
+          Outcome is the machine-readable verdict the client branches on:
+          admitted, already_admitted, void, wrong_event, not_paid, unknown,
+          malformed.
+        enum:
+        - admitted
+        - already_admitted
+        - void
+        - wrong_event
+        - not_paid
+        - unknown
+        - malformed
+        example: admitted
+        type: string
+      remaining:
+        description: |-
+          Remaining and Admitted counters keep the door's screen live without a
+          second request.
+        example: 318
+        type: integer
+      seat:
+        allOf:
+        - $ref: '#/definitions/admission.SeatResponse'
+        description: |-
+          Seat is the reserved chair, absent for general admission.
+
+          The most useful thing the door gains from reserved seating: somebody has
+          just been told they may come in, and the next thing they ask is where to
+          sit. Sent pre-formatted as well as in parts, so the screen and the email
+          cannot disagree about how a chair is named.
+      sequence:
+        description: Sequence and Total read as "2 de 3" on a group's tickets.
+        example: 2
+        type: integer
+      ticketTitle:
+        example: Pista
+        type: string
+    type: object
+  admission.SeatResponse:
+    properties:
+      label:
+        description: |-
+          Label is the whole thing, formatted once on the server.
+
+          The door, the wallet, the receipt and the confirmation email all have to
+          say the same thing about a chair somebody is standing in front of, and
+          four copies of that format string is four chances to disagree.
+        example: Plateia A · Fila K · Assento 12
+        type: string
+      row:
+        example: K
+        type: string
+      seat:
+        example: "12"
+        type: string
+      section:
+        example: Plateia A
+        type: string
+    type: object
+  admission.TicketListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/admission.TicketResponse'
+        type: array
+    type: object
+  admission.TicketResponse:
+    properties:
+      admittedAt:
+        type: string
+      code:
+        description: |-
+          Code is the printed, grouped form, and QRPayload is what a QR must
+          encode. Both are sent because the page draws both, and the client must
+          not have to know that one is the other with the hyphens removed.
+        example: 7QP5-2NFX-W78H
+        type: string
+      id:
+        example: adm_9f2c1d8a
+        type: string
+      qrPayload:
+        example: 7QP52NFXW78H
+        type: string
+      seat:
+        $ref: '#/definitions/admission.SeatResponse'
+      sequence:
+        example: 2
+        type: integer
+      status:
+        enum:
+        - issued
+        - admitted
+        - void
+        example: issued
+        type: string
+      ticketTitle:
+        example: Pista
+        type: string
+    type: object
   auth.AuthResponse:
     properties:
       accessToken:
@@ -46,6 +199,9 @@ definitions:
       birthDate:
         example: "1994-03-21"
         type: string
+      city:
+        example: Natal
+        type: string
       document:
         example: 529.982.247-25
         type: string
@@ -56,14 +212,34 @@ definitions:
         - passport
         example: cpf
         type: string
+      gender:
+        description: |-
+          Gender, City and UF are OPTIONAL and always will be. They exist so an
+          organiser can see who bought tickets to their event; a buyer who does not
+          want to answer must still be able to buy one, so an empty value is
+          accepted and stored as "não informado" rather than refused.
+        enum:
+        - female
+        - male
+        - non_binary
+        - other
+        - undisclosed
+        example: female
+        type: string
       legalName:
         example: Maria Souza
+        type: string
+      uf:
+        example: RN
         type: string
     type: object
   auth.ProfileResponse:
     properties:
       birthDate:
         example: "1994-03-21"
+        type: string
+      city:
+        example: Natal
         type: string
       complete:
         example: true
@@ -74,6 +250,13 @@ definitions:
       documentType:
         example: cpf
         type: string
+      gender:
+        description: |-
+          The optional demographics come back in full, unlike the document: they
+          identify nobody, and the form has to be able to show the buyer what it
+          already has so they are not asked the same question twice.
+        example: female
+        type: string
       legalName:
         example: Maria Souza
         type: string
@@ -83,6 +266,9 @@ definitions:
       phoneVerified:
         example: false
         type: boolean
+      uf:
+        example: RN
+        type: string
     type: object
   auth.RefreshTokenRequest:
     properties:
@@ -163,6 +349,18 @@ definitions:
       quantity:
         example: 2
         type: integer
+      seatIds:
+        description: |-
+          SeatIDs names the reserved chairs this line buys, for a seated event.
+
+          Its presence is what makes the line seated. Omit it and the line is
+          counted stock, which is every line of a general-admission event and the
+          common case. Send it and Quantity is derived from it: a mismatch is
+          refused rather than resolved, since either number could be the one the
+          buyer meant.
+        items:
+          type: string
+        type: array
       ticketId:
         example: tkt_a1b2c3d4
         type: string
@@ -199,6 +397,12 @@ definitions:
       quantity:
         example: 2
         type: integer
+      seatIds:
+        description: SeatIDs is the single-tier shorthand's seats, for a reserved
+          event.
+        items:
+          type: string
+        type: array
       ticketId:
         description: |-
           TicketID and Quantity are the single-tier shorthand, kept because an
@@ -219,6 +423,9 @@ definitions:
     type: object
   checkout.ErrorResponse:
     properties:
+      code:
+        example: insufficient_stock
+        type: string
       error:
         example: not enough tickets available
         type: string
@@ -255,6 +462,9 @@ definitions:
     type: object
   checkout.OrderItemResponse:
     properties:
+      feeCents:
+        example: 4800
+        type: integer
       quantity:
         example: 2
         type: integer
@@ -267,7 +477,15 @@ definitions:
       totalCents:
         example: 48000
         type: integer
+      unitFeeCents:
+        example: 2400
+        type: integer
       unitPriceCents:
+        description: |-
+          UnitPriceCents and TotalCents are the FACE value: what the organiser
+          charges for one ticket, and for this line. The fee fields are the service
+          charge on top, so what the buyer paid for this line is totalCents +
+          feeCents.
         example: 24000
         type: integer
     type: object
@@ -336,6 +554,20 @@ definitions:
           headline number does not have to add them up.
         example: 3
         type: integer
+      refund:
+        allOf:
+        - $ref: '#/definitions/checkout.RefundStateResponse'
+        description: |-
+          Refund is the cancellation state of this order: whether the buyer may
+          still ask for their money back, until when, and the request already in
+          flight if there is one.
+
+          Attached to a LISTING as well as to a single order, resolved in one query
+          for the whole page, so an order history can draw its buttons without
+          asking per row.
+      serviceFeeCents:
+        example: 4800
+        type: integer
       status:
         enum:
         - pending_payment
@@ -347,8 +579,20 @@ definitions:
         - refund_required
         example: pending_payment
         type: string
-      totalCents:
+      subtotalCents:
+        description: |-
+          SubtotalCents is the tickets, ServiceFeeCents is the charge on top, and
+          TotalCents is what the buyer pays — always the sum of the two.
+
+          All three are sent rather than just the total, because a checkout screen
+          that shows a number larger than the prices the buyer just chose, with no
+          line explaining the difference, is the single largest cause of abandoned
+          carts. The client cannot derive the split from a rate: the rate is not
+          sent, deliberately, because an old order was charged an old one.
         example: 48000
+        type: integer
+      totalCents:
+        example: 52800
         type: integer
       updatedAt:
         type: string
@@ -386,6 +630,34 @@ definitions:
         example: pending
         type: string
     type: object
+  checkout.RefundStateResponse:
+    properties:
+      refusal:
+        description: |-
+          Refusal names why not: window_closed, too_close_to_event, not_paid,
+          already_refunded, event_passed, request_open.
+        example: window_closed
+        type: string
+      requestId:
+        description: RequestID is the request already open on this order, if any.
+        example: rfr_9f2c1d8a
+        type: string
+      requestable:
+        description: Requestable is whether the buyer may open a request RIGHT NOW.
+        example: true
+        type: boolean
+      status:
+        description: |-
+          Status is the in-flight request's state — pending, approved or rejected —
+          absent when there is no request.
+        example: pending
+        type: string
+      until:
+        description: |-
+          Until is the deadline for the right of withdrawal, so the order page can
+          say "você pode cancelar até 12/07" instead of "soon".
+        type: string
+    type: object
   event.CategoryResponse:
     properties:
       count:
@@ -419,6 +691,19 @@ definitions:
         $ref: '#/definitions/event.LocationRequest'
       name:
         example: Festival Aurora
+        type: string
+      salesMode:
+        description: |-
+          SalesMode is how this event sells: `counted` by the number, the way a
+          party does, or `seated` by the chair, with a row and a seat number. It is
+          a declaration and not a fact about inventory — the seats themselves
+          answer whether a night has any — but nothing else can be derived from an
+          event that has no tiers yet, and the interface has to know which question
+          to ask next. Empty means counted.
+        enum:
+        - counted
+        - seated
+        example: counted
         type: string
       startsAt:
         example: "2026-11-15T22:00:00-03:00"
@@ -461,6 +746,11 @@ definitions:
           $ref: '#/definitions/event.MediaResponse'
         type: array
       name:
+        type: string
+      salesMode:
+        enum:
+        - counted
+        - seated
         type: string
       slug:
         example: festival-aurora
@@ -528,6 +818,11 @@ definitions:
           $ref: '#/definitions/event.MediaResponse'
         type: array
       name:
+        type: string
+      salesMode:
+        enum:
+        - counted
+        - seated
         type: string
       slug:
         example: festival-aurora
@@ -651,10 +946,19 @@ definitions:
         type: string
       eventId:
         type: string
+      feeCents:
+        type: integer
       id:
         type: string
       priceCents:
-        description: Centavos. No float ever touches a price.
+        description: |-
+          Centavos. No float ever touches a price.
+
+          PriceCents is the FACE value the organiser set. FeeCents is the service
+          charge added on top of one ticket, and TotalCents is what the buyer will
+          actually pay for it — the number that has to appear on the event page,
+          because a total that first shows up at the last step of checkout is the
+          single largest cause of an abandoned cart.
         type: integer
       quantity:
         type: integer
@@ -664,6 +968,8 @@ definitions:
         type: string
       title:
         type: string
+      totalCents:
+        type: integer
     type: object
   event.UpdateRequest:
     properties:
@@ -679,6 +985,19 @@ definitions:
       name:
         example: Festival Aurora
         type: string
+      salesMode:
+        description: |-
+          SalesMode is how this event sells: `counted` by the number, the way a
+          party does, or `seated` by the chair, with a row and a seat number. It is
+          a declaration and not a fact about inventory — the seats themselves
+          answer whether a night has any — but nothing else can be derived from an
+          event that has no tiers yet, and the interface has to know which question
+          to ask next. Empty means counted.
+        enum:
+        - counted
+        - seated
+        example: counted
+        type: string
       startsAt:
         example: "2026-11-15T22:00:00-03:00"
         type: string
@@ -688,6 +1007,837 @@ definitions:
         - published
         - cancelled
         example: draft
+        type: string
+    type: object
+  refund.DecisionBody:
+    properties:
+      note:
+        example: Reembolso autorizado
+        type: string
+    type: object
+  refund.EligibilityResponse:
+    properties:
+      allowed:
+        example: true
+        type: boolean
+      amountCents:
+        description: |-
+          AmountCents is what would come back to the BUYER and FeeCents how much of
+          it is our commission. Both are pointers and both are OMITTED for an
+          organiser: see SeesPlatformShare in usecases/refund.
+
+          Omitted rather than zeroed. A zero here would render as "R$ 0,00 comes
+          back", which is worse than saying nothing.
+        example: 11000
+        type: integer
+      feeCents:
+        example: 1000
+        type: integer
+      organiserCents:
+        description: |-
+          OrganiserCents is the part of the refund that comes out of the
+          organiser's revenue. Always sent, to everyone.
+        example: 10000
+        type: integer
+      refundsFees:
+        description: |-
+          RefundsFees says the fee is included. Rendered beside the amount because
+          "R$ 110,00, taxa incluída" is the sentence that prevents the dispute.
+        example: true
+        type: boolean
+      refusal:
+        description: |-
+          Refusal is the stable name of the reason, for a client to branch on:
+          window_closed, too_close_to_event, not_paid, already_refunded,
+          event_passed, request_open.
+        example: too_close_to_event
+        type: string
+      request:
+        allOf:
+        - $ref: '#/definitions/refund.Response'
+        description: Request is the one already in flight, when there is one.
+      until:
+        description: |-
+          Until is when the right to cancel expires, so the page can render a real
+          date instead of "soon". Absent for grounds that have no deadline.
+        type: string
+    type: object
+  refund.Envelope:
+    properties:
+      data:
+        $ref: '#/definitions/refund.Response'
+    type: object
+  refund.ErrorResponse:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+    type: object
+  refund.ListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/refund.Response'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  refund.RequestBody:
+    properties:
+      note:
+        example: Não vou conseguir ir
+        type: string
+      reason:
+        description: |-
+          Reason is the grounds. A buyer may send buyer_withdrawal or
+          event_cancelled and nothing else; the other two are refused for them,
+          because they are the grounds with no window.
+        enum:
+        - buyer_withdrawal
+        - event_cancelled
+        - organiser_goodwill
+        example: buyer_withdrawal
+        type: string
+    type: object
+  refund.Response:
+    properties:
+      amountCents:
+        description: |-
+          AmountCents is what goes back to the BUYER and FeeCents how much of it is
+          our commission. Omitted for an organiser; see SeesPlatformShare.
+        example: 11000
+        type: integer
+      autoApproved:
+        description: |-
+          AutoApproved is true when the POLICY decided rather than a person, which
+          is what the screen shows instead of naming a reviewer.
+        example: true
+        type: boolean
+      createdAt:
+        type: string
+      decidedAt:
+        type: string
+      decidedBy:
+        type: string
+      decisionNote:
+        type: string
+      eventId:
+        example: evt_88
+        type: string
+      feeCents:
+        example: 1000
+        type: integer
+      id:
+        example: rfr_9f2c1d8a
+        type: string
+      note:
+        type: string
+      orderId:
+        example: ord_4a1b7c
+        type: string
+      organiserCents:
+        description: OrganiserCents is what comes out of the organiser's revenue.
+          Always sent.
+        example: 10000
+        type: integer
+      reason:
+        example: buyer_withdrawal
+        type: string
+      requestedBy:
+        example: usr_31
+        type: string
+      status:
+        description: |-
+          Status is pending, approved or rejected: where the DECISION stands.
+
+          Whether the money has actually arrived is a different question and is
+          answered by `orderStatus` below, which is the order's own. Two fields
+          rather than one combined status, because only one of them is stored and
+          the two therefore cannot disagree; a single "completed" written here
+          would be a second writer for a fact the settlement path already owns.
+        example: approved
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  report.AttendeeListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/report.AttendeeResponse'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  report.AttendeeResponse:
+    properties:
+      admittedCount:
+        description: AdmittedCount is how many of this line's Quantity tickets have
+          entered.
+        example: 2
+        type: integer
+      ageYears:
+        description: AgeYears is the buyer's age AT PURCHASE, 0 when not informed.
+        example: 31
+        type: integer
+      city:
+        example: Natal
+        type: string
+      documentMask:
+        example: 529***25
+        type: string
+      email:
+        example: maria@exemplo.com.br
+        type: string
+      gender:
+        example: female
+        type: string
+      name:
+        example: Maria Souza
+        type: string
+      netCents:
+        example: 48000
+        type: integer
+      orderId:
+        example: ord_4a1b7c
+        type: string
+      purchasedAt:
+        type: string
+      quantity:
+        example: 2
+        type: integer
+      status:
+        example: paid
+        type: string
+      ticketId:
+        example: tkt_9f
+        type: string
+      ticketTitle:
+        example: Pista
+        type: string
+      uf:
+        example: RN
+        type: string
+      unitPriceCents:
+        example: 24000
+        type: integer
+    type: object
+  report.DayResponse:
+    properties:
+      day:
+        description: Day is YYYY-MM-DD in UTC, the day the money LANDED.
+        example: "2026-07-26"
+        type: string
+      netCents:
+        example: 15920000
+        type: integer
+      orders:
+        example: 612
+        type: integer
+      tickets:
+        example: 1592
+        type: integer
+    type: object
+  report.ErrorResponse:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+    type: object
+  report.SalesEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/report.SalesResponse'
+    type: object
+  report.SalesResponse:
+    properties:
+      byAge:
+        items:
+          $ref: '#/definitions/report.SliceResponse'
+        type: array
+      byCity:
+        items:
+          $ref: '#/definitions/report.SliceResponse'
+        type: array
+      byDay:
+        items:
+          $ref: '#/definitions/report.DayResponse'
+        type: array
+      byGender:
+        items:
+          $ref: '#/definitions/report.SliceResponse'
+        type: array
+      byTier:
+        items:
+          $ref: '#/definitions/report.SliceResponse'
+        type: array
+      byUf:
+        items:
+          $ref: '#/definitions/report.SliceResponse'
+        type: array
+      eventId:
+        example: evt_88
+        type: string
+      totals:
+        $ref: '#/definitions/report.TotalsResponse'
+    type: object
+  report.SliceResponse:
+    properties:
+      key:
+        example: SP
+        type: string
+      label:
+        example: Pista
+        type: string
+      netCents:
+        description: |-
+          NetCents is the organiser's earnings for this slice. It is the only
+          money field here; see the money note in domain/report.
+        example: 9370000
+        type: integer
+      orders:
+        description: |-
+          Orders is how many purchases; Tickets is how many admissions. One order
+          for eight tickets is one buyer and eight seats, and a table showing only
+          one of them is wrong for half the decisions made from it.
+        example: 412
+        type: integer
+      tickets:
+        example: 937
+        type: integer
+    type: object
+  report.TotalsResponse:
+    properties:
+      buyers:
+        description: 'Buyers is DISTINCT accounts: how many PEOPLE, not how many purchases.'
+        example: 11902
+        type: integer
+      netCents:
+        description: |-
+          NetCents is what the organiser earned: the sum of the face values they
+          priced. RefundedCents is at face value too.
+
+          Neither the gross the buyer paid nor our commission is sent, and not
+          because they are filtered out here — the query never selects them. See
+          the money note in domain/report.
+        example: 357350000
+        type: integer
+      orders:
+        example: 12430
+        type: integer
+      refundedCents:
+        example: 2750000
+        type: integer
+      refundedOrders:
+        example: 87
+        type: integer
+      tickets:
+        example: 35735
+        type: integer
+    type: object
+  seating.AvailabilityEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/seating.AvailabilityResponse'
+        type: array
+    type: object
+  seating.AvailabilityResponse:
+    properties:
+      available:
+        type: integer
+      ticketId:
+        type: string
+      total:
+        type: integer
+    type: object
+  seating.BindRequest:
+    properties:
+      layoutId:
+        type: string
+      ticketBySection:
+        additionalProperties:
+          type: string
+        description: |-
+          TicketBySection prices each setor: the section id mapped to the tier its
+          seats sell at. A section left out is not sold at all, which is how a
+          balcony is closed for one night without editing the room.
+        type: object
+    type: object
+  seating.BlockRequest:
+    properties:
+      reason:
+        enum:
+        - house
+        - production
+        - broken
+        - distancing
+        example: broken
+        type: string
+      seatIds:
+        items:
+          type: string
+        type: array
+    type: object
+  seating.BlockResponse:
+    properties:
+      moved:
+        description: |-
+          Moved is how many seats actually changed, which can be fewer than asked:
+          a held or sold seat is never taken from the person holding it, and the
+          difference is what lets a screen say "3 de 4 bloqueados; um está vendido".
+        type: integer
+    type: object
+  seating.ComplianceResponse:
+    properties:
+      capacity:
+        type: integer
+      compliant:
+        type: boolean
+      haveCompanion:
+        type: integer
+      haveObese:
+        type: integer
+      haveReducedMobility:
+        type: integer
+      haveWheelchair:
+        type: integer
+      requiredObese:
+        type: integer
+      requiredReducedMobility:
+        type: integer
+      requiredWheelchair:
+        type: integer
+    type: object
+  seating.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  seating.GenerateRequest:
+    properties:
+      sections:
+        items:
+          $ref: '#/definitions/seating.SectionRequest'
+        type: array
+    type: object
+  seating.LayoutDetailEnvelope:
+    properties:
+      collisions:
+        description: |-
+          Collisions are the sections drawn on top of each other, by id.
+
+          Reported on a preview and REFUSED on a save, and computed by the same rule
+          both times. The preview has to be able to draw a collision — that is how
+          an organiser sees the one they are making — so the editor marks these and
+          disables its own save, and the server refuses the request regardless.
+        items:
+          type: string
+        type: array
+      compliance:
+        allOf:
+        - $ref: '#/definitions/seating.ComplianceResponse'
+        description: |-
+          Compliance is present on a PREVIEW, computed from the draft being drawn.
+
+          It travels with the preview rather than being fetched separately so the
+          number and the room on screen can never describe different things — which
+          they did: "against 0 places, the quotas are met" beside a 192-seat
+          sector, because the report came from the saved layout.
+      data:
+        $ref: '#/definitions/seating.LayoutResponse'
+      seats:
+        items:
+          $ref: '#/definitions/seating.SeatResponse'
+        type: array
+      sections:
+        items:
+          $ref: '#/definitions/seating.SectionResponse'
+        type: array
+      suggestedKinds:
+        additionalProperties:
+          type: string
+        description: |-
+          SuggestedKinds names chairs that would satisfy the quotas the room is
+          short of, keyed "FILA/ASSENTO". Present on a preview when something is
+          missing, so the studio can offer to apply it in one action instead of
+          telling the organiser to find them by hand.
+        type: object
+    type: object
+  seating.LayoutEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/seating.LayoutResponse'
+    type: object
+  seating.LayoutListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/seating.LayoutResponse'
+        type: array
+    type: object
+  seating.LayoutRequest:
+    properties:
+      name:
+        example: Configuração padrão
+        type: string
+      viewBoxHeight:
+        example: 800
+        type: integer
+      viewBoxWidth:
+        example: 1000
+        type: integer
+    type: object
+  seating.LayoutResponse:
+    properties:
+      frozen:
+        type: boolean
+      id:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+      venueId:
+        type: string
+      version:
+        type: integer
+      viewBoxHeight:
+        type: integer
+      viewBoxWidth:
+        type: integer
+    type: object
+  seating.MapEnvelope:
+    properties:
+      complete:
+        description: |-
+          Complete distinguishes a whole map from a delta, so a client knows
+          whether to replace its state or patch it.
+        type: boolean
+      data:
+        items:
+          $ref: '#/definitions/seating.MapSeatResponse'
+        type: array
+      markers:
+        description: |-
+          Markers are the room's scenery, sent with a complete map and omitted from
+          a delta: the stage does not move between two polls.
+        items:
+          $ref: '#/definitions/seating.MapMarkerResponse'
+        type: array
+      version:
+        description: Version is the cursor to send back as `since` on the next poll.
+        type: integer
+    type: object
+  seating.MapMarkerResponse:
+    properties:
+      height:
+        type: number
+      id:
+        type: string
+      kind:
+        enum:
+        - stage
+        - arena
+        type: string
+      name:
+        type: string
+      width:
+        type: number
+      x:
+        description: |-
+          X and Y are the marker's TOP-LEFT corner, in the same coordinate space as
+          the seats. Width and Height are its size.
+        type: number
+      "y":
+        type: number
+    type: object
+  seating.MapSeatResponse:
+    properties:
+      id:
+        type: string
+      kind:
+        type: string
+      row:
+        type: string
+      rowOrder:
+        type: integer
+      seat:
+        type: string
+      seatOrder:
+        type: integer
+      section:
+        type: string
+      status:
+        enum:
+        - available
+        - held
+        - sold
+        - blocked
+        type: string
+      ticketId:
+        type: string
+      x:
+        description: |-
+          X and Y are where the seat sits in the layout coordinate space. A picker
+          draws from these, which is what makes a rodeo stand render as an arc
+          around an arena rather than as a straight row.
+        type: number
+      "y":
+        type: number
+    type: object
+  seating.SeatResponse:
+    properties:
+      id:
+        type: string
+      kind:
+        type: string
+      row:
+        type: string
+      rowOrder:
+        type: integer
+      seat:
+        type: string
+      seatOrder:
+        type: integer
+      sectionId:
+        type: string
+      x:
+        type: number
+      "y":
+        type: number
+    type: object
+  seating.SeatingEnvelope:
+    properties:
+      eventId:
+        type: string
+      layoutId:
+        type: string
+      layoutVersion:
+        type: integer
+      seatCount:
+        type: integer
+    type: object
+  seating.SectionRequest:
+    properties:
+      capacity:
+        example: 0
+        type: integer
+      curve:
+        example: 0
+        type: number
+      definition:
+        description: |-
+          Definition is this same object as the editor described it, echoed back on
+          a read so a saved room can be reopened in the builder rather than only
+          looked at. Ignored on the way in: the server records what it received.
+        type: object
+      displayOrder:
+        example: 1
+        type: integer
+      firstRowLetter:
+        example: A
+        type: string
+      firstTable:
+        example: 1
+        type: integer
+      height:
+        example: 0
+        type: number
+      kind:
+        description: |-
+          Kind is what this object is. `stage` and `arena` hold no seats: they are
+          scenery a buyer orients by, placed and sized like anything else, which is
+          why they are sections and not a mode on the layout.
+        enum:
+        - seated
+        - standing
+        - booth
+        - stage
+        - arena
+        example: seated
+        type: string
+      name:
+        example: Plateia A
+        type: string
+      numbering:
+        enum:
+        - sequential
+        - odd_even
+        example: sequential
+        type: string
+      offsetX:
+        description: |-
+          OffsetX and OffsetY are the object's TOP-LEFT corner, and what the canvas
+          sets by dragging. Width and Height size a marker.
+        example: 0
+        type: number
+      offsetY:
+        example: 0
+        type: number
+      radius:
+        example: 160
+        type: number
+      rowGap:
+        example: 28
+        type: number
+      rowLabels:
+        enum:
+        - letters
+        - numbers
+        example: letters
+        type: string
+      rowShape:
+        description: |-
+          The row generator. Ignored for a standing or booth section, which lays
+          out no individual chairs.
+
+          `rowShape` and not `shape`: this section already has a `shape`, which is
+          the polygon painted behind it. This one is how the ROWS run.
+
+          `rowShape` chooses the geometry: `linear` is a theatre, rows along a line;
+          `arc` is a rodeo, a stadium or a gymnasium, rows as concentric arcs
+          around an arena in the middle.
+        enum:
+        - linear
+        - arc
+        example: linear
+        type: string
+      rows:
+        example: 12
+        type: integer
+      seatGap:
+        example: 24
+        type: number
+      seatKinds:
+        additionalProperties:
+          type: string
+        description: |-
+          SeatKinds marks individual chairs, keyed "FILA/ASSENTO" — "K/12".
+
+          This is where the accessibility seats the law requires get set, and the
+          compliance report reads what lands here.
+        type: object
+      seatPitch:
+        description: |-
+          Arc only. Radius is how far the first row sits from the centre of the
+          arena; startAngle and sweepAngle are degrees clockwise from the top of
+          the map, so a stand at twelve o clock starts at zero.
+
+          The block's PLACEMENT is not here. It belongs to the section above, which
+          is what the canvas drags; holding it in two places is one place too many.
+
+          SeatPitch holds the spacing along an arc, so rows gain seats as they get
+          longer. That is what a real stand does; a fixed count per row fans out.
+        example: 26
+        type: number
+      seatsPerRow:
+        example: 20
+        type: integer
+      seatsPerTable:
+        example: 8
+        type: integer
+      shape:
+        items:
+          type: number
+        type: array
+      skips:
+        items:
+          type: integer
+        type: array
+      startAngle:
+        example: 0
+        type: number
+      sweepAngle:
+        example: 90
+        type: number
+      tableGap:
+        example: 110
+        type: number
+      tableRadius:
+        example: 34
+        type: number
+      tables:
+        description: |-
+          Round tables instead of rows, when `tables` is set. A camarote at a
+          rodeo, a gala floor. Each table is a ring of seats and reads as its own
+          row, so four seats together resolves to four seats at one table.
+        example: 12
+        type: integer
+      tablesPerRow:
+        example: 4
+        type: integer
+      width:
+        example: 0
+        type: number
+    type: object
+  seating.SectionResponse:
+    properties:
+      capacity:
+        type: integer
+      definition:
+        description: |-
+          Definition is the editor form this block was generated from. It is what
+          makes a saved room editable instead of only viewable.
+        type: object
+      displayOrder:
+        type: integer
+      height:
+        type: number
+      id:
+        type: string
+      kind:
+        type: string
+      name:
+        type: string
+      offsetX:
+        type: number
+      offsetY:
+        type: number
+      shape:
+        items:
+          type: number
+        type: array
+      width:
+        type: number
+    type: object
+  seating.VenueEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/seating.VenueResponse'
+    type: object
+  seating.VenueListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/seating.VenueResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  seating.VenueRequest:
+    properties:
+      name:
+        example: Teatro Municipal
+        type: string
+    type: object
+  seating.VenueResponse:
+    properties:
+      capacity:
+        type: integer
+      id:
+        type: string
+      name:
         type: string
     type: object
   ticket.ChangeStatusRequest:
@@ -1052,6 +2202,157 @@ paths:
       summary: Atualizar um evento
       tags:
       - Eventos
+  /api/v1/events/{id}/attendees:
+    get:
+      description: 'A lista de participantes, uma linha por lote de cada pedido. Traz
+        nome, e-mail, o documento MASCARADO, e o que o comprador informou de sexo,
+        idade, cidade e estado. O documento completo, a data de nascimento e o telefone
+        nunca são devolvidos: o organizador precisa conferir quem chega na porta,
+        não se passar por ela. Por padrão lista apenas pedidos pagos; use `status=all`
+        para incluir os estornados.'
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Filtrar por lote
+        in: query
+        name: ticketId
+        type: string
+      - description: 'Situação do pedido (padrão: paid)'
+        enum:
+        - paid
+        - refunded
+        - all
+        in: query
+        name: status
+        type: string
+      - description: Buscar por nome ou e-mail
+        in: query
+        name: q
+        type: string
+      - description: Itens por página (padrão 50, máximo 200)
+        in: query
+        name: limit
+        type: integer
+      - description: Deslocamento da paginação
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/report.AttendeeListEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Listar quem comprou
+      tags:
+      - Relatórios
+  /api/v1/events/{id}/attendees.csv:
+    get:
+      description: Baixa a lista de participantes como uma planilha. Aceita os mesmos
+        filtros da listagem. O arquivo é UTF-8 com BOM e separado por ponto e vírgula,
+        que é o que o Excel em português abre corretamente sem nenhum passo de importação;
+        os valores vão em reais com vírgula decimal. As linhas são transmitidas em
+        lotes conforme são lidas, então exportar um estádio inteiro não carrega tudo
+        na memória.
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Filtrar por lote
+        in: query
+        name: ticketId
+        type: string
+      - description: 'Situação do pedido (padrão: paid)'
+        enum:
+        - paid
+        - refunded
+        - all
+        in: query
+        name: status
+        type: string
+      - description: Buscar por nome ou e-mail
+        in: query
+        name: q
+        type: string
+      produces:
+      - text/csv
+      responses:
+        "200":
+          description: CSV
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Exportar quem comprou (CSV)
+      tags:
+      - Relatórios
+  /api/v1/events/{id}/door:
+    get:
+      description: Quantos ingressos do evento já entraram e quantos ainda faltam.
+        É o número que a tela da portaria mostra. Restrito ao organizador do evento
+        e a administradores.
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admission.DoorEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Contadores da entrada
+      tags:
+      - Entrada
   /api/v1/events/{id}/media:
     post:
       consumes:
@@ -1163,6 +2464,295 @@ paths:
       summary: Publicar um evento
       tags:
       - Eventos
+  /api/v1/events/{id}/report:
+    get:
+      description: 'Os números do evento para o organizador: totais, e a divisão por
+        sexo, faixa etária, estado, cidade, lote e dia. Ninguém é identificado aqui
+        — são contagens sobre os dados que o comprador informou no cadastro, congelados
+        no momento da compra. Todo valor aqui é `netCents`: o que o organizador recebe,
+        ou seja, o valor de face que ele definiu. A taxa de serviço da plataforma
+        e o total pago pelo comprador não são retornados neste relatório. Restrito
+        ao organizador do evento e a administradores.'
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/report.SalesEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Relatório de vendas do evento
+      tags:
+      - Relatórios
+  /api/v1/events/{id}/scan:
+    post:
+      consumes:
+      - application/json
+      description: 'Lê um código de ingresso, por QR ou digitado, e o consome se for
+        válido. Cada código vale uma única entrada: a segunda leitura responde `already_admitted`
+        e informa quando a primeira ocorreu. Um código de outro evento responde `wrong_event`,
+        e um de pedido estornado responde `void`. Restrito ao organizador do evento
+        e a administradores.'
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Código lido
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admission.ScanRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admission.ScanEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Validar um ingresso na entrada
+      tags:
+      - Entrada
+  /api/v1/events/{id}/seating:
+    post:
+      consumes:
+      - application/json
+      description: 'Materializa os assentos de um evento a partir de uma planta publicada,
+        com um lote por setor. Recusado se o evento já tem mapa: um segundo cria cadeiras
+        duplicadas ou divergentes, e os dois são piores do que exigir que o operador
+        diga qual queria.'
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Planta e preços
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/seating.BindRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/seating.SeatingEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "409":
+          description: O evento já tem mapa de assentos
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Colocar planta à venda
+      tags:
+      - Assentos
+  /api/v1/events/{id}/seating/availability:
+    get:
+      description: Quantos assentos de cada lote estão livres, que é o número mostrado
+        acima de cada setor na escolha.
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.AvailabilityEnvelope'
+      summary: Disponibilidade por setor
+      tags:
+      - Assentos
+  /api/v1/events/{id}/seating/best:
+    get:
+      description: 'Escolhe a melhor sequência de assentos vizinhos que couber no
+        pedido. É o caminho principal e não um atalho: a maioria não quer estudar
+        um mapa, quer quatro lugares juntos, perto da frente, agora — e é também o
+        que dá a quem usa leitor de tela uma forma real de comprar. Devolve vazio
+        em vez de separar o grupo em fileiras diferentes.'
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Restringir a um lote
+        in: query
+        name: ticketId
+        type: string
+      - description: Quantos assentos
+        in: query
+        name: quantity
+        required: true
+        type: integer
+      - description: Pedir assentos acessíveis
+        in: query
+        name: accessible
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.MapEnvelope'
+      summary: Melhor disponível
+      tags:
+      - Assentos
+  /api/v1/events/{id}/seating/map:
+    get:
+      description: 'Os assentos de um evento e a situação de cada um. Com `since`,
+        devolve apenas o que mudou desde aquele cursor, que é o que torna barato consultar
+        durante uma venda movimentada. Público: um mapa é o que alguém olha antes
+        de ter conta.'
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Cursor devolvido na consulta anterior
+        in: query
+        name: since
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.MapEnvelope'
+      summary: Mapa de assentos
+      tags:
+      - Assentos
+  /api/v1/events/{id}/seats/block:
+    post:
+      consumes:
+      - application/json
+      description: 'Retira assentos da venda: cadeira quebrada, lugar da produção,
+        visão obstruída. Nunca toca um assento reservado ou vendido — bloquear não
+        cancela o ingresso de ninguém.'
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Assentos
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/seating.BlockRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.BlockResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Bloquear assentos
+      tags:
+      - Assentos
+  /api/v1/events/{id}/seats/unblock:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do evento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Assentos
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/seating.BlockRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.BlockResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Desbloquear assentos
+      tags:
+      - Assentos
   /api/v1/events/{id}/unpublish:
     post:
       parameters:
@@ -1183,23 +2773,217 @@ paths:
       summary: Despublicar um evento
       tags:
       - Eventos
+  /api/v1/layouts/{id}:
+    get:
+      description: A planta com seus setores e assentos, para o editor desenhar.
+      parameters:
+      - description: ID da planta
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.LayoutDetailEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Planta completa
+      tags:
+      - Assentos
+  /api/v1/layouts/{id}/compliance:
+    get:
+      description: 'Quantos espaços para cadeira de rodas, assentos de mobilidade
+        reduzida e assentos para obesos a planta deve ter pelo Decreto 5.296/2004
+        (art. 23, com a redação do Decreto 9.404/2018), e quantos ela tem. É um relatório,
+        não um bloqueio: a plataforma não sabe se uma sala específica é legalmente
+        casa de espetáculo, e a responsabilidade é do organizador — que precisa ver
+        o número.'
+      parameters:
+      - description: ID da planta
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.ComplianceResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Acessibilidade da planta
+      tags:
+      - Assentos
+  /api/v1/layouts/{id}/preview:
+    post:
+      consumes:
+      - application/json
+      description: 'Gera os assentos de um formulário e NÃO grava nada. É o que o
+        editor desenha enquanto o organizador digita, e usa o mesmo gerador que a
+        gravação vai usar — uma prévia construída por outro caminho é uma prévia que
+        pode mentir. Funciona também em planta congelada: olhar não é editar.'
+      parameters:
+      - description: ID da planta
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Setores
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/seating.GenerateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.LayoutDetailEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Prévia da planta
+      tags:
+      - Assentos
+  /api/v1/layouts/{id}/publish:
+    post:
+      description: Torna a planta vinculável a um evento.
+      parameters:
+      - description: ID da planta
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Publicar planta
+      tags:
+      - Assentos
+  /api/v1/layouts/{id}/sections:
+    put:
+      consumes:
+      - application/json
+      description: 'Substitui os setores e assentos de uma planta a partir de um formulário
+        de fileiras: quantas fileiras, quantos assentos, onde ficam os corredores,
+        qual a numeração. É o que descreve uma casa brasileira em uma requisição.
+        Recusado quando a planta já está em uso por um evento.'
+      parameters:
+      - description: ID da planta
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Setores
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/seating.GenerateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.LayoutDetailEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "409":
+          description: A planta está em uso
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Gerar assentos da planta
+      tags:
+      - Assentos
   /api/v1/orders:
     get:
       description: Lista os pedidos do comprador autenticado, do mais recente para
-        o mais antigo. Aceita filtro por status e por ingresso.
+        o mais antigo. Aceita filtro por status e por ingresso. O parâmetro status
+        pode ser repetido para filtrar por vários ao mesmo tempo.
       parameters:
-      - description: Status do pedido
-        enum:
-        - pending_payment
-        - paid
-        - expired
-        - cancelled
-        - failed
-        - refunded
-        - refund_required
+      - collectionFormat: multi
+        description: Status do pedido; pode ser repetido
         in: query
+        items:
+          enum:
+          - pending_payment
+          - paid
+          - expired
+          - cancelled
+          - failed
+          - refunded
+          - refund_required
+          type: string
         name: status
-        type: string
+        type: array
       - description: Filtrar por ingresso
         in: query
         name: ticketId
@@ -1404,6 +3188,174 @@ paths:
       summary: Estornar um pedido
       tags:
       - Compras
+  /api/v1/orders/{id}/refund-eligibility:
+    get:
+      description: 'Responde se o comprador ainda pode cancelar e receber o reembolso,
+        até quando, e quanto receberia de volta. Quando não pode, devolve o motivo:
+        `window_closed` (passaram os 7 dias do arrependimento, CDC art. 49), `too_close_to_event`
+        (faltam menos de 48h para o evento), `not_paid`, `already_refunded`, `event_passed`
+        ou `request_open`. É a mesma função que o endpoint de solicitação usa para
+        decidir, então a tela e a regra nunca divergem.'
+      parameters:
+      - description: ID do pedido
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/refund.EligibilityResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Consultar se um pedido pode ser cancelado
+      tags:
+      - Reembolsos
+  /api/v1/orders/{id}/refund-request:
+    post:
+      consumes:
+      - application/json
+      description: 'Abre um pedido de reembolso. Dentro do prazo legal de arrependimento
+        (7 dias da compra e no mínimo 48h antes do evento) e em caso de evento cancelado,
+        o pedido é APROVADO na hora e o estorno entra na fila: são hipóteses que o
+        organizador não tem como recusar. Fora disso, o pedido fica pendente para
+        o organizador decidir. O valor devolvido inclui a taxa de serviço, conforme
+        entendimento do Procon-SP e do STJ. Pedir duas vezes devolve 409.'
+      parameters:
+      - description: ID do pedido
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Motivo
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/refund.RequestBody'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/refund.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "403":
+          description: O motivo informado não pode ser alegado por este usuário
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "409":
+          description: Já existe um pedido de reembolso em andamento
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "422":
+          description: Fora do prazo, ou pedido não reembolsável
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Solicitar reembolso de um pedido
+      tags:
+      - Reembolsos
+  /api/v1/orders/{id}/tickets:
+    get:
+      description: 'Os ingressos de um pedido pago, com o código de cada um para apresentar
+        na entrada. Restrito ao comprador do pedido e a administradores: o organizador
+        do evento NÃO vê estes códigos, porque quem os tem pode entrar.'
+      parameters:
+      - description: ID do pedido
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admission.TicketListEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Meus ingressos
+      tags:
+      - Entrada
+  /api/v1/orders/{id}/tickets/{admissionId}/qr.png:
+    get:
+      description: 'O QR Code de um ingresso, em PNG, para ser exibido ou impresso.
+        Endereçado pelo ID do ingresso e não pelo código: o endereço de uma imagem
+        aparece no histórico do navegador e nos registros de qualquer proxy, e um
+        ID sem sessão não serve para nada. Restrito ao comprador do pedido e a administradores.'
+      parameters:
+      - description: ID do pedido
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: ID do ingresso
+        in: path
+        name: admissionId
+        required: true
+        type: string
+      produces:
+      - image/png
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/admission.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Imagem do ingresso
+      tags:
+      - Entrada
   /api/v1/public/events:
     get:
       description: A vitrine pública. Aceita busca textual, categoria, cidade, intervalo
@@ -1534,10 +3486,188 @@ paths:
       summary: Opções de filtro
       tags:
       - Catálogo
+  /api/v1/refund-requests:
+    get:
+      description: A caixa de entrada do organizador e o histórico do comprador. Sem
+        `eventId`, lista os pedidos do próprio comprador; com `eventId`, lista os
+        do evento, e exige ser o organizador dele. Pendentes primeiro.
+      parameters:
+      - description: Pedidos de reembolso de um evento (exige ser o organizador)
+        in: query
+        name: eventId
+        type: string
+      - description: Filtrar por situação
+        enum:
+        - pending
+        - approved
+        - rejected
+        in: query
+        name: status
+        type: string
+      - description: Somente os que ainda ocupam o pedido (pendentes e aprovados)
+        in: query
+        name: open
+        type: boolean
+      - description: Itens por página (padrão 20, máximo 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Deslocamento da paginação
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/refund.ListEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Listar pedidos de reembolso
+      tags:
+      - Reembolsos
+  /api/v1/refund-requests/{id}:
+    get:
+      parameters:
+      - description: ID do pedido de reembolso
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/refund.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Consultar um pedido de reembolso
+      tags:
+      - Reembolsos
+  /api/v1/refund-requests/{id}/approve:
+    post:
+      consumes:
+      - application/json
+      description: 'Autoriza o estorno e o coloca na fila durável, na mesma transação:
+        uma aprovação sem estorno, ou um estorno sem aprovação registrada, são estados
+        que não podem existir. Restrito ao organizador do evento e a administradores.
+        Aprovar duas vezes devolve 409, porque a segunda é outra pessoa discordando
+        da primeira.'
+      parameters:
+      - description: ID do pedido de reembolso
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Observação da decisão
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/refund.DecisionBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/refund.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "409":
+          description: Já decidido
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Aprovar um pedido de reembolso
+      tags:
+      - Reembolsos
+  /api/v1/refund-requests/{id}/reject:
+    post:
+      consumes:
+      - application/json
+      description: 'Recusa o pedido, com observação. A recusa é registrada e não altera
+        o pedido de compra: é o caso sobre o qual o suporte será perguntado depois,
+        então fica guardado. Restrito ao organizador do evento e a administradores.'
+      parameters:
+      - description: ID do pedido de reembolso
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Observação da decisão
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/refund.DecisionBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/refund.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+        "409":
+          description: Já decidido
+          schema:
+            $ref: '#/definitions/refund.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Recusar um pedido de reembolso
+      tags:
+      - Reembolsos
   /api/v1/tickets:
     get:
-      description: Lista os lotes de ingressos. Aceita filtro de status, busca por
-        título ou descrição do lote, ordenação e paginação.
+      description: Lista os lotes de ingressos DO OPERADOR AUTENTICADO, incluindo
+        rascunhos. Um administrador vê os de todos. Aceita filtro de status, busca
+        por título ou descrição do lote, ordenação e paginação. O parâmetro `eventId`
+        restringe a um evento; ele não amplia o escopo, que é sempre o do chamador.
       parameters:
       - description: Status do ingresso
         enum:
@@ -1777,6 +3907,136 @@ paths:
       summary: Alterar o status de um ingresso
       tags:
       - Ingressos
+  /api/v1/venues:
+    get:
+      description: Os locais do operador autenticado. Administradores veem todos.
+      parameters:
+      - description: Itens por página (padrão 20)
+        in: query
+        name: limit
+        type: integer
+      - description: Deslocamento da paginação
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.VenueListEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Listar locais
+      tags:
+      - Assentos
+    post:
+      consumes:
+      - application/json
+      description: Cria um local físico reutilizável. Um teatro desenha sua planta
+        uma vez e vende duzentas noites a partir dela.
+      parameters:
+      - description: Dados do local
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/seating.VenueRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/seating.VenueEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Criar local
+      tags:
+      - Assentos
+  /api/v1/venues/{id}/layouts:
+    get:
+      parameters:
+      - description: ID do local
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/seating.LayoutListEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Listar plantas
+      tags:
+      - Assentos
+    post:
+      consumes:
+      - application/json
+      description: 'Cria uma planta do local. Um mesmo local pode ter mais de uma:
+        a configuração padrão e a acústica, com o palco adiantado, têm assentos diferentes
+        em lugares diferentes.'
+      parameters:
+      - description: ID do local
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Dados da planta
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/seating.LayoutRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/seating.LayoutEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/seating.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Criar planta
+      tags:
+      - Assentos
   /auth/email/start:
     post:
       consumes:

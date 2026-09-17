@@ -92,6 +92,7 @@ func (r *EventRepository) Update(ctx context.Context, item *domain.Event) error 
 		"starts_at":    record.StartsAt,
 		"ends_at":      record.EndsAt,
 		"status":       record.Status,
+		"sales_mode":   record.SalesMode,
 		"updated_at":   record.UpdatedAt,
 	})
 	if result.Error != nil {
@@ -386,6 +387,7 @@ func toSchema(item *domain.Event) schema.Event {
 		StartsAt:     item.StartsAt,
 		EndsAt:       item.EndsAt,
 		Status:       string(item.Status),
+		SalesMode:    string(item.SalesMode),
 		CreatedAt:    item.CreatedAt,
 		UpdatedAt:    item.UpdatedAt,
 	}
@@ -412,6 +414,7 @@ func toDomain(record *schema.Event) *domain.Event {
 		StartsAt:  record.StartsAt,
 		EndsAt:    record.EndsAt,
 		Status:    domain.Status(record.Status),
+		SalesMode: domain.SalesMode(record.SalesMode),
 		CreatedAt: record.CreatedAt,
 		UpdatedAt: record.UpdatedAt,
 	}

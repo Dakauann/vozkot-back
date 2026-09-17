@@ -131,6 +131,21 @@ func (e *EmailSender) Send(ctx context.Context, message domain.Message) error {
 		Html:    message.Body,
 		ReplyTo: e.replyTo,
 	}
+	// The inline parts, which is how a QR reaches an inbox that renders it.
+	// Resend turns an attachment with a ContentId into a multipart/related
+	// part, and the body's cid: reference then resolves in Gmail, Outlook and
+	// Apple Mail alike.
+	for _, inline := range message.Inline {
+		if inline.ContentID == "" || len(inline.Content) == 0 {
+			continue
+		}
+		request.Attachments = append(request.Attachments, &resend.Attachment{
+			Content:     inline.Content,
+			Filename:    inline.Filename,
+			ContentType: inline.ContentType,
+			ContentId:   inline.ContentID,
+		})
+	}
 	if tag := resendTag(message.Category); tag != "" {
 		// Lets an operator read deliverability per kind of message in the
 		// Resend dashboard rather than as one undifferentiated stream.

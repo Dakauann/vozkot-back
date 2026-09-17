@@ -53,6 +53,13 @@ type ProfileRequest struct {
 	Document     string `json:"document" example:"529.982.247-25"`
 	LegalName    string `json:"legalName" example:"Maria Souza"`
 	BirthDate    string `json:"birthDate" example:"1994-03-21"`
+	// Gender, City and UF are OPTIONAL and always will be. They exist so an
+	// organiser can see who bought tickets to their event; a buyer who does not
+	// want to answer must still be able to buy one, so an empty value is
+	// accepted and stored as "não informado" rather than refused.
+	Gender string `json:"gender,omitempty" enums:"female,male,non_binary,other,undisclosed" example:"female"`
+	City   string `json:"city,omitempty" example:"Natal"`
+	UF     string `json:"uf,omitempty" example:"RN"`
 }
 
 // ProfileResponse reports the state of the identity block.
@@ -69,6 +76,12 @@ type ProfileResponse struct {
 	BirthDate     string `json:"birthDate,omitempty" example:"1994-03-21"`
 	PhoneMask     string `json:"phoneMask,omitempty" example:"(84) *****-9624"`
 	PhoneVerified bool   `json:"phoneVerified" example:"false"`
+	// The optional demographics come back in full, unlike the document: they
+	// identify nobody, and the form has to be able to show the buyer what it
+	// already has so they are not asked the same question twice.
+	Gender string `json:"gender,omitempty" example:"female"`
+	City   string `json:"city,omitempty" example:"Natal"`
+	UF     string `json:"uf,omitempty" example:"RN"`
 }
 
 // RegisterVerification mounts the passwordless routes.
@@ -344,6 +357,9 @@ func (h *Handler) saveProfile(response http.ResponseWriter, request *http.Reques
 		Document:     body.Document,
 		LegalName:    body.LegalName,
 		BirthDate:    body.BirthDate,
+		Gender:       body.Gender,
+		City:         body.City,
+		UF:           body.UF,
 	})
 	if err != nil {
 		httpx.WriteCodedError(response, profileStatus(err), profileCode(err), err)
@@ -362,6 +378,9 @@ func profileResponse(account *user.User) ProfileResponse {
 		BirthDate:     profile.BirthDate,
 		PhoneMask:     maskPhone(profile.Phone),
 		PhoneVerified: profile.PhoneVerified(),
+		Gender:        string(profile.Gender),
+		City:          profile.City,
+		UF:            profile.UF,
 	}
 }
 

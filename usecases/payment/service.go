@@ -17,13 +17,17 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
+	admissiondomain "vozkot/domain/admission"
+	authdomain "vozkot/domain/auth"
 	eventdomain "vozkot/domain/event"
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
 	"vozkot/domain/queue"
+	seatingdomain "vozkot/domain/seating"
 	ticketdomain "vozkot/domain/ticket"
 	"vozkot/domain/uow"
 	notificationUsecase "vozkot/usecases/notification"
@@ -89,6 +93,30 @@ func (s *Service) CreateCharge(ctx context.Context, orderID string) error {
 	if s.gateway == nil {
 		return paymentdomain.ErrNotConfigured
 	}
+
+	// The last gate before money moves.
+	//
+	// This order was priced by domain/order at checkout and has been sitting in
+	// Postgres since; what gets charged below is item.TotalCents, and what the
+	// organiser is eventually owed is item.SubtotalCents. If those two have
+	// stopped agreeing with each other the buyer and the payout are about to be
+	// computed from different numbers, and no later reconciliation can undo a
+	// PIX that has already been paid. Permanent rather than retried: the row
+	// will not fix itself, and a retry loop would keep re-attempting a bad
+	// charge instead of surfacing it.
+	if err := item.ValidatePricing(); err != nil {
+		return queue.Permanent(fmt.Errorf("charge order %s: %w", item.ID, err))
+	}
+
+	// One line per charge, carrying the whole split.
+	//
+	// This is the record that lets an operator answer "why was I charged this"
+	// from the logs alone, without a database session: the face value the
+	// organiser set, the commission this build adds, and the sum the provider
+	// was asked for. It is logged BEFORE the call, so a charge that is created
+	// and then loses its response still leaves the amount behind.
+	log.Printf("pricing: order %s charging %s %d = tickets %d + service fee %d (%d items)",
+		item.ID, item.Currency, item.TotalCents, item.SubtotalCents, item.BuyerFeeCents, item.TotalQuantity())
 
 	charge, err := s.gateway.CreateCharge(ctx, paymentdomain.ChargeRequest{
 		Method:            item.PaymentMethod,
@@ -193,7 +221,18 @@ var ErrNotRefundable = errors.New("order has no settled charge to refund")
 // What IS checked here is everything a person should learn immediately: an
 // order that does not exist, or one there is nothing to refund on. Those would
 // only ever park a job and wait for someone to read the log.
-func (s *Service) RequestRefund(ctx context.Context, orderID string) (*orderdomain.Order, error) {
+func (s *Service) RequestRefund(
+	ctx context.Context,
+	actor authdomain.Actor,
+	orderID string,
+) (*orderdomain.Order, error) {
+	// Refunds move money OUT, so only an operator may ask for one. Enforced
+	// here rather than in the HTTP handler: this method is also reachable from
+	// the refund use case, and a rule that only the handler applied would be a
+	// rule that path skipped.
+	if !actor.IsAdmin() {
+		return nil, fmt.Errorf("%w: only an operator may refund an order", authdomain.ErrForbidden)
+	}
 	item, err := s.orders.GetByID(ctx, orderID)
 	if err != nil {
 		return nil, err
@@ -208,6 +247,33 @@ func (s *Service) RequestRefund(ctx context.Context, orderID string) (*orderdoma
 		return nil, fmt.Errorf("%w: order %s is %s", ErrNotRefundable, orderID, item.Status)
 	}
 
+	job, err := s.EnqueueRefund(ctx, s.jobs, item)
+	if err != nil {
+		return nil, err
+	}
+	s.dispatcher.Dispatch(ctx, job)
+	return item, nil
+}
+
+// EnqueueRefund schedules the money movement for one order onto the queue it is
+// given, and reports the job so the caller can announce it after committing.
+//
+// The queue is a PARAMETER rather than this service's own, and that is the
+// whole reason this is exported. A refund approved by an organiser has to write
+// the approval and schedule the money in one transaction — an approval nobody
+// acts on, or money leaving with no record of who allowed it, are both states
+// this pair can reach if they commit separately. So usecases/refund passes the
+// queue bound to its unit of work, and the ordinary admin path above passes
+// this service's own.
+//
+// Duplicating the job shape at that call site was the alternative, and the
+// dedupe key is exactly the thing that must not be written twice: it is what
+// makes an operator double-clicking refund once.
+func (s *Service) EnqueueRefund(
+	ctx context.Context,
+	jobs queue.Queue,
+	item *orderdomain.Order,
+) (*queue.Job, error) {
 	payload, err := queue.NewPayload(queue.SyncPaymentPayload{OrderID: item.ID, PaymentID: item.PaymentID})
 	if err != nil {
 		return nil, err
@@ -221,14 +287,15 @@ func (s *Service) RequestRefund(ctx context.Context, orderID string) (*orderdoma
 		// One refund per order, however many times the button is pressed.
 		DedupeKey: queue.TypeRefundCharge + ":" + item.ID,
 	}
-	added, err := s.jobs.Enqueue(ctx, job)
+	added, err := jobs.Enqueue(ctx, job)
 	if err != nil {
 		return nil, err
 	}
-	if added {
-		s.dispatcher.Dispatch(ctx, job)
+	if !added {
+		// Already scheduled; nothing new to publish.
+		return nil, nil
 	}
-	return item, nil
+	return job, nil
 }
 
 // Refund gives the money back and returns the tickets to sale. It is the
@@ -323,6 +390,82 @@ func (s *Service) AuditSettled(ctx context.Context, limit int) (int, error) {
 		}
 	}
 	return scheduled, nil
+}
+
+// BackfillAdmissions issues the tickets that paid orders from before this
+// feature existed never got.
+//
+// Admissions are minted in the transaction that crosses an order into paid, so
+// an order that reached paid BEFORE the door feature shipped has none, and its
+// buyer opens their wallet to "no tickets issued for this order yet" forever.
+// That is every order paid before the deploy, which on a live box office is not
+// a handful.
+//
+// It lives here, in the package that already owns "an order became paid,
+// therefore tickets exist", and reuses the same issuing path settlement does.
+// Nothing about it is special-cased: IssueForOrder is idempotent and reports
+// only what IT created, so this is safe to run repeatedly, safe to run while
+// settlements are happening, and cannot mint a second ticket for an order that
+// already has one.
+//
+// Bounded by `limit` and paged from the oldest, so an operator can run it in
+// slices rather than opening one transaction over a million rows.
+func (s *Service) BackfillAdmissions(ctx context.Context, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	pageSize := limit
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
+	issued := 0
+	scanned := 0
+	for scanned < limit {
+		remaining := limit - scanned
+		if remaining > pageSize {
+			remaining = pageSize
+		}
+		paid, err := s.orders.List(ctx, orderdomain.Filter{
+			Status: orderdomain.StatusPaid,
+			Limit:  remaining,
+			Offset: scanned,
+			// Oldest first, and stable: the backfill never changes an order's
+			// status, so the paid set does not shift under the paging and an
+			// OFFSET walk cannot skip a row. It also means the orders whose
+			// buyers have been waiting longest are served first.
+			OldestUpdatedFirst: true,
+		})
+		if err != nil {
+			return issued, err
+		}
+		if len(paid) == 0 {
+			break
+		}
+		for index := range paid {
+			item := &paid[index]
+			// One transaction per order. A single transaction over the whole
+			// batch would hold locks on every one of them while it ran, and a
+			// failure in the last order would discard the tickets minted for
+			// all the others.
+			err := s.unit.Run(ctx, func(ctx context.Context, repositories uow.Repositories) error {
+				minted, err := issueAdmissions(ctx, repositories, item)
+				if err != nil {
+					return err
+				}
+				issued += minted
+				return nil
+			})
+			if err != nil {
+				return issued, err
+			}
+		}
+		scanned += len(paid)
+		if len(paid) < remaining {
+			break
+		}
+	}
+	return issued, nil
 }
 
 // Reconcile re-checks orders that are still waiting, and is what makes the
@@ -431,6 +574,45 @@ func (s *Service) scheduleReconciliation(ctx context.Context, item *orderdomain.
 // runs inside one transaction: an order marked paid whose stock was not
 // committed oversells the next buyer, and stock committed for an order that
 // stayed pending sells the same seat twice.
+// issueAdmissions mints one credential per ticket on a newly paid order.
+//
+// Lives beside settle rather than in its own use case because it is part of
+// what "paid" means here, and because it must run inside the caller's
+// transaction: the admissions and the paid status commit together or neither
+// does.
+func issueAdmissions(ctx context.Context, repositories uow.Repositories, item *orderdomain.Order) (int, error) {
+	lines := make([]admissiondomain.Line, 0, len(item.Items))
+	for _, line := range item.Items {
+		lines = append(lines, admissiondomain.Line{
+			TicketID:    line.TicketID,
+			TicketTitle: line.TicketTitle,
+			Quantity:    line.Quantity,
+			// A seated line is one chair and Quantity 1, so this mints one
+			// admission carrying that chair's label. A counted line carries no
+			// seat and mints Quantity of them, exactly as before.
+			SeatID: line.SeatID,
+			Seat:   line.Seat,
+		})
+	}
+
+	issued, err := repositories.Admissions().IssueForOrder(ctx, admissiondomain.OrderLines{
+		OrderID: item.ID,
+		EventID: item.EventID,
+		Lines:   lines,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("issue admissions for order %s: %w", item.ID, err)
+	}
+	if len(issued) > 0 {
+		// One line per order, not per ticket: a festival order for twenty
+		// would otherwise be twenty lines of log for one sale. The codes
+		// themselves are never logged.
+		log.Printf("admission: issued %d admission(s) for order %s at event %s",
+			len(issued), item.ID, item.EventID)
+	}
+	return len(issued), nil
+}
+
 func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdomain.Charge) error {
 	if charge == nil {
 		return nil
@@ -549,6 +731,25 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 					return err
 				}
 			}
+			// The chairs move with the counters, in the same transaction. A
+			// paid order whose seats stayed "held" would have them swept back
+			// onto sale by the lapsed-hold job minutes later, and then sold to
+			// somebody else while the first buyer holds a valid ticket for
+			// them.
+			if _, err := repositories.Seats().CommitForOrder(ctx, item.ID); err != nil {
+				return err
+			}
+			// And the tickets themselves, in the same transaction that took
+			// the money. A paid order with no admissions is a buyer holding a
+			// receipt and no way through the door; issuing them afterwards, in
+			// a job, would leave a window where exactly that is true.
+			//
+			// `changed` above already guarantees one crossing into paid, and
+			// the repository is idempotent besides, so a redelivered webhook
+			// cannot mint a second set.
+			if _, err := issueAdmissions(ctx, repositories, item); err != nil {
+				return err
+			}
 		case orderdomain.StatusExpired, orderdomain.StatusFailed, orderdomain.StatusCancelled:
 			if previous.HoldsStock() {
 				if err := releaseAll(ctx, repositories, item); err != nil {
@@ -564,6 +765,22 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 						return err
 					}
 				}
+				// The refunded chair goes back on sale too. Scoped to sold, the
+				// mirror of the release above: between them a seat can only
+				// leave an order the same way it arrived.
+				if _, err := repositories.Seats().ReleaseSoldForOrder(ctx, item.ID); err != nil {
+					return err
+				}
+			}
+			// The money went back, so the entry goes with it. Withdrawn rather
+			// than deleted, so a holder who turns up with a refunded ticket is
+			// told it was refunded instead of being told it never existed.
+			voided, err := repositories.Admissions().VoidForOrder(ctx, item.ID)
+			if err != nil {
+				return err
+			}
+			if voided > 0 {
+				log.Printf("admission: voided %d admission(s) for refunded order %s", voided, item.ID)
 			}
 		}
 
@@ -670,6 +887,22 @@ func randomID() string {
 // by tier id at checkout. Two settlements racing over the same two tiers
 // therefore lock them in the same sequence and cannot deadlock.
 func reserveAll(ctx context.Context, repositories uow.Repositories, item *orderdomain.Order) (bool, error) {
+	// The chairs first, and NOT the same chairs-or-nothing question the
+	// counters ask.
+	//
+	// A counted line can be satisfied by any stock: the buyer asked for two
+	// Pista and two Pista is two Pista. A seated line cannot. This buyer paid
+	// for FILA K POLTRONA 12, it is printed on the ticket they already have,
+	// and if somebody else took it while the hold was lapsed then there is no
+	// substitute this function is allowed to choose for them. So the claim asks
+	// for exactly the seats the order names, and failing it is what sends the
+	// order to refund_required rather than to a different chair.
+	if seated, err := reclaimSeats(ctx, repositories, item); err != nil {
+		return false, err
+	} else if !seated {
+		return false, nil
+	}
+
 	taken := make([]orderdomain.Item, 0, len(item.Items))
 	for _, line := range item.Items {
 		reserved, err := repositories.Tickets().Reserve(ctx, line.TicketID, line.Quantity)
@@ -685,19 +918,85 @@ func reserveAll(ctx context.Context, repositories uow.Repositories, item *orderd
 				return false, err
 			}
 		}
+		// The seats go back with the counters. Without this a basket that lost
+		// its counted stock would keep holding chairs nobody can buy, for an
+		// order that is about to be marked refund_required.
+		if _, err := repositories.Seats().ReleaseForOrder(ctx, item.ID); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 	return true, nil
 }
 
-// releaseAll returns every line's held stock.
+// reclaimSeats takes back exactly the chairs an order already names.
+//
+// Reached only when a payment arrived after the hold lapsed, which released
+// them. It reports false — not an error — when any one of them is gone, because
+// that is the honest, frequent case the caller turns into "we owe a refund".
+//
+// Returns true immediately for a counted order, which is every order of a
+// general-admission event.
+func reclaimSeats(ctx context.Context, repositories uow.Repositories, item *orderdomain.Order) (bool, error) {
+	byTier := make(map[string][]string)
+	for _, line := range item.Items {
+		if line.Seated() {
+			byTier[line.TicketID] = append(byTier[line.TicketID], line.SeatID)
+		}
+	}
+	if len(byTier) == 0 {
+		return true, nil
+	}
+
+	// Sorted, so two settlements of two orders over the same tiers take the
+	// seat locks in the same order and cannot deadlock. The tier ids are sorted
+	// here and the seat ids inside ClaimRequest.Validate.
+	tiers := make([]string, 0, len(byTier))
+	for tierID := range byTier {
+		tiers = append(tiers, tierID)
+	}
+	sort.Strings(tiers)
+
+	for _, tierID := range tiers {
+		result, err := repositories.Seats().Claim(ctx, seatingdomain.ClaimRequest{
+			EventID:  item.EventID,
+			TicketID: tierID,
+			OrderID:  item.ID,
+			SeatIDs:  byTier[tierID],
+			// The order's own deadline, already past. It is written only to
+			// satisfy the not-null guard on a held seat, and the commit that
+			// follows in this same transaction clears it a statement later.
+			HoldExpiresAt: item.HoldExpiresAt,
+		})
+		if err != nil {
+			return false, err
+		}
+		if !result.OK() {
+			// Give back whatever this loop did manage to take, so the order
+			// about to become refund_required is not sitting on chairs.
+			if _, releaseErr := repositories.Seats().ReleaseForOrder(ctx, item.ID); releaseErr != nil {
+				return false, releaseErr
+			}
+			log.Printf("payment: order %s paid after its hold expired and %d of its seats are gone; refund required",
+				item.ID, len(result.Unavailable))
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// releaseAll returns every line's held stock, and the chairs with it.
 func releaseAll(ctx context.Context, repositories uow.Repositories, item *orderdomain.Order) error {
 	for _, line := range item.Items {
 		if err := repositories.Tickets().Release(ctx, line.TicketID, line.Quantity); err != nil {
 			return err
 		}
 	}
-	return nil
+	// Keyed by the order, not by the line: a seat is held by whoever holds it.
+	// Scoped to held inside the repository, so a sweep arriving after a
+	// settlement cannot put a paid chair back on sale.
+	_, err := repositories.Seats().ReleaseForOrder(ctx, item.ID)
+	return err
 }
 
 // describe is what the buyer will see on their bank statement.

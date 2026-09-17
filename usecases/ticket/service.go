@@ -1,14 +1,24 @@
 // Package ticket is the application layer of the box office: it orchestrates
 // the ticket entity, its persistence port and the media library, and holds no
 // rule that belongs to the entity itself.
+//
+// Every method that names a tier by id starts with owned, and the listing is
+// scoped by the caller. That check is HERE and not in the HTTP handler, for the
+// same reason usecases/report says so: a rule enforced at the transport edge is
+// a rule the next caller forgets, and the next caller is a CLI, a job or
+// another use case that never passes through a handler. It was in the handler
+// once, and the handler simply did not do it — every signed-in account could
+// read, reprice and delete every tier on the platform.
 package ticket
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"time"
 
+	authdomain "vozkot/domain/auth"
 	domain "vozkot/domain/ticket"
 )
 
@@ -70,10 +80,22 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*domain.Ticket
 	return item, nil
 }
 
-func (s *Service) Get(ctx context.Context, id string) (*domain.Ticket, error) {
+// Get returns one tier, refusing one that is not the caller's.
+func (s *Service) Get(ctx context.Context, actor authdomain.Actor, id string) (*domain.Ticket, error) {
+	return s.owned(ctx, actor, id)
+}
+
+// owned loads a tier and refuses one belonging to somebody else.
+//
+// The single authorisation point of this package. An operator reaches
+// anything; everybody else reaches only tiers they own.
+func (s *Service) owned(ctx context.Context, actor authdomain.Actor, id string) (*domain.Ticket, error) {
 	item, err := s.repository.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if !actor.MayReach(item.OwnerID) {
+		return nil, fmt.Errorf("%w: this ticket tier belongs to another operator", authdomain.ErrForbidden)
 	}
 	return item, nil
 }
@@ -84,7 +106,17 @@ func (s *Service) Get(ctx context.Context, id string) (*domain.Ticket, error) {
 // it depicts. An evening selling Pista and Camarote has one poster, and a
 // listing card that had to choose between two tiers' images would be choosing
 // arbitrarily.
-func (s *Service) List(ctx context.Context, filter domain.Filter) (Page, error) {
+func (s *Service) List(ctx context.Context, actor authdomain.Actor, filter domain.Filter) (Page, error) {
+	// Narrowed to the caller before the query runs, rather than filtered after
+	// it: an unscoped listing is a full read of every box office's prices and
+	// stock, and pagination would hand it over twenty rows at a time.
+	if !actor.IsAdmin() {
+		if !actor.Authenticated() {
+			return Page{}, authdomain.ErrUnauthorized
+		}
+		filter.OwnerID = actor.ID
+	}
+
 	items, err := s.repository.List(ctx, filter)
 	if err != nil {
 		return Page{}, err
@@ -96,8 +128,13 @@ func (s *Service) List(ctx context.Context, filter domain.Filter) (Page, error) 
 	return Page{Items: items, Total: total}, nil
 }
 
-func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (*domain.Ticket, error) {
-	item, err := s.repository.GetByID(ctx, id)
+func (s *Service) Update(
+	ctx context.Context,
+	actor authdomain.Actor,
+	id string,
+	input UpdateInput,
+) (*domain.Ticket, error) {
+	item, err := s.owned(ctx, actor, id)
 	if err != nil {
 		return nil, err
 	}
@@ -117,11 +154,16 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (*do
 	if err := s.repository.Update(ctx, item); err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, id)
+	return s.owned(ctx, actor, id)
 }
 
-func (s *Service) ChangeStatus(ctx context.Context, id string, status domain.Status) (*domain.Ticket, error) {
-	item, err := s.repository.GetByID(ctx, id)
+func (s *Service) ChangeStatus(
+	ctx context.Context,
+	actor authdomain.Actor,
+	id string,
+	status domain.Status,
+) (*domain.Ticket, error) {
+	item, err := s.owned(ctx, actor, id)
 	if err != nil {
 		return nil, err
 	}
@@ -131,13 +173,13 @@ func (s *Service) ChangeStatus(ctx context.Context, id string, status domain.Sta
 	if err := s.repository.Update(ctx, item); err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, id)
+	return s.owned(ctx, actor, id)
 }
 
 // Delete removes a tier. Its event's artwork is untouched: the poster belongs
 // to the evening, not to one of its prices.
-func (s *Service) Delete(ctx context.Context, id string) error {
-	if _, err := s.repository.GetByID(ctx, id); err != nil {
+func (s *Service) Delete(ctx context.Context, actor authdomain.Actor, id string) error {
+	if _, err := s.owned(ctx, actor, id); err != nil {
 		return err
 	}
 	return s.repository.Delete(ctx, id)

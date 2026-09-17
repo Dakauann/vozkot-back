@@ -32,6 +32,12 @@ type SaveInput struct {
 	Document     string
 	LegalName    string
 	BirthDate    string
+	// Gender, City and UF are optional. They are asked for because an organiser
+	// needs to know who came to their event, and they are optional because
+	// nobody should have to answer that to buy a ticket.
+	Gender string
+	City   string
+	UF     string
 }
 
 // Save validates and stores the identity block.
@@ -46,12 +52,32 @@ func (p *Profiles) Save(ctx context.Context, input SaveInput) (*user.User, error
 		return nil, err
 	}
 
-	profile, err := user.NormalizeProfile(user.ProfileDraft{
+	draft := user.ProfileDraft{
 		DocumentType: input.DocumentType,
 		Document:     input.Document,
 		LegalName:    input.LegalName,
 		BirthDate:    input.BirthDate,
-	}, p.now())
+		Gender:       input.Gender,
+		City:         input.City,
+		UF:           input.UF,
+	}
+	// On an account that has already filled the block in, a BLANK identity field
+	// means "leave it as it is" rather than "clear it".
+	//
+	// This is what lets a buyer edit the optional answers — their city, say —
+	// without the screen having to send a CPF back. It could not send one: the
+	// API returns the document masked and never in full, by design, so a form
+	// that had to echo it would either have to be given the real thing or would
+	// blank it.
+	//
+	// It can only ever PRESERVE. A non-blank value still validates in full, so
+	// this is not a way to skip a check, and an account with no profile yet
+	// falls through to the ordinary rules where every field is required.
+	if account.Profile.Complete() {
+		carryForward(&draft, account.Profile)
+	}
+
+	profile, err := user.NormalizeProfile(draft, p.now())
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +107,27 @@ func (p *Profiles) Save(ctx context.Context, input SaveInput) (*user.User, error
 		account.Name = profile.LegalName
 	}
 	return account, nil
+}
+
+// carryForward fills blank identity fields from what is already stored.
+//
+// Only the three that cannot be re-sent by an edit screen. The optional
+// demographics are deliberately absent: for those, blank is a real answer —
+// somebody clearing their city means they want it cleared — and carrying them
+// forward would make the fields impossible to empty once set.
+func carryForward(draft *user.ProfileDraft, stored user.Profile) {
+	if strings.TrimSpace(draft.Document) == "" {
+		draft.Document = stored.Document
+		if strings.TrimSpace(draft.DocumentType) == "" {
+			draft.DocumentType = string(stored.DocumentType)
+		}
+	}
+	if strings.TrimSpace(draft.LegalName) == "" {
+		draft.LegalName = stored.LegalName
+	}
+	if strings.TrimSpace(draft.BirthDate) == "" {
+		draft.BirthDate = stored.BirthDate
+	}
 }
 
 // Get returns the account with its identity block decrypted.

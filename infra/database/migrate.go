@@ -101,8 +101,33 @@ func RunMigrations(ctx context.Context, db *gorm.DB) error {
 			&schema.OrderItem{},
 			&schema.Job{},
 			&schema.IdempotencyKey{},
+			// Refund requests come after orders: the table carries a foreign key
+			// to one, and AutoMigrate cannot create it against a table that
+			// does not exist yet.
+			&schema.RefundRequest{},
+			// Admissions come after orders and tiers for the same reason: a
+			// credential names the order it was issued for and the tier it was
+			// sold as.
+			&schema.Admission{},
+			// Reserved seating, last: an event seat names its event AND its
+			// tier, and a layout names the venue it arranges, so every table
+			// it points at has to exist first.
+			//
+			// Creating these on an installation that sells nothing but general
+			// admission costs five empty tables and no query anywhere. That is
+			// the trade the whole feature is built on: a party pays nothing for
+			// a theatre's chairs.
+			&schema.Venue{},
+			&schema.VenueLayout{},
+			&schema.LayoutSection{},
+			&schema.LayoutSeat{},
+			&schema.EventSeating{},
+			&schema.EventSeat{},
 		); err != nil {
 			return fmt.Errorf("auto migrate: %w", err)
+		}
+		if err := addSeatVersionSequence(tx); err != nil {
+			return err
 		}
 		// Copy, derive, verify, drop, in that order, and never the other way
 		// round. See orders_backfill.go for why each step is guarded the way it
@@ -125,6 +150,20 @@ func RunMigrations(ctx context.Context, db *gorm.DB) error {
 		if err := addStockGuards(tx); err != nil {
 			return err
 		}
+		// After AutoMigrate, which is what adds the seat columns the partial
+		// replacements are predicated on.
+		if err := replaceOrderItemUniqueIndex(tx); err != nil {
+			return err
+		}
+		if err := dropLayoutFocus(tx); err != nil {
+			return err
+		}
+		// The money split, applied to orders that predate it. Runs after
+		// AutoMigrate has added the columns and after the item backfill has
+		// created the lines it reads.
+		if err := backfillOrderPricing(tx); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
@@ -137,6 +176,70 @@ func RunMigrations(ctx context.Context, db *gorm.DB) error {
 	// Indexes live in indexes.go and are built outside this transaction, on
 	// purpose. See that file for why.
 	return createIndexes(ctx, db)
+}
+
+// dropLayoutFocus removes the superseded orientation column.
+//
+// venue_layouts.focus said what the room faced, as one of three words, and the
+// client derived a stage bar or an arena disc from it. That could only ever put
+// the stage in one place, gave no way to move it, and could not describe a rodeo
+// with a show stage at one end. A stage is a SECTION now, with a position and a
+// size like everything else in the room.
+//
+// Guarded on the column existing, so a boot that already ran this does no DDL:
+// dropping a column takes an ACCESS EXCLUSIVE lock, and taking one every boot
+// to do nothing is how a deploy waits behind a long read.
+func dropLayoutFocus(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable("venue_layouts") {
+		return nil
+	}
+	if !tx.Migrator().HasColumn(&schema.VenueLayout{}, "focus") {
+		return nil
+	}
+	// Metadata-only in Postgres: no table rewrite, so the lock is held for
+	// microseconds rather than for the length of a scan.
+	if err := tx.Exec(`ALTER TABLE venue_layouts DROP COLUMN IF EXISTS focus`).Error; err != nil {
+		return fmt.Errorf("drop superseded layout focus: %w", err)
+	}
+	return nil
+}
+
+// replaceOrderItemUniqueIndex drops the old one-tier-one-line unique index.
+//
+// It said UNIQUE (order_id, ticket_id), which was right while every line was a
+// counted quantity and is wrong now that a line can be one CHAIR: four seats of
+// Plateia Premium are four rows sharing an order and a tier, and this index
+// rejects the fourth.
+//
+// Dropped here rather than widened, because the replacements are two PARTIAL
+// unique indexes that together say more than one combined index could — see
+// indexes.go. AutoMigrate never drops an index, so it has to be done by hand,
+// and it is guarded on the index actually being unique so a boot that already
+// ran this does no DDL at all.
+func replaceOrderItemUniqueIndex(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable("order_items") {
+		return nil
+	}
+	var unique bool
+	if err := tx.Raw(`
+		SELECT COALESCE(i.indisunique, false)
+		  FROM pg_class c
+		  JOIN pg_index i ON i.indexrelid = c.oid
+		 WHERE c.relname = 'idx_order_items_order_ticket'`).Scan(&unique).Error; err != nil {
+		return fmt.Errorf("inspect order item index: %w", err)
+	}
+	if !unique {
+		return nil
+	}
+	// The replacement partial indexes are built CONCURRENTLY afterwards, so
+	// there is a window with neither. It is the safest of the three options: a
+	// unique index cannot be swapped atomically, holding the old one blocks
+	// seated orders outright, and the window is a boot-time one in which the
+	// application still refuses a duplicate line itself.
+	if err := tx.Exec(`DROP INDEX IF EXISTS idx_order_items_order_ticket`).Error; err != nil {
+		return fmt.Errorf("drop superseded order item index: %w", err)
+	}
+	return nil
 }
 
 // replaceClaimIndex drops the jobs claim index when an earlier revision built
@@ -258,6 +361,36 @@ func enableTrigramSearch(ctx context.Context, db *gorm.DB) {
 
 // addStockGuards puts the inventory invariants in the database itself.
 //
+// addSeatVersionSequence creates the counter behind event_seats.version.
+//
+// The version is what makes polling a seat map cheap: a client asks "what
+// changed since 417" and gets only that, rather than four thousand chairs it
+// already has. A sequence is the right source because it is monotonic under
+// concurrency without a lock, which a MAX(version)+1 read would not be.
+//
+// One sequence for every event rather than one per event. The cursor is only
+// ever compared within an event, so a global counter is the same cursor, and it
+// is one object instead of one per night forever.
+//
+// Created only when absent, for the same reason the constraints below are: a
+// steady-state boot must run no DDL at all.
+func addSeatVersionSequence(tx *gorm.DB) error {
+	var present int64
+	if err := tx.Raw(
+		`SELECT COUNT(*) FROM pg_class WHERE relkind = 'S' AND relname = ?`,
+		schema.SeatVersionSequence,
+	).Scan(&present).Error; err != nil {
+		return fmt.Errorf("inspect sequence %s: %w", schema.SeatVersionSequence, err)
+	}
+	if present > 0 {
+		return nil
+	}
+	if err := tx.Exec(`CREATE SEQUENCE IF NOT EXISTS ` + schema.SeatVersionSequence).Error; err != nil {
+		return fmt.Errorf("create sequence %s: %w", schema.SeatVersionSequence, err)
+	}
+	return nil
+}
+
 // The application is careful, and the application can have bugs. A CHECK
 // constraint is the one guard that holds even when the code above it is wrong:
 // no negative holds, no negative sales, and never more sold-plus-held than the
@@ -277,6 +410,19 @@ func addStockGuards(tx *gorm.DB) error {
 		// now lives. An order's total is the sum of its items; a line of zero
 		// tickets is a hold on nothing and must never reach the table.
 		{"order_items", "chk_order_items_quantity_positive", "quantity > 0 AND unit_price_cents >= 0 AND total_cents >= 0"},
+		// A seat's status and the order holding it have to agree. Held and sold
+		// mean somebody has it; available and blocked mean nobody does. The
+		// application maintains both columns in one update, and the application
+		// can have bugs: a held seat with no order is inventory nothing will
+		// ever release, and an available seat carrying an order id is a chair
+		// two people have a claim on.
+		{"event_seats", "chk_event_seats_holder", `
+			(status IN ('held', 'sold') AND order_id IS NOT NULL)
+			OR (status IN ('available', 'blocked') AND order_id IS NULL)`},
+		// A hold with no deadline never expires, which is inventory withheld
+		// for good by a buyer who closed the tab.
+		{"event_seats", "chk_event_seats_hold_deadline",
+			"status <> 'held' OR hold_expires_at IS NOT NULL"},
 	}
 	for _, guard := range guards {
 		var present int64

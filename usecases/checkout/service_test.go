@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	orderdomain "vozkot/domain/order"
+	"vozkot/domain/pricing"
 	queuedomain "vozkot/domain/queue"
 	ticketdomain "vozkot/domain/ticket"
 	orderRepository "vozkot/infra/repositories/order"
@@ -27,6 +28,13 @@ import (
 // row lock the database takes to evaluate it. A fake repository would be
 // testing the fake's mutex.
 
+// harnessTierPriceCents is what the organiser priced the tier at: R$ 240,00.
+//
+// Named because the money tests assert against it. A fee is defined as a
+// percentage OF this number, so a test that hard-coded both would still pass
+// if the seeded price drifted.
+const harnessTierPriceCents = 24000
+
 type harness struct {
 	db       *gorm.DB
 	service  *Service
@@ -35,6 +43,11 @@ type harness struct {
 	jobs     queuedomain.Queue
 	ticketID string
 	ownerID  string
+	eventID  string
+	// priceCents is the seeded tier's face value, and fee is the commission
+	// this harness's box office adds on top of it.
+	priceCents int64
+	fee        pricing.Fee
 }
 
 // newHarness builds a box office with no per-buyer hold cap, which is what most
@@ -42,10 +55,30 @@ type harness struct {
 // twenty orders for one account on purpose.
 func newHarness(t *testing.T, capacity int) *harness {
 	t.Helper()
-	return newHarnessWithLimits(t, capacity, orderdomain.HoldLimits{})
+	return newHarnessWith(t, capacity, orderdomain.HoldLimits{}, pricing.Fee{})
 }
 
 func newHarnessWithLimits(t *testing.T, capacity int, limits orderdomain.HoldLimits) *harness {
+	t.Helper()
+	return newHarnessWith(t, capacity, limits, pricing.Fee{})
+}
+
+// newHarnessWithFee is the same box office, charging a real commission.
+//
+// The fee is a parameter rather than a second harness because everything else
+// about the setup — the seeded owner, event, tier and the cleanup that removes
+// them — is identical, and two copies of it would drift.
+func newHarnessWithFee(t *testing.T, capacity int, fee pricing.Fee) *harness {
+	t.Helper()
+	return newHarnessWith(t, capacity, orderdomain.HoldLimits{}, fee)
+}
+
+func newHarnessWith(
+	t *testing.T,
+	capacity int,
+	limits orderdomain.HoldLimits,
+	fee pricing.Fee,
+) *harness {
 	t.Helper()
 	db := testsupport.Database(t)
 	ctx := context.Background()
@@ -55,10 +88,11 @@ func newHarnessWithLimits(t *testing.T, capacity int, limits orderdomain.HoldLim
 	jobs := queueRepository.NewJobRepository(db)
 
 	ownerID := seedUser(t, db)
+	eventID := testsupport.SeedEvent(t, db, ownerID)
 	item, err := ticketdomain.New(testsupport.Unique("tkt"), ownerID, ticketdomain.Draft{
-		EventID:    testsupport.SeedEvent(t, db, ownerID),
+		EventID:    eventID,
 		Title:      "Pista",
-		PriceCents: 24000,
+		PriceCents: harnessTierPriceCents,
 		Quantity:   capacity,
 		Status:     ticketdomain.StatusOnSale,
 	}, time.Now())
@@ -76,13 +110,21 @@ func newHarnessWithLimits(t *testing.T, capacity int, limits orderdomain.HoldLim
 	})
 
 	return &harness{
-		db:       db,
-		service:  NewService(uow.NewRunner(db), orders, tickets, queueUsecase.NewDispatcher(nil), 30*time.Minute, 10*time.Minute, limits),
-		orders:   orders,
-		tickets:  tickets,
-		jobs:     jobs,
-		ticketID: item.ID,
-		ownerID:  ownerID,
+		db: db,
+		service: NewService(uow.NewRunner(db), orders, tickets, nil, queueUsecase.NewDispatcher(nil), Settings{
+			HoldFor:     30 * time.Minute,
+			CartHoldFor: 10 * time.Minute,
+			HoldLimits:  limits,
+			Fee:         fee,
+		}),
+		orders:     orders,
+		tickets:    tickets,
+		jobs:       jobs,
+		ticketID:   item.ID,
+		ownerID:    ownerID,
+		eventID:    eventID,
+		priceCents: harnessTierPriceCents,
+		fee:        fee,
 	}
 }
 

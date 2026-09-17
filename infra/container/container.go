@@ -2,7 +2,9 @@ package container
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -12,9 +14,13 @@ import (
 	"time"
 
 	delivery "vozkot/delivery/http"
+	admissionHTTP "vozkot/delivery/http/admission"
 	authHTTP "vozkot/delivery/http/auth"
 	checkoutHTTP "vozkot/delivery/http/checkout"
 	eventHTTP "vozkot/delivery/http/event"
+	refundHTTP "vozkot/delivery/http/refund"
+	reportHTTP "vozkot/delivery/http/report"
+	seatingHTTP "vozkot/delivery/http/seating"
 	ticketHTTP "vozkot/delivery/http/ticket"
 	webhooksHTTP "vozkot/delivery/http/webhooks"
 	authdomain "vozkot/domain/auth"
@@ -35,19 +41,25 @@ import (
 	"vozkot/infra/imaging"
 	"vozkot/infra/mercadopago"
 	"vozkot/infra/notifications"
+	"vozkot/infra/qrcode"
 	"vozkot/infra/rabbitmq"
 	redisCache "vozkot/infra/redis"
+	admissionRepository "vozkot/infra/repositories/admission"
 	authRepository "vozkot/infra/repositories/auth"
 	eventRepository "vozkot/infra/repositories/event"
 	idempotencyRepository "vozkot/infra/repositories/idempotency"
 	mediaRepository "vozkot/infra/repositories/media"
 	orderRepository "vozkot/infra/repositories/order"
 	queueRepository "vozkot/infra/repositories/queue"
+	refundRepository "vozkot/infra/repositories/refund"
+	reportRepository "vozkot/infra/repositories/report"
+	seatingRepository "vozkot/infra/repositories/seating"
 	ticketRepository "vozkot/infra/repositories/ticket"
 	userRepository "vozkot/infra/repositories/user"
 	"vozkot/infra/security"
 	"vozkot/infra/storage"
 	"vozkot/infra/uow"
+	admissionUsecase "vozkot/usecases/admission"
 	authUsecase "vozkot/usecases/auth"
 	checkoutUsecase "vozkot/usecases/checkout"
 	eventUsecase "vozkot/usecases/event"
@@ -55,6 +67,9 @@ import (
 	notificationUsecase "vozkot/usecases/notification"
 	paymentUsecase "vozkot/usecases/payment"
 	queueUsecase "vozkot/usecases/queue"
+	refundUsecase "vozkot/usecases/refund"
+	reportUsecase "vozkot/usecases/report"
+	seatingUsecase "vozkot/usecases/seating"
 	ticketUsecase "vozkot/usecases/ticket"
 )
 
@@ -153,7 +168,7 @@ func New(cfg config.Config) (*Container, error) {
 	// nobody can place still publishes.
 	events := eventRepository.NewEventRepository(db)
 	eventService := eventUsecase.NewService(events, tickets, mediaLibrary, geocoding.New())
-	eventHandler := eventHTTP.NewHandler(eventService)
+	eventHandler := eventHTTP.NewHandler(eventService, cfg.ServiceFee)
 
 	users := userRepository.NewUserRepository(db)
 	// One decorator instance serves both the use case and the guard, which is
@@ -239,11 +254,18 @@ func New(cfg config.Config) (*Container, error) {
 		log.Printf("checkout: one account may hold %d open order(s) and %d ticket(s) per tier",
 			holdLimits.Orders, holdLimits.TicketsPerTier)
 	}
+	// The door's store and the QR encoder, built here rather than further down
+	// because the receipt needs them: a confirmation carries one QR and one
+	// printed code per admission, and the source is handed to the messenger
+	// below.
+	admissions := admissionRepository.NewAdmissionRepository(db)
+	admissionTickets := notificationUsecase.NewAdmissionTickets(admissions, qrcode.NewRenderer())
+
 	// Buyer messaging. Built before the payment service because settlement is
 	// what raises a receipt, and built as ONE stack: renderer, channel
 	// senders, notifier, so the channels the notifier will accept are exactly
 	// the channels something can deliver.
-	messenger, purchases, notifier, err := buildNotifications(cfg.Notifications, jobs, dispatcher)
+	messenger, purchases, notifier, err := buildNotifications(cfg.Notifications, jobs, dispatcher, admissionTickets)
 	if err != nil {
 		return nil, err
 	}
@@ -302,9 +324,58 @@ func New(cfg config.Config) (*Container, error) {
 		}
 	}
 
-	checkoutService := checkoutUsecase.NewService(unit, orders, tickets, dispatcher, cfg.Payments.HoldFor, cfg.Payments.CartHoldFor, holdLimits)
+	checkoutService := checkoutUsecase.NewService(unit, orders, tickets, users, dispatcher, checkoutUsecase.Settings{
+		HoldFor:     cfg.Payments.HoldFor,
+		CartHoldFor: cfg.Payments.CartHoldFor,
+		HoldLimits:  holdLimits,
+		Fee:         cfg.ServiceFee,
+	})
 	paymentService := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, purchases)
-	checkoutHandler := checkoutHTTP.NewHandler(checkoutService, paymentService, eventService, keys, cfg.Queue.IdempotencyLease)
+
+	// Refunds and reporting hang off the sale rather than being part of it: both
+	// read what checkout wrote, and neither can move stock. The refund service
+	// borrows the payment service's refund enqueue so an approval and the money
+	// it authorises commit together.
+	refundRequests := refundRepository.NewRefundRepository(db)
+	refundService := refundUsecase.NewService(unit, refundRequests, orders, events, paymentService, dispatcher)
+	reportService := reportUsecase.NewService(reportRepository.NewReportRepository(db), events)
+
+	// The door. The repository above serves reads and scans; issuing goes
+	// through the unit of work so the tickets commit with the payment that
+	// bought them.
+	admissionService := admissionUsecase.NewService(admissions, orders, events).
+		WithCodeRenderer(qrcode.NewRenderer())
+
+	// Reserved seating. The layout side is an editor and reads and writes
+	// outside any transaction; the seat side is inventory and its writes go
+	// through the unit of work, which is why the two are separate repositories
+	// bound to the same connection here.
+	seatingService := seatingUsecase.NewService(
+		seatingRepository.NewLayoutRepository(db),
+		seatingRepository.NewSeatRepository(db),
+		events,
+		prefixedID,
+	)
+
+	checkoutHandler := checkoutHTTP.NewHandler(
+		checkoutService, paymentService, eventService, refundService,
+		keys, cfg.Queue.IdempotencyLease,
+	)
+	refundHandler := refundHTTP.NewHandler(refundService)
+	reportHandler := reportHTTP.NewHandler(reportService)
+	admissionHandler := admissionHTTP.NewHandler(admissionService)
+	seatingHandler := seatingHTTP.NewHandler(seatingService)
+
+	// Said once at boot, because it is the number every receipt, payout and
+	// refund in this process will be computed from. An operator reconciling a
+	// disputed charge should be able to read the rate that produced it out of
+	// the log for that deploy rather than having to match a build to a commit.
+	if fee := cfg.ServiceFee; fee.Free() {
+		log.Printf("pricing: service fee is ZERO - buyers pay the tier price and no commission is taken. This is a build-level setting; check domain/pricing.PlatformBasisPoints")
+	} else {
+		log.Printf("pricing: service fee %d basis points (%d.%02d%%) added on top of every paid ticket; the organiser is owed the face value",
+			fee.BasisPoints, fee.BasisPoints/100, fee.BasisPoints%100)
+	}
 
 	webhookHandler := buildWebhookHandler(cfg.Payments, jobs, dispatcher)
 	switch {
@@ -337,6 +408,10 @@ func New(cfg config.Config) (*Container, error) {
 		Tickets:           ticketHandler,
 		Events:            eventHandler,
 		Checkout:          checkoutHandler,
+		Refunds:           refundHandler,
+		Reports:           reportHandler,
+		Admissions:        admissionHandler,
+		Seating:           seatingHandler,
 		Webhooks:          webhookHandler,
 		AuthMiddleware:    authGuard,
 		CheckoutLimit:     checkoutLimit,
@@ -372,6 +447,11 @@ func buildNotifications(
 	cfg config.NotificationsConfig,
 	jobs queuedomain.Queue,
 	dispatcher *queueUsecase.Dispatcher,
+	// tickets puts the QR and the printed code into a confirmation. Nil is
+	// supported and means the receipt goes out without them, which is what a
+	// deployment with no encryption keyring gets: a receipt, never a failed
+	// send.
+	tickets notificationUsecase.Tickets,
 ) (*notificationUsecase.Service, *notificationUsecase.Purchases, *notificationUsecase.Notifier, error) {
 	// One stack, assembled from whatever is configured. Each channel contributes
 	// a Sender and the Renderer that produces the body it carries, and the two are
@@ -415,7 +495,8 @@ func buildNotifications(
 		return nil, nil, nil, nil
 	}
 
-	messenger := notificationUsecase.NewService(notifications.NewChannels(renderers), senders...)
+	messenger := notificationUsecase.NewService(notifications.NewChannels(renderers), senders...).
+		WithTickets(tickets)
 	notifier := notificationUsecase.NewNotifier(jobs, dispatcher, messenger.Channels()...)
 	purchases := notificationUsecase.NewPurchases(notifier, cfg.Brand.SiteURL)
 
@@ -685,4 +766,22 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	}
 	databaseErr := c.database.Close()
 	return errors.Join(serverErr, brokerErr, cacheErr, databaseErr)
+}
+
+// prefixedID mints an identifier in the shape the rest of this codebase uses:
+// a short type prefix, an underscore, sixteen hex characters.
+//
+// Passed into the seating use case rather than reached for inside it, because a
+// use case that generated its own ids could not be tested for the labels it
+// produces without matching random strings. It is the same argument the payment
+// and notification services already make for their own newID.
+func prefixedID(prefix string) string {
+	buffer := make([]byte, 8)
+	if _, err := rand.Read(buffer); err != nil {
+		// A clock-based fallback rather than a panic. Losing entropy makes an
+		// id guessable, which matters for a code somebody scans at a door and
+		// not at all for the primary key of a row in a layout.
+		return prefix + "_" + time.Now().UTC().Format("20060102150405000000000")
+	}
+	return prefix + "_" + hex.EncodeToString(buffer)
 }

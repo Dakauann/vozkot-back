@@ -21,6 +21,9 @@ import (
 	"strings"
 	"time"
 
+	"fmt"
+
+	authdomain "vozkot/domain/auth"
 	domain "vozkot/domain/event"
 	mediadomain "vozkot/domain/media"
 	ticketdomain "vozkot/domain/ticket"
@@ -65,6 +68,8 @@ type CreateInput struct {
 	StartsAt    time.Time
 	EndsAt      *time.Time
 	Status      domain.Status
+	// SalesMode is how the event sells. Empty defaults to counted on create.
+	SalesMode domain.SalesMode
 }
 
 // UpdateInput is an edit. Owner is not among the fields: an event does not
@@ -77,6 +82,8 @@ type UpdateInput struct {
 	StartsAt    time.Time
 	EndsAt      *time.Time
 	Status      domain.Status
+	// SalesMode is how the event sells. Empty leaves it as it was.
+	SalesMode domain.SalesMode
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (*domain.Event, error) {
@@ -88,6 +95,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*domain.Event,
 		StartsAt:    input.StartsAt,
 		EndsAt:      input.EndsAt,
 		Status:      input.Status,
+		SalesMode:   input.SalesMode,
 	}, s.now())
 	if err != nil {
 		return nil, err
@@ -111,8 +119,13 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*domain.Event,
 	return item, nil
 }
 
-func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (*domain.Event, error) {
-	item, err := s.repository.GetByID(ctx, id)
+func (s *Service) Update(
+	ctx context.Context,
+	actor authdomain.Actor,
+	id string,
+	input UpdateInput,
+) (*domain.Event, error) {
+	item, err := s.owned(ctx, actor, id)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +139,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (*do
 		StartsAt:    input.StartsAt,
 		EndsAt:      input.EndsAt,
 		Status:      input.Status,
+		SalesMode:   input.SalesMode,
 	}, s.now()); err != nil {
 		return nil, err
 	}
@@ -135,7 +149,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (*do
 	if err := s.repository.Update(ctx, item); err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, id)
+	return s.get(ctx, id)
 }
 
 // locate fills in coordinates, and knows when not to.
@@ -208,7 +222,29 @@ func (s *Service) availableSlug(ctx context.Context, base, eventID string) (stri
 	return base + "-" + randomHex(6), nil
 }
 
-func (s *Service) Get(ctx context.Context, id string) (*domain.Event, error) {
+// owned loads an event and refuses one belonging to somebody else.
+//
+// The single authorisation point of this package. Every operator method below
+// starts here, which is what keeps a new one from being the method that
+// forgot; it used to be a helper in the HTTP handler, where eight routes each
+// remembered to call it and nothing made them.
+func (s *Service) owned(ctx context.Context, actor authdomain.Actor, id string) (*domain.Event, error) {
+	item, err := s.get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !actor.MayReach(item.OwnerID) {
+		return nil, fmt.Errorf("%w: this event belongs to another operator", authdomain.ErrForbidden)
+	}
+	return item, nil
+}
+
+// Get returns one event to its owner.
+func (s *Service) Get(ctx context.Context, actor authdomain.Actor, id string) (*domain.Event, error) {
+	return s.owned(ctx, actor, id)
+}
+
+func (s *Service) get(ctx context.Context, id string) (*domain.Event, error) {
 	item, err := s.repository.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -247,7 +283,46 @@ func (s *Service) withMedia(ctx context.Context, item *domain.Event) (*domain.Ev
 }
 
 // List is the catalogue query, for buyers and operators alike.
-func (s *Service) List(ctx context.Context, filter domain.Filter) (domain.Page, error) {
+// List is the operator's own events, drafts included.
+//
+// Scoped here rather than by the caller: an unscoped listing is every box
+// office's unannounced line-ups, and the transport layer used to be the only
+// thing standing between them.
+func (s *Service) List(ctx context.Context, actor authdomain.Actor, filter domain.Filter) (domain.Page, error) {
+	if !actor.IsAdmin() {
+		if !actor.Authenticated() {
+			return domain.Page{}, authdomain.ErrUnauthorized
+		}
+		filter.OwnerID = actor.ID
+	}
+	return s.list(ctx, filter)
+}
+
+// ListPublic is the catalogue: published events only, owned by anybody.
+//
+// The status is pinned here and the owner cleared, so no caller can widen it.
+func (s *Service) ListPublic(ctx context.Context, filter domain.Filter) (domain.Page, error) {
+	filter.Status = domain.StatusPublished
+	filter.OwnerID = ""
+	return s.list(ctx, filter)
+}
+
+// ByIDs resolves events the caller already holds ids for.
+//
+// It exists for hydrating a name onto something else — a buyer's own order
+// list — and is deliberately NOT ownership-scoped: a buyer does not own the
+// event they bought a ticket to. It takes ids rather than a filter so it can
+// never be turned into a general listing of somebody else's catalogue.
+func (s *Service) ByIDs(ctx context.Context, ids []string) (domain.Page, error) {
+	if len(ids) == 0 {
+		return domain.Page{}, nil
+	}
+	return s.list(ctx, domain.Filter{IDs: ids, Limit: len(ids)}.Normalize())
+}
+
+// list is the query itself, with the gallery hydration every listing needs.
+// Unexported: every caller above has already said which audience it serves.
+func (s *Service) list(ctx context.Context, filter domain.Filter) (domain.Page, error) {
 	page, err := s.repository.List(ctx, filter)
 	if err != nil {
 		return domain.Page{}, err
@@ -280,20 +355,25 @@ func (s *Service) List(ctx context.Context, filter domain.Filter) (domain.Page, 
 // status field, because that is how an operator thinks about them and because
 // the listing's visibility should not be changed by accident while editing a
 // description.
-func (s *Service) Publish(ctx context.Context, id string) (*domain.Event, error) {
-	return s.changeStatus(ctx, id, domain.StatusPublished)
+func (s *Service) Publish(ctx context.Context, actor authdomain.Actor, id string) (*domain.Event, error) {
+	return s.changeStatus(ctx, actor, id, domain.StatusPublished)
 }
 
-func (s *Service) Unpublish(ctx context.Context, id string) (*domain.Event, error) {
-	return s.changeStatus(ctx, id, domain.StatusDraft)
+func (s *Service) Unpublish(ctx context.Context, actor authdomain.Actor, id string) (*domain.Event, error) {
+	return s.changeStatus(ctx, actor, id, domain.StatusDraft)
 }
 
-func (s *Service) Cancel(ctx context.Context, id string) (*domain.Event, error) {
-	return s.changeStatus(ctx, id, domain.StatusCancelled)
+func (s *Service) Cancel(ctx context.Context, actor authdomain.Actor, id string) (*domain.Event, error) {
+	return s.changeStatus(ctx, actor, id, domain.StatusCancelled)
 }
 
-func (s *Service) changeStatus(ctx context.Context, id string, status domain.Status) (*domain.Event, error) {
-	item, err := s.repository.GetByID(ctx, id)
+func (s *Service) changeStatus(
+	ctx context.Context,
+	actor authdomain.Actor,
+	id string,
+	status domain.Status,
+) (*domain.Event, error) {
+	item, err := s.owned(ctx, actor, id)
 	if err != nil {
 		return nil, err
 	}
@@ -305,15 +385,20 @@ func (s *Service) changeStatus(ctx context.Context, id string, status domain.Sta
 	if err := s.repository.Update(ctx, item); err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, id)
+	return s.get(ctx, id)
 }
 
 // PlacePin records coordinates a person chose.
 //
 // Separate from Update because it means something different: these are trusted
 // above anything a geocoder produces, and nothing later overwrites them.
-func (s *Service) PlacePin(ctx context.Context, id string, latitude, longitude float64) (*domain.Event, error) {
-	item, err := s.repository.GetByID(ctx, id)
+func (s *Service) PlacePin(
+	ctx context.Context,
+	actor authdomain.Actor,
+	id string,
+	latitude, longitude float64,
+) (*domain.Event, error) {
+	item, err := s.owned(ctx, actor, id)
 	if err != nil {
 		return nil, err
 	}
@@ -328,13 +413,14 @@ func (s *Service) PlacePin(ctx context.Context, id string, latitude, longitude f
 		StartsAt:    item.StartsAt,
 		EndsAt:      item.EndsAt,
 		Status:      item.Status,
+		SalesMode:   item.SalesMode,
 	}, s.now()); err != nil {
 		return nil, err
 	}
 	if err := s.repository.Update(ctx, item); err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, id)
+	return s.get(ctx, id)
 }
 
 // OnSaleTiers is what an event page's buy panel is built from.
@@ -366,8 +452,13 @@ func (s *Service) OnSaleTiers(ctx context.Context, eventID string) ([]ticketdoma
 // The event is loaded first so an upload can never invent the listing it
 // belongs to, which is what stops a caller writing objects into a bucket under
 // an id nothing will ever point at.
-func (s *Service) AttachMedia(ctx context.Context, eventID string, upload mediadomain.Upload) (*mediadomain.Media, error) {
-	item, err := s.repository.GetByID(ctx, eventID)
+func (s *Service) AttachMedia(
+	ctx context.Context,
+	actor authdomain.Actor,
+	eventID string,
+	upload mediadomain.Upload,
+) (*mediadomain.Media, error) {
+	item, err := s.owned(ctx, actor, eventID)
 	if err != nil {
 		return nil, err
 	}
@@ -375,8 +466,8 @@ func (s *Service) AttachMedia(ctx context.Context, eventID string, upload mediad
 	return s.media.Add(ctx, upload)
 }
 
-func (s *Service) RemoveMedia(ctx context.Context, eventID, mediaID string) error {
-	if _, err := s.repository.GetByID(ctx, eventID); err != nil {
+func (s *Service) RemoveMedia(ctx context.Context, actor authdomain.Actor, eventID, mediaID string) error {
+	if _, err := s.owned(ctx, actor, eventID); err != nil {
 		return err
 	}
 	return s.media.Remove(ctx, eventID, mediaID)
@@ -385,7 +476,10 @@ func (s *Service) RemoveMedia(ctx context.Context, eventID, mediaID string) erro
 // Delete removes the gallery before the event so that a failure at the storage
 // step still leaves an event the operator can retry on, rather than an
 // unreachable row and a bucket full of assets nothing points to.
-func (s *Service) Delete(ctx context.Context, id string) error {
+func (s *Service) Delete(ctx context.Context, actor authdomain.Actor, id string) error {
+	if _, err := s.owned(ctx, actor, id); err != nil {
+		return err
+	}
 	if err := s.media.RemoveAllByEvent(ctx, id); err != nil && !errors.Is(err, mediadomain.ErrNotFound) {
 		return err
 	}

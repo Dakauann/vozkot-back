@@ -9,14 +9,20 @@ package uow
 import (
 	"context"
 
+	"vozkot/domain/admission"
 	"vozkot/domain/event"
 	"vozkot/domain/order"
 	"vozkot/domain/queue"
+	"vozkot/domain/refund"
+	"vozkot/domain/seating"
 	"vozkot/domain/ticket"
 	domain "vozkot/domain/uow"
+	admissionRepository "vozkot/infra/repositories/admission"
 	eventRepository "vozkot/infra/repositories/event"
 	orderRepository "vozkot/infra/repositories/order"
 	queueRepository "vozkot/infra/repositories/queue"
+	refundRepository "vozkot/infra/repositories/refund"
+	seatingRepository "vozkot/infra/repositories/seating"
 	ticketRepository "vozkot/infra/repositories/ticket"
 
 	"gorm.io/gorm"
@@ -47,4 +53,13 @@ func (r *repositories) Tickets() ticket.Repository {
 	return ticketRepository.NewTicketRepository(r.tx)
 }
 func (r *repositories) Events() event.Repository { return eventRepository.NewEventRepository(r.tx) }
-func (r *repositories) Jobs() queue.Queue        { return queueRepository.NewJobRepository(r.tx) }
+func (r *repositories) Refunds() refund.Repository {
+	return refundRepository.NewRefundRepository(r.tx)
+}
+func (r *repositories) Admissions() admission.Repository {
+	return admissionRepository.NewAdmissionRepository(r.tx)
+}
+func (r *repositories) Seats() seating.Repository {
+	return seatingRepository.NewSeatRepository(r.tx)
+}
+func (r *repositories) Jobs() queue.Queue { return queueRepository.NewJobRepository(r.tx) }

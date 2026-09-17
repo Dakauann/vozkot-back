@@ -6,6 +6,7 @@ import (
 
 	domain "vozkot/domain/event"
 	mediadomain "vozkot/domain/media"
+	"vozkot/domain/pricing"
 	ticketdomain "vozkot/domain/ticket"
 )
 
@@ -37,6 +38,13 @@ type CreateRequest struct {
 	StartsAt    time.Time       `json:"startsAt" example:"2026-11-15T22:00:00-03:00"`
 	EndsAt      *time.Time      `json:"endsAt,omitempty"`
 	Status      string          `json:"status" enums:"draft,published,cancelled" example:"draft"`
+	// SalesMode is how this event sells: `counted` by the number, the way a
+	// party does, or `seated` by the chair, with a row and a seat number. It is
+	// a declaration and not a fact about inventory — the seats themselves
+	// answer whether a night has any — but nothing else can be derived from an
+	// event that has no tiers yet, and the interface has to know which question
+	// to ask next. Empty means counted.
+	SalesMode string `json:"salesMode" enums:"counted,seated" example:"counted"`
 }
 
 type UpdateRequest = CreateRequest
@@ -88,6 +96,7 @@ type EventResponse struct {
 	StartsAt    time.Time        `json:"startsAt"`
 	EndsAt      *time.Time       `json:"endsAt,omitempty"`
 	Status      string           `json:"status"`
+	SalesMode   string           `json:"salesMode" enums:"counted,seated"`
 	Media       []MediaResponse  `json:"media"`
 	CreatedAt   time.Time        `json:"createdAt"`
 	UpdatedAt   time.Time        `json:"updatedAt"`
@@ -144,7 +153,15 @@ type TierResponse struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	// Centavos. No float ever touches a price.
+	//
+	// PriceCents is the FACE value the organiser set. FeeCents is the service
+	// charge added on top of one ticket, and TotalCents is what the buyer will
+	// actually pay for it — the number that has to appear on the event page,
+	// because a total that first shows up at the last step of checkout is the
+	// single largest cause of an abandoned cart.
 	PriceCents int64  `json:"priceCents"`
+	FeeCents   int64  `json:"feeCents"`
+	TotalCents int64  `json:"totalCents"`
 	Currency   string `json:"currency"`
 	Quantity   int    `json:"quantity"`
 	Sold       int    `json:"sold"`
@@ -156,16 +173,25 @@ type TierListEnvelope struct {
 	Data []TierResponse `json:"data"`
 }
 
-func toTierResponses(items []ticketdomain.Ticket) []TierResponse {
+// toTierResponses prices each tier the way checkout will.
+//
+// The fee is applied HERE, from the same pricing.Fee the checkout service
+// carries, rather than being recomputed from a rate the client is told: the
+// number quoted on the event page and the number charged on the order have to
+// come from one place, and this is the only way they can.
+func toTierResponses(items []ticketdomain.Ticket, fee pricing.Fee) []TierResponse {
 	responses := make([]TierResponse, 0, len(items))
 	for index := range items {
 		item := items[index]
+		priced := fee.Quote(item.PriceCents, 1)
 		responses = append(responses, TierResponse{
 			ID:          item.ID,
 			EventID:     item.EventID,
 			Title:       item.Title,
 			Description: item.Description,
 			PriceCents:  item.PriceCents,
+			FeeCents:    priced.UnitFeeCents,
+			TotalCents:  priced.TotalCents,
 			Currency:    item.Currency,
 			Quantity:    item.Quantity,
 			Sold:        item.Sold,
@@ -204,6 +230,7 @@ func toEventResponse(item *domain.Event) EventResponse {
 		StartsAt:    item.StartsAt,
 		EndsAt:      item.EndsAt,
 		Status:      string(item.Status),
+		SalesMode:   string(item.SalesMode),
 		Media:       toMediaResponses(item.Media),
 		CreatedAt:   item.CreatedAt,
 		UpdatedAt:   item.UpdatedAt,

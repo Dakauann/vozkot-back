@@ -217,6 +217,19 @@ func uniqueSlug(tx *gorm.DB, base, eventID string) (string, error) {
 // Adding them before the backfill would refuse to migrate a database that has
 // customers in it, which is the only kind worth migrating carefully.
 func enforceEventLink(tx *gorm.DB) error {
+	// A database that has no tickets table yet has nothing to enforce.
+	//
+	// This runs BEFORE the AutoMigrate that creates the table, which is
+	// correct for an existing deployment and was silently wrong for a brand
+	// new one: on an empty database the COUNT below failed with "relation
+	// tickets does not exist" and took the whole migration with it. It went
+	// unnoticed because every database this had ever run against already had
+	// the table — until the test suite was pointed at a fresh one of its own.
+	// A first deploy would have hit exactly this.
+	if !tx.Migrator().HasTable("tickets") {
+		return nil
+	}
+
 	var orphans int64
 	if err := tx.Raw(`SELECT COUNT(*) FROM tickets WHERE event_id IS NULL OR event_id = ''`).Scan(&orphans).Error; err != nil {
 		return fmt.Errorf("count tiers with no event: %w", err)

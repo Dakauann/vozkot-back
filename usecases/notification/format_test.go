@@ -70,17 +70,6 @@ func TestLocationFallsBackWithoutTZData(t *testing.T) {
 	}
 }
 
-// reference is what a buyer reads out to support: short enough to say, long
-// enough to find the row.
-func TestReference(t *testing.T) {
-	if got, want := reference("ord_a1b2c3d4e5f6"), "A1B2C3D4"; got != want {
-		t.Fatalf("reference = %q, want %q", got, want)
-	}
-	if got, want := reference("ord_ab"), "AB"; got != want {
-		t.Fatalf("reference = %q, want %q", got, want)
-	}
-}
-
 func TestFirstName(t *testing.T) {
 	if got, want := firstName("Maria Aparecida dos Santos"), "Maria"; got != want {
 		t.Fatalf("firstName = %q, want %q", got, want)

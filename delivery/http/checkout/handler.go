@@ -16,10 +16,12 @@ import (
 	idempotencydomain "vozkot/domain/idempotency"
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
+	refunddomain "vozkot/domain/refund"
 	ticketdomain "vozkot/domain/ticket"
 	checkoutUsecase "vozkot/usecases/checkout"
 	eventUsecase "vozkot/usecases/event"
 	paymentUsecase "vozkot/usecases/payment"
+	refundUsecase "vozkot/usecases/refund"
 )
 
 const (
@@ -37,17 +39,22 @@ type Handler struct {
 	// rather than an id. Optional: without it an order still renders, minus its
 	// event block.
 	events *eventUsecase.Service
-	replay *httpx.Idempotency
+	// refunds answers "can this order still be cancelled" for a listing. Nil is
+	// supported and simply omits the block: an orders page without a refund
+	// button still lists orders.
+	refunds *refundUsecase.Service
+	replay  *httpx.Idempotency
 }
 
 func NewHandler(
 	checkout *checkoutUsecase.Service,
 	payments *paymentUsecase.Service,
 	events *eventUsecase.Service,
+	refunds *refundUsecase.Service,
 	store idempotencydomain.Store,
 	lease time.Duration,
 ) *Handler {
-	handler := &Handler{checkout: checkout, payments: payments, events: events}
+	handler := &Handler{checkout: checkout, payments: payments, events: events, refunds: refunds}
 	handler.replay = httpx.NewIdempotency(store, StatusFor,
 		httpx.WithLease(lease),
 		// Recovery for a claim orphaned by a crash. The order table already
@@ -174,12 +181,35 @@ func (h *Handler) confirm(response http.ResponseWriter, request *http.Request) {
 	httpx.WriteJSON(response, http.StatusOK, OrderEnvelope{Data: h.withEvent(request.Context(), item)})
 }
 
+// statusQuery splits a multi-valued `status` parameter into the one-status and
+// many-status forms of the filter.
+//
+// Blank values are dropped rather than passed through: `?status=` is a client
+// that sent an empty field, which means "no filter", not "orders whose status
+// is the empty string".
+func statusQuery(values []string) (orderdomain.Status, []orderdomain.Status) {
+	statuses := make([]orderdomain.Status, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			statuses = append(statuses, orderdomain.Status(trimmed))
+		}
+	}
+	switch len(statuses) {
+	case 0:
+		return "", nil
+	case 1:
+		return statuses[0], nil
+	default:
+		return "", statuses
+	}
+}
+
 // @Summary		Listar pedidos
-// @Description	Lista os pedidos do comprador autenticado, do mais recente para o mais antigo. Aceita filtro por status e por ingresso.
+// @Description	Lista os pedidos do comprador autenticado, do mais recente para o mais antigo. Aceita filtro por status e por ingresso. O parâmetro status pode ser repetido para filtrar por vários ao mesmo tempo.
 // @Tags			Compras
 // @Produce		json
 // @Security		BearerAuth
-// @Param		status query string false "Status do pedido" Enums(pending_payment,paid,expired,cancelled,failed,refunded,refund_required)
+// @Param		status query []string false "Status do pedido; pode ser repetido" collectionFormat(multi) Enums(pending_payment,paid,expired,cancelled,failed,refunded,refund_required)
 // @Param		ticketId query string false "Filtrar por ingresso"
 // @Param		eventId query string false "Filtrar pelos pedidos de um evento"
 // @Param		limit query int false "Itens por página (padrão 20, máximo 100)"
@@ -201,8 +231,15 @@ func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
 	}
 	offset := intQuery(query.Get("offset"), 0)
 
+	// One `status` narrows to that status; several narrow to the set. Repeating
+	// the parameter rather than inventing a comma list keeps it one name with
+	// one meaning, and it is what the URL spec and every client library
+	// already do with a multi-valued field.
+	single, several := statusQuery(query["status"])
+
 	filter := orderdomain.Filter{
-		Status:   orderdomain.Status(strings.TrimSpace(query.Get("status"))),
+		Status:   single,
+		Statuses: several,
 		TicketID: strings.TrimSpace(query.Get("ticketId")),
 		// Every order for one night, which is what an organiser looking at
 		// their own event asks for, and what a buyer asking "what did I buy
@@ -211,14 +248,7 @@ func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
 		Limit:   limit,
 		Offset:  offset,
 	}
-	// An operator sees the whole box office; a buyer sees only their own
-	// orders. Scoping here rather than in the use case keeps the rule where the
-	// caller's identity is known.
-	if claims.Role != string(adminRole) {
-		filter.BuyerID = claims.UserID
-	}
-
-	page, err := h.checkout.List(request.Context(), filter)
+	page, err := h.checkout.List(request.Context(), actor(request), filter)
 	if err != nil {
 		writeFailure(response, err)
 		return
@@ -297,17 +327,14 @@ func (h *Handler) refund(response http.ResponseWriter, request *http.Request) {
 		httpx.WriteError(response, http.StatusUnauthorized, authdomain.ErrUnauthorized)
 		return
 	}
-	// Refunds move money out. Only an operator may ask for one.
-	if claims.Role != string(adminRole) {
-		httpx.WriteError(response, http.StatusForbidden, errForbidden)
-		return
-	}
-
 	// Scheduled, not performed. Calling the provider on this request meant one
 	// slower than the write timeout left the money refunded at Mercado Pago and
 	// the order untouched here, with nothing to reconcile the two.
+	//
+	// "Only an operator may refund" is a rule about money, so it is enforced in
+	// usecases/payment rather than here.
 	id := strings.TrimSpace(request.PathValue("id"))
-	item, err := h.payments.RequestRefund(request.Context(), id)
+	item, err := h.payments.RequestRefund(request.Context(), actor(request), id)
 	if err != nil {
 		writeFailure(response, err)
 		return
@@ -315,25 +342,19 @@ func (h *Handler) refund(response http.ResponseWriter, request *http.Request) {
 	httpx.WriteJSON(response, http.StatusAccepted, OrderEnvelope{Data: toOrderResponse(item)})
 }
 
-// authorized loads the order and refuses one that belongs to someone else.
+// authorized loads the order the request names, for the caller making it.
+//
+// The refusal itself lives in usecases/checkout: this only supplies who is
+// asking. It stays as a helper because two routes want the same order and the
+// same path value, not because it decides anything.
 func (h *Handler) authorized(request *http.Request) (*orderdomain.Order, error) {
-	claims, _ := authdomain.ClaimsFromContext(request.Context())
-	if claims == nil {
-		return nil, authdomain.ErrUnauthorized
-	}
-	item, err := h.checkout.Get(request.Context(), strings.TrimSpace(request.PathValue("id")))
-	if err != nil {
-		return nil, err
-	}
-	if claims.Role != string(adminRole) && item.BuyerID != "" && item.BuyerID != claims.UserID {
-		return nil, errForbidden
-	}
-	return item, nil
+	return h.checkout.Get(request.Context(), actor(request), strings.TrimSpace(request.PathValue("id")))
 }
 
-const adminRole = "admin"
-
-var errForbidden = errors.New("this order belongs to another buyer")
+// actor is who is asking, as the use cases need it.
+func actor(request *http.Request) authdomain.Actor {
+	return authdomain.ActorFromContext(request.Context())
+}
 
 // errBadRequest marks a malformed request so StatusFor can answer 400 without
 // the handler writing the response itself.
@@ -353,7 +374,7 @@ func StatusFor(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, authdomain.ErrUnauthorized):
 		return http.StatusUnauthorized
-	case errors.Is(err, errForbidden):
+	case errors.Is(err, authdomain.ErrForbidden):
 		return http.StatusForbidden
 	case errors.Is(err, orderdomain.ErrNotFound), errors.Is(err, ticketdomain.ErrNotFound):
 		return http.StatusNotFound
@@ -429,7 +450,11 @@ func (h *Handler) withEvents(ctx context.Context, items []orderdomain.Order) []O
 		return responses
 	}
 
-	page, err := h.events.List(ctx, eventdomain.Filter{IDs: ids, Limit: len(ids)})
+	// ByIDs and not a filtered listing: this hydrates event names onto a
+	// buyer's own orders, and a buyer does not own the events they bought
+	// tickets to. Asking by id says that, and cannot widen into somebody
+	// else's catalogue.
+	page, err := h.events.ByIDs(ctx, ids)
 	if err != nil {
 		log.Printf("orders: could not resolve %d event(s) for a listing: %v", len(ids), err)
 		return responses
@@ -440,7 +465,51 @@ func (h *Handler) withEvents(ctx context.Context, items []orderdomain.Order) []O
 		found[happening.ID] = happening
 	}
 	attachEvents(responses, found)
+	h.attachRefunds(ctx, responses)
 	return responses
+}
+
+// attachRefunds marks the orders that already have a refund request in flight.
+//
+// ONE query for the whole page, for the same reason the events are resolved in
+// one: an order history asking "is there a request on this order" per row is
+// the N+1 that makes the screen slow for exactly the buyers who use it most.
+//
+// Only the in-flight request is resolved here, never the full eligibility: that
+// needs the policy, the event timing and a clock per order, and the order page
+// asks for it explicitly through /refund-eligibility when the buyer opens one
+// order. A listing needs to know which buttons say "em análise", not the exact
+// deadline of every row.
+//
+// A failure costs the page its refund badges and nothing else.
+func (h *Handler) attachRefunds(ctx context.Context, responses []OrderResponse) {
+	if h.refunds == nil || len(responses) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(responses))
+	for _, item := range responses {
+		ids = append(ids, item.ID)
+	}
+	open, err := h.refunds.OpenByOrders(ctx, ids)
+	if err != nil {
+		log.Printf("orders: could not resolve refund requests for a listing: %v", err)
+		return
+	}
+	if len(open) == 0 {
+		return
+	}
+	for index := range responses {
+		request, found := open[responses[index].ID]
+		if !found {
+			continue
+		}
+		responses[index].Refund = &RefundStateResponse{
+			Requestable: false,
+			Refusal:     string(refunddomain.RefusalRequestOpen),
+			Status:      string(request.Status),
+			RequestID:   request.ID,
+		}
+	}
 }
 
 // withEvent is the single-order case, kept on the same path so one order and a

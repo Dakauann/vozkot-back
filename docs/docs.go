@@ -302,6 +302,220 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/events/{id}/attendees": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "A lista de participantes, uma linha por lote de cada pedido. Traz nome, e-mail, o documento MASCARADO, e o que o comprador informou de sexo, idade, cidade e estado. O documento completo, a data de nascimento e o telefone nunca são devolvidos: o organizador precisa conferir quem chega na porta, não se passar por ela. Por padrão lista apenas pedidos pagos; use ` + "`" + `status=all` + "`" + ` para incluir os estornados.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Relatórios"
+                ],
+                "summary": "Listar quem comprou",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtrar por lote",
+                        "name": "ticketId",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "paid",
+                            "refunded",
+                            "all"
+                        ],
+                        "type": "string",
+                        "description": "Situação do pedido (padrão: paid)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Buscar por nome ou e-mail",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (padrão 50, máximo 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Deslocamento da paginação",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/report.AttendeeListEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/attendees.csv": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Baixa a lista de participantes como uma planilha. Aceita os mesmos filtros da listagem. O arquivo é UTF-8 com BOM e separado por ponto e vírgula, que é o que o Excel em português abre corretamente sem nenhum passo de importação; os valores vão em reais com vírgula decimal. As linhas são transmitidas em lotes conforme são lidas, então exportar um estádio inteiro não carrega tudo na memória.",
+                "produces": [
+                    "text/csv"
+                ],
+                "tags": [
+                    "Relatórios"
+                ],
+                "summary": "Exportar quem comprou (CSV)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtrar por lote",
+                        "name": "ticketId",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "paid",
+                            "refunded",
+                            "all"
+                        ],
+                        "type": "string",
+                        "description": "Situação do pedido (padrão: paid)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Buscar por nome ou e-mail",
+                        "name": "q",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "CSV",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/door": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Quantos ingressos do evento já entraram e quantos ainda faltam. É o número que a tela da portaria mostra. Restrito ao organizador do evento e a administradores.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Entrada"
+                ],
+                "summary": "Contadores da entrada",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admission.DoorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/events/{id}/media": {
             "post": {
                 "security": [
@@ -477,6 +691,419 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/events/{id}/report": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Os números do evento para o organizador: totais, e a divisão por sexo, faixa etária, estado, cidade, lote e dia. Ninguém é identificado aqui — são contagens sobre os dados que o comprador informou no cadastro, congelados no momento da compra. Todo valor aqui é ` + "`" + `netCents` + "`" + `: o que o organizador recebe, ou seja, o valor de face que ele definiu. A taxa de serviço da plataforma e o total pago pelo comprador não são retornados neste relatório. Restrito ao organizador do evento e a administradores.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Relatórios"
+                ],
+                "summary": "Relatório de vendas do evento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/report.SalesEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/scan": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lê um código de ingresso, por QR ou digitado, e o consome se for válido. Cada código vale uma única entrada: a segunda leitura responde ` + "`" + `already_admitted` + "`" + ` e informa quando a primeira ocorreu. Um código de outro evento responde ` + "`" + `wrong_event` + "`" + `, e um de pedido estornado responde ` + "`" + `void` + "`" + `. Restrito ao organizador do evento e a administradores.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Entrada"
+                ],
+                "summary": "Validar um ingresso na entrada",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Código lido",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admission.ScanRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ScanEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/seating": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Materializa os assentos de um evento a partir de uma planta publicada, com um lote por setor. Recusado se o evento já tem mapa: um segundo cria cadeiras duplicadas ou divergentes, e os dois são piores do que exigir que o operador diga qual queria.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Colocar planta à venda",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Planta e preços",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/seating.BindRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/seating.SeatingEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "O evento já tem mapa de assentos",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/seating/availability": {
+            "get": {
+                "description": "Quantos assentos de cada lote estão livres, que é o número mostrado acima de cada setor na escolha.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Disponibilidade por setor",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.AvailabilityEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/seating/best": {
+            "get": {
+                "description": "Escolhe a melhor sequência de assentos vizinhos que couber no pedido. É o caminho principal e não um atalho: a maioria não quer estudar um mapa, quer quatro lugares juntos, perto da frente, agora — e é também o que dá a quem usa leitor de tela uma forma real de comprar. Devolve vazio em vez de separar o grupo em fileiras diferentes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Melhor disponível",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Restringir a um lote",
+                        "name": "ticketId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Quantos assentos",
+                        "name": "quantity",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Pedir assentos acessíveis",
+                        "name": "accessible",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.MapEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/seating/map": {
+            "get": {
+                "description": "Os assentos de um evento e a situação de cada um. Com ` + "`" + `since` + "`" + `, devolve apenas o que mudou desde aquele cursor, que é o que torna barato consultar durante uma venda movimentada. Público: um mapa é o que alguém olha antes de ter conta.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Mapa de assentos",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Cursor devolvido na consulta anterior",
+                        "name": "since",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.MapEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/seats/block": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retira assentos da venda: cadeira quebrada, lugar da produção, visão obstruída. Nunca toca um assento reservado ou vendido — bloquear não cancela o ingresso de ninguém.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Bloquear assentos",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Assentos",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/seating.BlockRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.BlockResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/events/{id}/seats/unblock": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Desbloquear assentos",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do evento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Assentos",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/seating.BlockRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.BlockResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/events/{id}/unpublish": {
             "post": {
                 "security": [
@@ -510,6 +1137,287 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/layouts/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "A planta com seus setores e assentos, para o editor desenhar.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Planta completa",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID da planta",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.LayoutDetailEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/layouts/{id}/compliance": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Quantos espaços para cadeira de rodas, assentos de mobilidade reduzida e assentos para obesos a planta deve ter pelo Decreto 5.296/2004 (art. 23, com a redação do Decreto 9.404/2018), e quantos ela tem. É um relatório, não um bloqueio: a plataforma não sabe se uma sala específica é legalmente casa de espetáculo, e a responsabilidade é do organizador — que precisa ver o número.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Acessibilidade da planta",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID da planta",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ComplianceResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/layouts/{id}/preview": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Gera os assentos de um formulário e NÃO grava nada. É o que o editor desenha enquanto o organizador digita, e usa o mesmo gerador que a gravação vai usar — uma prévia construída por outro caminho é uma prévia que pode mentir. Funciona também em planta congelada: olhar não é editar.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Prévia da planta",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID da planta",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Setores",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/seating.GenerateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.LayoutDetailEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/layouts/{id}/publish": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Torna a planta vinculável a um evento.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Publicar planta",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID da planta",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/layouts/{id}/sections": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Substitui os setores e assentos de uma planta a partir de um formulário de fileiras: quantas fileiras, quantos assentos, onde ficam os corredores, qual a numeração. É o que descreve uma casa brasileira em uma requisição. Recusado quando a planta já está em uso por um evento.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Gerar assentos da planta",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID da planta",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Setores",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/seating.GenerateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.LayoutDetailEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "A planta está em uso",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/orders": {
             "get": {
                 "security": [
@@ -517,7 +1425,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lista os pedidos do comprador autenticado, do mais recente para o mais antigo. Aceita filtro por status e por ingresso.",
+                "description": "Lista os pedidos do comprador autenticado, do mais recente para o mais antigo. Aceita filtro por status e por ingresso. O parâmetro status pode ser repetido para filtrar por vários ao mesmo tempo.",
                 "produces": [
                     "application/json"
                 ],
@@ -527,17 +1435,21 @@ const docTemplate = `{
                 "summary": "Listar pedidos",
                 "parameters": [
                     {
-                        "enum": [
-                            "pending_payment",
-                            "paid",
-                            "expired",
-                            "cancelled",
-                            "failed",
-                            "refunded",
-                            "refund_required"
-                        ],
-                        "type": "string",
-                        "description": "Status do pedido",
+                        "type": "array",
+                        "items": {
+                            "enum": [
+                                "pending_payment",
+                                "paid",
+                                "expired",
+                                "cancelled",
+                                "failed",
+                                "refunded",
+                                "refund_required"
+                            ],
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Status do pedido; pode ser repetido",
                         "name": "status",
                         "in": "query"
                     },
@@ -835,6 +1747,245 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/orders/{id}/refund-eligibility": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Responde se o comprador ainda pode cancelar e receber o reembolso, até quando, e quanto receberia de volta. Quando não pode, devolve o motivo: ` + "`" + `window_closed` + "`" + ` (passaram os 7 dias do arrependimento, CDC art. 49), ` + "`" + `too_close_to_event` + "`" + ` (faltam menos de 48h para o evento), ` + "`" + `not_paid` + "`" + `, ` + "`" + `already_refunded` + "`" + `, ` + "`" + `event_passed` + "`" + ` ou ` + "`" + `request_open` + "`" + `. É a mesma função que o endpoint de solicitação usa para decidir, então a tela e a regra nunca divergem.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reembolsos"
+                ],
+                "summary": "Consultar se um pedido pode ser cancelado",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/refund.EligibilityResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/orders/{id}/refund-request": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Abre um pedido de reembolso. Dentro do prazo legal de arrependimento (7 dias da compra e no mínimo 48h antes do evento) e em caso de evento cancelado, o pedido é APROVADO na hora e o estorno entra na fila: são hipóteses que o organizador não tem como recusar. Fora disso, o pedido fica pendente para o organizador decidir. O valor devolvido inclui a taxa de serviço, conforme entendimento do Procon-SP e do STJ. Pedir duas vezes devolve 409.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reembolsos"
+                ],
+                "summary": "Solicitar reembolso de um pedido",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Motivo",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/refund.RequestBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/refund.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "O motivo informado não pode ser alegado por este usuário",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Já existe um pedido de reembolso em andamento",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Fora do prazo, ou pedido não reembolsável",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/orders/{id}/tickets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Os ingressos de um pedido pago, com o código de cada um para apresentar na entrada. Restrito ao comprador do pedido e a administradores: o organizador do evento NÃO vê estes códigos, porque quem os tem pode entrar.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Entrada"
+                ],
+                "summary": "Meus ingressos",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admission.TicketListEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/orders/{id}/tickets/{admissionId}/qr.png": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "O QR Code de um ingresso, em PNG, para ser exibido ou impresso. Endereçado pelo ID do ingresso e não pelo código: o endereço de uma imagem aparece no histórico do navegador e nos registros de qualquer proxy, e um ID sem sessão não serve para nada. Restrito ao comprador do pedido e a administradores.",
+                "produces": [
+                    "image/png"
+                ],
+                "tags": [
+                    "Entrada"
+                ],
+                "summary": "Imagem do ingresso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "ID do ingresso",
+                        "name": "admissionId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/public/events": {
             "get": {
                 "description": "A vitrine pública. Aceita busca textual, categoria, cidade, intervalo de datas, preço máximo, apenas gratuitos, apenas com ingressos disponíveis, ordenação e paginação. Só retorna eventos publicados, independentemente do que o cliente enviar.",
@@ -1019,6 +2170,269 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/refund-requests": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "A caixa de entrada do organizador e o histórico do comprador. Sem ` + "`" + `eventId` + "`" + `, lista os pedidos do próprio comprador; com ` + "`" + `eventId` + "`" + `, lista os do evento, e exige ser o organizador dele. Pendentes primeiro.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reembolsos"
+                ],
+                "summary": "Listar pedidos de reembolso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pedidos de reembolso de um evento (exige ser o organizador)",
+                        "name": "eventId",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "pending",
+                            "approved",
+                            "rejected"
+                        ],
+                        "type": "string",
+                        "description": "Filtrar por situação",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Somente os que ainda ocupam o pedido (pendentes e aprovados)",
+                        "name": "open",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (padrão 20, máximo 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Deslocamento da paginação",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ListEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/refund-requests/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reembolsos"
+                ],
+                "summary": "Consultar um pedido de reembolso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido de reembolso",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/refund.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/refund-requests/{id}/approve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Autoriza o estorno e o coloca na fila durável, na mesma transação: uma aprovação sem estorno, ou um estorno sem aprovação registrada, são estados que não podem existir. Restrito ao organizador do evento e a administradores. Aprovar duas vezes devolve 409, porque a segunda é outra pessoa discordando da primeira.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reembolsos"
+                ],
+                "summary": "Aprovar um pedido de reembolso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido de reembolso",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Observação da decisão",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/refund.DecisionBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/refund.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Já decidido",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/refund-requests/{id}/reject": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Recusa o pedido, com observação. A recusa é registrada e não altera o pedido de compra: é o caso sobre o qual o suporte será perguntado depois, então fica guardado. Restrito ao organizador do evento e a administradores.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reembolsos"
+                ],
+                "summary": "Recusar um pedido de reembolso",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do pedido de reembolso",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Observação da decisão",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/refund.DecisionBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/refund.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Já decidido",
+                        "schema": {
+                            "$ref": "#/definitions/refund.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/tickets": {
             "get": {
                 "security": [
@@ -1026,7 +2440,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lista os lotes de ingressos. Aceita filtro de status, busca por título ou descrição do lote, ordenação e paginação.",
+                "description": "Lista os lotes de ingressos DO OPERADOR AUTENTICADO, incluindo rascunhos. Um administrador vê os de todos. Aceita filtro de status, busca por título ou descrição do lote, ordenação e paginação. O parâmetro ` + "`" + `eventId` + "`" + ` restringe a um evento; ele não amplia o escopo, que é sempre o do chamador.",
                 "produces": [
                     "application/json"
                 ],
@@ -1380,6 +2794,207 @@ const docTemplate = `{
                         "description": "Unprocessable Entity",
                         "schema": {
                             "$ref": "#/definitions/ticket.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/venues": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Os locais do operador autenticado. Administradores veem todos.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Listar locais",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (padrão 20)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Deslocamento da paginação",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.VenueListEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cria um local físico reutilizável. Um teatro desenha sua planta uma vez e vende duzentas noites a partir dela.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Criar local",
+                "parameters": [
+                    {
+                        "description": "Dados do local",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/seating.VenueRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/seating.VenueEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/venues/{id}/layouts": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Listar plantas",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do local",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/seating.LayoutListEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cria uma planta do local. Um mesmo local pode ter mais de uma: a configuração padrão e a acústica, com o palco adiantado, têm assentos diferentes em lugares diferentes.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Assentos"
+                ],
+                "summary": "Criar planta",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID do local",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Dados da planta",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/seating.LayoutRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/seating.LayoutEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/seating.ErrorResponse"
                         }
                     }
                 }
@@ -2034,6 +3649,186 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "admission.DoorEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/admission.DoorResponse"
+                }
+            }
+        },
+        "admission.DoorResponse": {
+            "type": "object",
+            "properties": {
+                "admittedCount": {
+                    "type": "integer",
+                    "example": 682
+                },
+                "remaining": {
+                    "type": "integer",
+                    "example": 318
+                }
+            }
+        },
+        "admission.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "admission.ScanEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/admission.ScanResponse"
+                }
+            }
+        },
+        "admission.ScanRequest": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "description": "Code is whatever the scanner or the keyboard produced. It is normalised\nand check-verified by the domain, so the grouped form, lower case and\nthe usual O-for-zero substitutions are all accepted.",
+                    "type": "string",
+                    "example": "7QP5-2NFX-W78H"
+                }
+            }
+        },
+        "admission.ScanResponse": {
+            "type": "object",
+            "properties": {
+                "admitted": {
+                    "description": "Admitted is the one boolean the screen needs to pick green or red.",
+                    "type": "boolean",
+                    "example": true
+                },
+                "admittedAt": {
+                    "description": "AdmittedAt is when the code was FIRST used, which is what the holder is\ntold when it is refused as already used.",
+                    "type": "string",
+                    "example": "2026-09-16T21:14:03Z"
+                },
+                "admittedCount": {
+                    "type": "integer",
+                    "example": 682
+                },
+                "orderReference": {
+                    "type": "string",
+                    "example": "A1B2C3D4"
+                },
+                "outcome": {
+                    "description": "Outcome is the machine-readable verdict the client branches on:\nadmitted, already_admitted, void, wrong_event, not_paid, unknown,\nmalformed.",
+                    "type": "string",
+                    "enum": [
+                        "admitted",
+                        "already_admitted",
+                        "void",
+                        "wrong_event",
+                        "not_paid",
+                        "unknown",
+                        "malformed"
+                    ],
+                    "example": "admitted"
+                },
+                "remaining": {
+                    "description": "Remaining and Admitted counters keep the door's screen live without a\nsecond request.",
+                    "type": "integer",
+                    "example": 318
+                },
+                "seat": {
+                    "description": "Seat is the reserved chair, absent for general admission.\n\nThe most useful thing the door gains from reserved seating: somebody has\njust been told they may come in, and the next thing they ask is where to\nsit. Sent pre-formatted as well as in parts, so the screen and the email\ncannot disagree about how a chair is named.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/admission.SeatResponse"
+                        }
+                    ]
+                },
+                "sequence": {
+                    "description": "Sequence and Total read as \"2 de 3\" on a group's tickets.",
+                    "type": "integer",
+                    "example": 2
+                },
+                "ticketTitle": {
+                    "type": "string",
+                    "example": "Pista"
+                }
+            }
+        },
+        "admission.SeatResponse": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "description": "Label is the whole thing, formatted once on the server.\n\nThe door, the wallet, the receipt and the confirmation email all have to\nsay the same thing about a chair somebody is standing in front of, and\nfour copies of that format string is four chances to disagree.",
+                    "type": "string",
+                    "example": "Plateia A · Fila K · Assento 12"
+                },
+                "row": {
+                    "type": "string",
+                    "example": "K"
+                },
+                "seat": {
+                    "type": "string",
+                    "example": "12"
+                },
+                "section": {
+                    "type": "string",
+                    "example": "Plateia A"
+                }
+            }
+        },
+        "admission.TicketListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admission.TicketResponse"
+                    }
+                }
+            }
+        },
+        "admission.TicketResponse": {
+            "type": "object",
+            "properties": {
+                "admittedAt": {
+                    "type": "string"
+                },
+                "code": {
+                    "description": "Code is the printed, grouped form, and QRPayload is what a QR must\nencode. Both are sent because the page draws both, and the client must\nnot have to know that one is the other with the hyphens removed.",
+                    "type": "string",
+                    "example": "7QP5-2NFX-W78H"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "adm_9f2c1d8a"
+                },
+                "qrPayload": {
+                    "type": "string",
+                    "example": "7QP52NFXW78H"
+                },
+                "seat": {
+                    "$ref": "#/definitions/admission.SeatResponse"
+                },
+                "sequence": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "issued",
+                        "admitted",
+                        "void"
+                    ],
+                    "example": "issued"
+                },
+                "ticketTitle": {
+                    "type": "string",
+                    "example": "Pista"
+                }
+            }
+        },
         "auth.AuthResponse": {
             "type": "object",
             "properties": {
@@ -2101,6 +3896,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "1994-03-21"
                 },
+                "city": {
+                    "type": "string",
+                    "example": "Natal"
+                },
                 "document": {
                     "type": "string",
                     "example": "529.982.247-25"
@@ -2114,9 +3913,25 @@ const docTemplate = `{
                     ],
                     "example": "cpf"
                 },
+                "gender": {
+                    "description": "Gender, City and UF are OPTIONAL and always will be. They exist so an\norganiser can see who bought tickets to their event; a buyer who does not\nwant to answer must still be able to buy one, so an empty value is\naccepted and stored as \"não informado\" rather than refused.",
+                    "type": "string",
+                    "enum": [
+                        "female",
+                        "male",
+                        "non_binary",
+                        "other",
+                        "undisclosed"
+                    ],
+                    "example": "female"
+                },
                 "legalName": {
                     "type": "string",
                     "example": "Maria Souza"
+                },
+                "uf": {
+                    "type": "string",
+                    "example": "RN"
                 }
             }
         },
@@ -2126,6 +3941,10 @@ const docTemplate = `{
                 "birthDate": {
                     "type": "string",
                     "example": "1994-03-21"
+                },
+                "city": {
+                    "type": "string",
+                    "example": "Natal"
                 },
                 "complete": {
                     "type": "boolean",
@@ -2139,6 +3958,11 @@ const docTemplate = `{
                     "type": "string",
                     "example": "cpf"
                 },
+                "gender": {
+                    "description": "The optional demographics come back in full, unlike the document: they\nidentify nobody, and the form has to be able to show the buyer what it\nalready has so they are not asked the same question twice.",
+                    "type": "string",
+                    "example": "female"
+                },
                 "legalName": {
                     "type": "string",
                     "example": "Maria Souza"
@@ -2150,6 +3974,10 @@ const docTemplate = `{
                 "phoneVerified": {
                     "type": "boolean",
                     "example": false
+                },
+                "uf": {
+                    "type": "string",
+                    "example": "RN"
                 }
             }
         },
@@ -2260,6 +4088,13 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 2
                 },
+                "seatIds": {
+                    "description": "SeatIDs names the reserved chairs this line buys, for a seated event.\n\nIts presence is what makes the line seated. Omit it and the line is\ncounted stock, which is every line of a general-admission event and the\ncommon case. Send it and Quantity is derived from it: a mismatch is\nrefused rather than resolved, since either number could be the one the\nbuyer meant.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "ticketId": {
                     "type": "string",
                     "example": "tkt_a1b2c3d4"
@@ -2301,6 +4136,13 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 2
                 },
+                "seatIds": {
+                    "description": "SeatIDs is the single-tier shorthand's seats, for a reserved event.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "ticketId": {
                     "description": "TicketID and Quantity are the single-tier shorthand, kept because an\noperator selling one tier at the door, and the load harness, have no\nuse for a list of one. Ignored when Items is present.",
                     "type": "string",
@@ -2326,6 +4168,10 @@ const docTemplate = `{
         "checkout.ErrorResponse": {
             "type": "object",
             "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "insufficient_stock"
+                },
                 "error": {
                     "type": "string",
                     "example": "not enough tickets available"
@@ -2378,6 +4224,10 @@ const docTemplate = `{
         "checkout.OrderItemResponse": {
             "type": "object",
             "properties": {
+                "feeCents": {
+                    "type": "integer",
+                    "example": 4800
+                },
                 "quantity": {
                     "type": "integer",
                     "example": 2
@@ -2394,7 +4244,12 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 48000
                 },
+                "unitFeeCents": {
+                    "type": "integer",
+                    "example": 2400
+                },
                 "unitPriceCents": {
+                    "description": "UnitPriceCents and TotalCents are the FACE value: what the organiser\ncharges for one ticket, and for this line. The fee fields are the service\ncharge on top, so what the buyer paid for this line is totalCents +\nfeeCents.",
                     "type": "integer",
                     "example": 24000
                 }
@@ -2484,6 +4339,18 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 3
                 },
+                "refund": {
+                    "description": "Refund is the cancellation state of this order: whether the buyer may\nstill ask for their money back, until when, and the request already in\nflight if there is one.\n\nAttached to a LISTING as well as to a single order, resolved in one query\nfor the whole page, so an order history can draw its buttons without\nasking per row.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/checkout.RefundStateResponse"
+                        }
+                    ]
+                },
+                "serviceFeeCents": {
+                    "type": "integer",
+                    "example": 4800
+                },
                 "status": {
                     "type": "string",
                     "enum": [
@@ -2497,9 +4364,14 @@ const docTemplate = `{
                     ],
                     "example": "pending_payment"
                 },
-                "totalCents": {
+                "subtotalCents": {
+                    "description": "SubtotalCents is the tickets, ServiceFeeCents is the charge on top, and\nTotalCents is what the buyer pays — always the sum of the two.\n\nAll three are sent rather than just the total, because a checkout screen\nthat shows a number larger than the prices the buyer just chose, with no\nline explaining the difference, is the single largest cause of abandoned\ncarts. The client cannot derive the split from a rate: the rate is not\nsent, deliberately, because an old order was charged an old one.",
                     "type": "integer",
                     "example": 48000
+                },
+                "totalCents": {
+                    "type": "integer",
+                    "example": 52800
                 },
                 "updatedAt": {
                     "type": "string"
@@ -2542,6 +4414,35 @@ const docTemplate = `{
                         "in_analysis"
                     ],
                     "example": "pending"
+                }
+            }
+        },
+        "checkout.RefundStateResponse": {
+            "type": "object",
+            "properties": {
+                "refusal": {
+                    "description": "Refusal names why not: window_closed, too_close_to_event, not_paid,\nalready_refunded, event_passed, request_open.",
+                    "type": "string",
+                    "example": "window_closed"
+                },
+                "requestId": {
+                    "description": "RequestID is the request already open on this order, if any.",
+                    "type": "string",
+                    "example": "rfr_9f2c1d8a"
+                },
+                "requestable": {
+                    "description": "Requestable is whether the buyer may open a request RIGHT NOW.",
+                    "type": "boolean",
+                    "example": true
+                },
+                "status": {
+                    "description": "Status is the in-flight request's state — pending, approved or rejected —\nabsent when there is no request.",
+                    "type": "string",
+                    "example": "pending"
+                },
+                "until": {
+                    "description": "Until is the deadline for the right of withdrawal, so the order page can\nsay \"você pode cancelar até 12/07\" instead of \"soon\".",
+                    "type": "string"
                 }
             }
         },
@@ -2591,6 +4492,15 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "example": "Festival Aurora"
+                },
+                "salesMode": {
+                    "description": "SalesMode is how this event sells: ` + "`" + `counted` + "`" + ` by the number, the way a\nparty does, or ` + "`" + `seated` + "`" + ` by the chair, with a row and a seat number. It is\na declaration and not a fact about inventory — the seats themselves\nanswer whether a night has any — but nothing else can be derived from an\nevent that has no tiers yet, and the interface has to know which question\nto ask next. Empty means counted.",
+                    "type": "string",
+                    "enum": [
+                        "counted",
+                        "seated"
+                    ],
+                    "example": "counted"
                 },
                 "startsAt": {
                     "type": "string",
@@ -2653,6 +4563,13 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "salesMode": {
+                    "type": "string",
+                    "enum": [
+                        "counted",
+                        "seated"
+                    ]
                 },
                 "slug": {
                     "type": "string",
@@ -2751,6 +4668,13 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "salesMode": {
+                    "type": "string",
+                    "enum": [
+                        "counted",
+                        "seated"
+                    ]
                 },
                 "slug": {
                     "type": "string",
@@ -2917,11 +4841,14 @@ const docTemplate = `{
                 "eventId": {
                     "type": "string"
                 },
+                "feeCents": {
+                    "type": "integer"
+                },
                 "id": {
                     "type": "string"
                 },
                 "priceCents": {
-                    "description": "Centavos. No float ever touches a price.",
+                    "description": "Centavos. No float ever touches a price.\n\nPriceCents is the FACE value the organiser set. FeeCents is the service\ncharge added on top of one ticket, and TotalCents is what the buyer will\nactually pay for it — the number that has to appear on the event page,\nbecause a total that first shows up at the last step of checkout is the\nsingle largest cause of an abandoned cart.",
                     "type": "integer"
                 },
                 "quantity": {
@@ -2935,6 +4862,9 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                },
+                "totalCents": {
+                    "type": "integer"
                 }
             }
         },
@@ -2958,6 +4888,15 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Festival Aurora"
                 },
+                "salesMode": {
+                    "description": "SalesMode is how this event sells: ` + "`" + `counted` + "`" + ` by the number, the way a\nparty does, or ` + "`" + `seated` + "`" + ` by the chair, with a row and a seat number. It is\na declaration and not a fact about inventory — the seats themselves\nanswer whether a night has any — but nothing else can be derived from an\nevent that has no tiers yet, and the interface has to know which question\nto ask next. Empty means counted.",
+                    "type": "string",
+                    "enum": [
+                        "counted",
+                        "seated"
+                    ],
+                    "example": "counted"
+                },
                 "startsAt": {
                     "type": "string",
                     "example": "2026-11-15T22:00:00-03:00"
@@ -2970,6 +4909,1048 @@ const docTemplate = `{
                         "cancelled"
                     ],
                     "example": "draft"
+                }
+            }
+        },
+        "refund.DecisionBody": {
+            "type": "object",
+            "properties": {
+                "note": {
+                    "type": "string",
+                    "example": "Reembolso autorizado"
+                }
+            }
+        },
+        "refund.EligibilityResponse": {
+            "type": "object",
+            "properties": {
+                "allowed": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "amountCents": {
+                    "description": "AmountCents is what would come back to the BUYER and FeeCents how much of\nit is our commission. Both are pointers and both are OMITTED for an\norganiser: see SeesPlatformShare in usecases/refund.\n\nOmitted rather than zeroed. A zero here would render as \"R$ 0,00 comes\nback\", which is worse than saying nothing.",
+                    "type": "integer",
+                    "example": 11000
+                },
+                "feeCents": {
+                    "type": "integer",
+                    "example": 1000
+                },
+                "organiserCents": {
+                    "description": "OrganiserCents is the part of the refund that comes out of the\norganiser's revenue. Always sent, to everyone.",
+                    "type": "integer",
+                    "example": 10000
+                },
+                "refundsFees": {
+                    "description": "RefundsFees says the fee is included. Rendered beside the amount because\n\"R$ 110,00, taxa incluída\" is the sentence that prevents the dispute.",
+                    "type": "boolean",
+                    "example": true
+                },
+                "refusal": {
+                    "description": "Refusal is the stable name of the reason, for a client to branch on:\nwindow_closed, too_close_to_event, not_paid, already_refunded,\nevent_passed, request_open.",
+                    "type": "string",
+                    "example": "too_close_to_event"
+                },
+                "request": {
+                    "description": "Request is the one already in flight, when there is one.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/refund.Response"
+                        }
+                    ]
+                },
+                "until": {
+                    "description": "Until is when the right to cancel expires, so the page can render a real\ndate instead of \"soon\". Absent for grounds that have no deadline.",
+                    "type": "string"
+                }
+            }
+        },
+        "refund.Envelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/refund.Response"
+                }
+            }
+        },
+        "refund.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "refund.ListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/refund.Response"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "refund.RequestBody": {
+            "type": "object",
+            "properties": {
+                "note": {
+                    "type": "string",
+                    "example": "Não vou conseguir ir"
+                },
+                "reason": {
+                    "description": "Reason is the grounds. A buyer may send buyer_withdrawal or\nevent_cancelled and nothing else; the other two are refused for them,\nbecause they are the grounds with no window.",
+                    "type": "string",
+                    "enum": [
+                        "buyer_withdrawal",
+                        "event_cancelled",
+                        "organiser_goodwill"
+                    ],
+                    "example": "buyer_withdrawal"
+                }
+            }
+        },
+        "refund.Response": {
+            "type": "object",
+            "properties": {
+                "amountCents": {
+                    "description": "AmountCents is what goes back to the BUYER and FeeCents how much of it is\nour commission. Omitted for an organiser; see SeesPlatformShare.",
+                    "type": "integer",
+                    "example": 11000
+                },
+                "autoApproved": {
+                    "description": "AutoApproved is true when the POLICY decided rather than a person, which\nis what the screen shows instead of naming a reviewer.",
+                    "type": "boolean",
+                    "example": true
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "decidedAt": {
+                    "type": "string"
+                },
+                "decidedBy": {
+                    "type": "string"
+                },
+                "decisionNote": {
+                    "type": "string"
+                },
+                "eventId": {
+                    "type": "string",
+                    "example": "evt_88"
+                },
+                "feeCents": {
+                    "type": "integer",
+                    "example": 1000
+                },
+                "id": {
+                    "type": "string",
+                    "example": "rfr_9f2c1d8a"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "orderId": {
+                    "type": "string",
+                    "example": "ord_4a1b7c"
+                },
+                "organiserCents": {
+                    "description": "OrganiserCents is what comes out of the organiser's revenue. Always sent.",
+                    "type": "integer",
+                    "example": 10000
+                },
+                "reason": {
+                    "type": "string",
+                    "example": "buyer_withdrawal"
+                },
+                "requestedBy": {
+                    "type": "string",
+                    "example": "usr_31"
+                },
+                "status": {
+                    "description": "Status is pending, approved or rejected: where the DECISION stands.\n\nWhether the money has actually arrived is a different question and is\nanswered by ` + "`" + `orderStatus` + "`" + ` below, which is the order's own. Two fields\nrather than one combined status, because only one of them is stored and\nthe two therefore cannot disagree; a single \"completed\" written here\nwould be a second writer for a fact the settlement path already owns.",
+                    "type": "string",
+                    "example": "approved"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "report.AttendeeListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/report.AttendeeResponse"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "report.AttendeeResponse": {
+            "type": "object",
+            "properties": {
+                "admittedCount": {
+                    "description": "AdmittedCount is how many of this line's Quantity tickets have entered.",
+                    "type": "integer",
+                    "example": 2
+                },
+                "ageYears": {
+                    "description": "AgeYears is the buyer's age AT PURCHASE, 0 when not informed.",
+                    "type": "integer",
+                    "example": 31
+                },
+                "city": {
+                    "type": "string",
+                    "example": "Natal"
+                },
+                "documentMask": {
+                    "type": "string",
+                    "example": "529***25"
+                },
+                "email": {
+                    "type": "string",
+                    "example": "maria@exemplo.com.br"
+                },
+                "gender": {
+                    "type": "string",
+                    "example": "female"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Maria Souza"
+                },
+                "netCents": {
+                    "type": "integer",
+                    "example": 48000
+                },
+                "orderId": {
+                    "type": "string",
+                    "example": "ord_4a1b7c"
+                },
+                "purchasedAt": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "status": {
+                    "type": "string",
+                    "example": "paid"
+                },
+                "ticketId": {
+                    "type": "string",
+                    "example": "tkt_9f"
+                },
+                "ticketTitle": {
+                    "type": "string",
+                    "example": "Pista"
+                },
+                "uf": {
+                    "type": "string",
+                    "example": "RN"
+                },
+                "unitPriceCents": {
+                    "type": "integer",
+                    "example": 24000
+                }
+            }
+        },
+        "report.DayResponse": {
+            "type": "object",
+            "properties": {
+                "day": {
+                    "description": "Day is YYYY-MM-DD in UTC, the day the money LANDED.",
+                    "type": "string",
+                    "example": "2026-07-26"
+                },
+                "netCents": {
+                    "type": "integer",
+                    "example": 15920000
+                },
+                "orders": {
+                    "type": "integer",
+                    "example": 612
+                },
+                "tickets": {
+                    "type": "integer",
+                    "example": 1592
+                }
+            }
+        },
+        "report.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "report.SalesEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/report.SalesResponse"
+                }
+            }
+        },
+        "report.SalesResponse": {
+            "type": "object",
+            "properties": {
+                "byAge": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/report.SliceResponse"
+                    }
+                },
+                "byCity": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/report.SliceResponse"
+                    }
+                },
+                "byDay": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/report.DayResponse"
+                    }
+                },
+                "byGender": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/report.SliceResponse"
+                    }
+                },
+                "byTier": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/report.SliceResponse"
+                    }
+                },
+                "byUf": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/report.SliceResponse"
+                    }
+                },
+                "eventId": {
+                    "type": "string",
+                    "example": "evt_88"
+                },
+                "totals": {
+                    "$ref": "#/definitions/report.TotalsResponse"
+                }
+            }
+        },
+        "report.SliceResponse": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "example": "SP"
+                },
+                "label": {
+                    "type": "string",
+                    "example": "Pista"
+                },
+                "netCents": {
+                    "description": "NetCents is the organiser's earnings for this slice. It is the only\nmoney field here; see the money note in domain/report.",
+                    "type": "integer",
+                    "example": 9370000
+                },
+                "orders": {
+                    "description": "Orders is how many purchases; Tickets is how many admissions. One order\nfor eight tickets is one buyer and eight seats, and a table showing only\none of them is wrong for half the decisions made from it.",
+                    "type": "integer",
+                    "example": 412
+                },
+                "tickets": {
+                    "type": "integer",
+                    "example": 937
+                }
+            }
+        },
+        "report.TotalsResponse": {
+            "type": "object",
+            "properties": {
+                "buyers": {
+                    "description": "Buyers is DISTINCT accounts: how many PEOPLE, not how many purchases.",
+                    "type": "integer",
+                    "example": 11902
+                },
+                "netCents": {
+                    "description": "NetCents is what the organiser earned: the sum of the face values they\npriced. RefundedCents is at face value too.\n\nNeither the gross the buyer paid nor our commission is sent, and not\nbecause they are filtered out here — the query never selects them. See\nthe money note in domain/report.",
+                    "type": "integer",
+                    "example": 357350000
+                },
+                "orders": {
+                    "type": "integer",
+                    "example": 12430
+                },
+                "refundedCents": {
+                    "type": "integer",
+                    "example": 2750000
+                },
+                "refundedOrders": {
+                    "type": "integer",
+                    "example": 87
+                },
+                "tickets": {
+                    "type": "integer",
+                    "example": 35735
+                }
+            }
+        },
+        "seating.AvailabilityEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/seating.AvailabilityResponse"
+                    }
+                }
+            }
+        },
+        "seating.AvailabilityResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "integer"
+                },
+                "ticketId": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "seating.BindRequest": {
+            "type": "object",
+            "properties": {
+                "layoutId": {
+                    "type": "string"
+                },
+                "ticketBySection": {
+                    "description": "TicketBySection prices each setor: the section id mapped to the tier its\nseats sell at. A section left out is not sold at all, which is how a\nbalcony is closed for one night without editing the room.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "seating.BlockRequest": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "enum": [
+                        "house",
+                        "production",
+                        "broken",
+                        "distancing"
+                    ],
+                    "example": "broken"
+                },
+                "seatIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "seating.BlockResponse": {
+            "type": "object",
+            "properties": {
+                "moved": {
+                    "description": "Moved is how many seats actually changed, which can be fewer than asked:\na held or sold seat is never taken from the person holding it, and the\ndifference is what lets a screen say \"3 de 4 bloqueados; um está vendido\".",
+                    "type": "integer"
+                }
+            }
+        },
+        "seating.ComplianceResponse": {
+            "type": "object",
+            "properties": {
+                "capacity": {
+                    "type": "integer"
+                },
+                "compliant": {
+                    "type": "boolean"
+                },
+                "haveCompanion": {
+                    "type": "integer"
+                },
+                "haveObese": {
+                    "type": "integer"
+                },
+                "haveReducedMobility": {
+                    "type": "integer"
+                },
+                "haveWheelchair": {
+                    "type": "integer"
+                },
+                "requiredObese": {
+                    "type": "integer"
+                },
+                "requiredReducedMobility": {
+                    "type": "integer"
+                },
+                "requiredWheelchair": {
+                    "type": "integer"
+                }
+            }
+        },
+        "seating.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "seating.GenerateRequest": {
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/seating.SectionRequest"
+                    }
+                }
+            }
+        },
+        "seating.LayoutDetailEnvelope": {
+            "type": "object",
+            "properties": {
+                "collisions": {
+                    "description": "Collisions are the sections drawn on top of each other, by id.\n\nReported on a preview and REFUSED on a save, and computed by the same rule\nboth times. The preview has to be able to draw a collision — that is how\nan organiser sees the one they are making — so the editor marks these and\ndisables its own save, and the server refuses the request regardless.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "compliance": {
+                    "description": "Compliance is present on a PREVIEW, computed from the draft being drawn.\n\nIt travels with the preview rather than being fetched separately so the\nnumber and the room on screen can never describe different things — which\nthey did: \"against 0 places, the quotas are met\" beside a 192-seat\nsector, because the report came from the saved layout.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/seating.ComplianceResponse"
+                        }
+                    ]
+                },
+                "data": {
+                    "$ref": "#/definitions/seating.LayoutResponse"
+                },
+                "seats": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/seating.SeatResponse"
+                    }
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/seating.SectionResponse"
+                    }
+                },
+                "suggestedKinds": {
+                    "description": "SuggestedKinds names chairs that would satisfy the quotas the room is\nshort of, keyed \"FILA/ASSENTO\". Present on a preview when something is\nmissing, so the studio can offer to apply it in one action instead of\ntelling the organiser to find them by hand.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "seating.LayoutEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/seating.LayoutResponse"
+                }
+            }
+        },
+        "seating.LayoutListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/seating.LayoutResponse"
+                    }
+                }
+            }
+        },
+        "seating.LayoutRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "example": "Configuração padrão"
+                },
+                "viewBoxHeight": {
+                    "type": "integer",
+                    "example": 800
+                },
+                "viewBoxWidth": {
+                    "type": "integer",
+                    "example": 1000
+                }
+            }
+        },
+        "seating.LayoutResponse": {
+            "type": "object",
+            "properties": {
+                "frozen": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "venueId": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "viewBoxHeight": {
+                    "type": "integer"
+                },
+                "viewBoxWidth": {
+                    "type": "integer"
+                }
+            }
+        },
+        "seating.MapEnvelope": {
+            "type": "object",
+            "properties": {
+                "complete": {
+                    "description": "Complete distinguishes a whole map from a delta, so a client knows\nwhether to replace its state or patch it.",
+                    "type": "boolean"
+                },
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/seating.MapSeatResponse"
+                    }
+                },
+                "markers": {
+                    "description": "Markers are the room's scenery, sent with a complete map and omitted from\na delta: the stage does not move between two polls.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/seating.MapMarkerResponse"
+                    }
+                },
+                "version": {
+                    "description": "Version is the cursor to send back as ` + "`" + `since` + "`" + ` on the next poll.",
+                    "type": "integer"
+                }
+            }
+        },
+        "seating.MapMarkerResponse": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "stage",
+                        "arena"
+                    ]
+                },
+                "name": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "number"
+                },
+                "x": {
+                    "description": "X and Y are the marker's TOP-LEFT corner, in the same coordinate space as\nthe seats. Width and Height are its size.",
+                    "type": "number"
+                },
+                "y": {
+                    "type": "number"
+                }
+            }
+        },
+        "seating.MapSeatResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "row": {
+                    "type": "string"
+                },
+                "rowOrder": {
+                    "type": "integer"
+                },
+                "seat": {
+                    "type": "string"
+                },
+                "seatOrder": {
+                    "type": "integer"
+                },
+                "section": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "available",
+                        "held",
+                        "sold",
+                        "blocked"
+                    ]
+                },
+                "ticketId": {
+                    "type": "string"
+                },
+                "x": {
+                    "description": "X and Y are where the seat sits in the layout coordinate space. A picker\ndraws from these, which is what makes a rodeo stand render as an arc\naround an arena rather than as a straight row.",
+                    "type": "number"
+                },
+                "y": {
+                    "type": "number"
+                }
+            }
+        },
+        "seating.SeatResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "row": {
+                    "type": "string"
+                },
+                "rowOrder": {
+                    "type": "integer"
+                },
+                "seat": {
+                    "type": "string"
+                },
+                "seatOrder": {
+                    "type": "integer"
+                },
+                "sectionId": {
+                    "type": "string"
+                },
+                "x": {
+                    "type": "number"
+                },
+                "y": {
+                    "type": "number"
+                }
+            }
+        },
+        "seating.SeatingEnvelope": {
+            "type": "object",
+            "properties": {
+                "eventId": {
+                    "type": "string"
+                },
+                "layoutId": {
+                    "type": "string"
+                },
+                "layoutVersion": {
+                    "type": "integer"
+                },
+                "seatCount": {
+                    "type": "integer"
+                }
+            }
+        },
+        "seating.SectionRequest": {
+            "type": "object",
+            "properties": {
+                "capacity": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "curve": {
+                    "type": "number",
+                    "example": 0
+                },
+                "definition": {
+                    "description": "Definition is this same object as the editor described it, echoed back on\na read so a saved room can be reopened in the builder rather than only\nlooked at. Ignored on the way in: the server records what it received.",
+                    "type": "object"
+                },
+                "displayOrder": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "firstRowLetter": {
+                    "type": "string",
+                    "example": "A"
+                },
+                "firstTable": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "height": {
+                    "type": "number",
+                    "example": 0
+                },
+                "kind": {
+                    "description": "Kind is what this object is. ` + "`" + `stage` + "`" + ` and ` + "`" + `arena` + "`" + ` hold no seats: they are\nscenery a buyer orients by, placed and sized like anything else, which is\nwhy they are sections and not a mode on the layout.",
+                    "type": "string",
+                    "enum": [
+                        "seated",
+                        "standing",
+                        "booth",
+                        "stage",
+                        "arena"
+                    ],
+                    "example": "seated"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Plateia A"
+                },
+                "numbering": {
+                    "type": "string",
+                    "enum": [
+                        "sequential",
+                        "odd_even"
+                    ],
+                    "example": "sequential"
+                },
+                "offsetX": {
+                    "description": "OffsetX and OffsetY are the object's TOP-LEFT corner, and what the canvas\nsets by dragging. Width and Height size a marker.",
+                    "type": "number",
+                    "example": 0
+                },
+                "offsetY": {
+                    "type": "number",
+                    "example": 0
+                },
+                "radius": {
+                    "type": "number",
+                    "example": 160
+                },
+                "rowGap": {
+                    "type": "number",
+                    "example": 28
+                },
+                "rowLabels": {
+                    "type": "string",
+                    "enum": [
+                        "letters",
+                        "numbers"
+                    ],
+                    "example": "letters"
+                },
+                "rowShape": {
+                    "description": "The row generator. Ignored for a standing or booth section, which lays\nout no individual chairs.\n\n` + "`" + `rowShape` + "`" + ` and not ` + "`" + `shape` + "`" + `: this section already has a ` + "`" + `shape` + "`" + `, which is\nthe polygon painted behind it. This one is how the ROWS run.\n\n` + "`" + `rowShape` + "`" + ` chooses the geometry: ` + "`" + `linear` + "`" + ` is a theatre, rows along a line;\n` + "`" + `arc` + "`" + ` is a rodeo, a stadium or a gymnasium, rows as concentric arcs\naround an arena in the middle.",
+                    "type": "string",
+                    "enum": [
+                        "linear",
+                        "arc"
+                    ],
+                    "example": "linear"
+                },
+                "rows": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "seatGap": {
+                    "type": "number",
+                    "example": 24
+                },
+                "seatKinds": {
+                    "description": "SeatKinds marks individual chairs, keyed \"FILA/ASSENTO\" — \"K/12\".\n\nThis is where the accessibility seats the law requires get set, and the\ncompliance report reads what lands here.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "seatPitch": {
+                    "description": "Arc only. Radius is how far the first row sits from the centre of the\narena; startAngle and sweepAngle are degrees clockwise from the top of\nthe map, so a stand at twelve o clock starts at zero.\n\nThe block's PLACEMENT is not here. It belongs to the section above, which\nis what the canvas drags; holding it in two places is one place too many.\n\nSeatPitch holds the spacing along an arc, so rows gain seats as they get\nlonger. That is what a real stand does; a fixed count per row fans out.",
+                    "type": "number",
+                    "example": 26
+                },
+                "seatsPerRow": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "seatsPerTable": {
+                    "type": "integer",
+                    "example": 8
+                },
+                "shape": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "skips": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "startAngle": {
+                    "type": "number",
+                    "example": 0
+                },
+                "sweepAngle": {
+                    "type": "number",
+                    "example": 90
+                },
+                "tableGap": {
+                    "type": "number",
+                    "example": 110
+                },
+                "tableRadius": {
+                    "type": "number",
+                    "example": 34
+                },
+                "tables": {
+                    "description": "Round tables instead of rows, when ` + "`" + `tables` + "`" + ` is set. A camarote at a\nrodeo, a gala floor. Each table is a ring of seats and reads as its own\nrow, so four seats together resolves to four seats at one table.",
+                    "type": "integer",
+                    "example": 12
+                },
+                "tablesPerRow": {
+                    "type": "integer",
+                    "example": 4
+                },
+                "width": {
+                    "type": "number",
+                    "example": 0
+                }
+            }
+        },
+        "seating.SectionResponse": {
+            "type": "object",
+            "properties": {
+                "capacity": {
+                    "type": "integer"
+                },
+                "definition": {
+                    "description": "Definition is the editor form this block was generated from. It is what\nmakes a saved room editable instead of only viewable.",
+                    "type": "object"
+                },
+                "displayOrder": {
+                    "type": "integer"
+                },
+                "height": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "offsetX": {
+                    "type": "number"
+                },
+                "offsetY": {
+                    "type": "number"
+                },
+                "shape": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "width": {
+                    "type": "number"
+                }
+            }
+        },
+        "seating.VenueEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/seating.VenueResponse"
+                }
+            }
+        },
+        "seating.VenueListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/seating.VenueResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "seating.VenueRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "example": "Teatro Municipal"
+                }
+            }
+        },
+        "seating.VenueResponse": {
+            "type": "object",
+            "properties": {
+                "capacity": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
                 }
             }
         },

@@ -6,10 +6,14 @@ import (
 
 	httpSwagger "github.com/swaggo/http-swagger"
 
+	admissionHTTP "vozkot/delivery/http/admission"
 	authHTTP "vozkot/delivery/http/auth"
 	checkoutHTTP "vozkot/delivery/http/checkout"
 	eventHTTP "vozkot/delivery/http/event"
 	"vozkot/delivery/http/httpx"
+	refundHTTP "vozkot/delivery/http/refund"
+	reportHTTP "vozkot/delivery/http/report"
+	seatingHTTP "vozkot/delivery/http/seating"
 	ticketHTTP "vozkot/delivery/http/ticket"
 	"vozkot/infra/http/middleware"
 )
@@ -43,6 +47,20 @@ type Dependencies struct {
 	// Events is the catalogue: public buyer routes plus operator routes.
 	Events   *eventHTTP.Handler
 	Checkout *checkoutHTTP.Handler
+	// Refunds is the cancellation surface: the buyer's request and the
+	// organiser's inbox. Nil leaves both unmounted, which is what a deployment
+	// with no payment provider gets — a refund endpoint that cannot refund is
+	// worse than no endpoint.
+	Refunds *refundHTTP.Handler
+	// Reports is the organiser's audience dashboard and the attendee export.
+	Reports *reportHTTP.Handler
+	// Admissions is the door: scanning a code at an event, and a holder's own
+	// tickets under their order.
+	Admissions *admissionHTTP.Handler
+	// Seating is reserved seating: the organiser's room editor, and the public
+	// seat map a buyer picks from. Nil leaves both unmounted, which is what a
+	// deployment selling only general admission gets.
+	Seating *seatingHTTP.Handler
 	// Webhooks is nil when no payment provider is configured, and the route is
 	// then not mounted at all; a webhook endpoint that cannot verify a
 	// signature must not exist.
@@ -101,6 +119,14 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.Events != nil {
 		deps.Events.RegisterPublic(router)
 	}
+	if deps.Seating != nil {
+		// The seat map is public for the same reason the catalogue is: it is
+		// what somebody looks at before they have an account. The view it
+		// serves carries no order id and no hold deadline, so being public
+		// tells a visitor which chairs are free and nothing about who has
+		// the others.
+		deps.Seating.RegisterPublicRoutes(router)
+	}
 
 	protected := http.NewServeMux()
 	deps.Tickets.Register(protected)
@@ -110,10 +136,38 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.Checkout != nil {
 		deps.Checkout.Register(protected)
 	}
+	if deps.Refunds != nil {
+		// Split across two prefixes on purpose: the two routes that act on an
+		// order live under /api/v1/orders/, and the inbox has its own prefix
+		// because it is a listing of requests rather than of orders.
+		deps.Refunds.RegisterOrderRoutes(protected)
+		deps.Refunds.Register(protected)
+	}
+	if deps.Admissions != nil {
+		// Split for the same reason refunds are: the door lives under the
+		// event it guards, and a holder's tickets under the order that paid
+		// for them.
+		deps.Admissions.RegisterOrderRoutes(protected)
+		deps.Admissions.Register(protected)
+	}
+	if deps.Reports != nil {
+		// Under /api/v1/events/{id}/, beside the operator routes the events
+		// handler already mounts there.
+		deps.Reports.Register(protected)
+	}
+	if deps.Seating != nil {
+		// The editor: venues, layouts and putting a room on sale. Behind the
+		// session, and every route authorized in usecases/seating against the
+		// actor's ownership rather than here.
+		deps.Seating.Register(protected)
+	}
 	for _, pattern := range []string{
 		"/api/v1/tickets", "/api/v1/tickets/",
 		"/api/v1/orders", "/api/v1/orders/",
 		"/api/v1/events", "/api/v1/events/",
+		"/api/v1/refund-requests", "/api/v1/refund-requests/",
+		"/api/v1/venues", "/api/v1/venues/",
+		"/api/v1/layouts", "/api/v1/layouts/",
 	} {
 		router.Handle(pattern, deps.AuthMiddleware.Require(protected))
 	}

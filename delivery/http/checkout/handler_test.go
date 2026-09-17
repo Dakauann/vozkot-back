@@ -15,7 +15,7 @@ import (
 
 	authdomain "vozkot/domain/auth"
 	idempotencydomain "vozkot/domain/idempotency"
-	orderdomain "vozkot/domain/order"
+	"vozkot/domain/pricing"
 	ticketdomain "vozkot/domain/ticket"
 	idempotencyRepository "vozkot/infra/repositories/idempotency"
 	orderRepository "vozkot/infra/repositories/order"
@@ -38,9 +38,22 @@ type harness struct {
 	keys     idempotencydomain.Store
 	ticketID string
 	userID   string
+	// priceCents is the seeded tier's face value and fee the commission the
+	// handler's box office adds, so a test can state the expected split
+	// without repeating either number.
+	priceCents int64
+	fee        pricing.Fee
 }
 
 func newHarness(t *testing.T, capacity int) *harness {
+	t.Helper()
+	return newHarnessWithFee(t, capacity, pricing.Fee{})
+}
+
+// newHarnessWithFee is the same API, served by a box office that charges a
+// commission. The fee is a parameter rather than a second harness so the
+// seeding and cleanup below have exactly one definition.
+func newHarnessWithFee(t *testing.T, capacity int, fee pricing.Fee) *harness {
 	t.Helper()
 	db := testsupport.Database(t)
 	ctx := context.Background()
@@ -74,12 +87,19 @@ func newHarness(t *testing.T, capacity int) *harness {
 		db.Exec("DELETE FROM users WHERE id = ?", userID)
 	})
 
-	checkout := checkoutUsecase.NewService(uow.NewRunner(db), orders, tickets, dispatcher, 30*time.Minute, 10*time.Minute, orderdomain.HoldLimits{})
+	checkout := checkoutUsecase.NewService(uow.NewRunner(db), orders, tickets, nil, dispatcher, checkoutUsecase.Settings{
+		HoldFor:     30 * time.Minute,
+		CartHoldFor: 10 * time.Minute,
+		Fee:         fee,
+	})
 	payments := paymentUsecase.NewService(uow.NewRunner(db), orders, nil, queueRepository.NewJobRepository(db), dispatcher, nil)
 
 	mux := http.NewServeMux()
-	NewHandler(checkout, payments, nil, keys, idempotencydomain.DefaultLease).Register(mux)
-	return &harness{db: db, mux: mux, keys: keys, ticketID: ticket.ID, userID: userID}
+	NewHandler(checkout, payments, nil, nil, keys, idempotencydomain.DefaultLease).Register(mux)
+	return &harness{
+		db: db, mux: mux, keys: keys,
+		ticketID: ticket.ID, userID: userID, priceCents: ticket.PriceCents, fee: fee,
+	}
 }
 
 func (h *harness) post(t *testing.T, key string, body string) *httptest.ResponseRecorder {
@@ -260,5 +280,93 @@ func TestOrdersAreScopedToTheirBuyer(t *testing.T) {
 
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403: a buyer must not read another buyer's order", recorder.Code)
+	}
+}
+
+// The split has to survive the last hop as well.
+//
+// Everything below the handler is covered by usecases/checkout's money tests;
+// what those cannot see is the DTO. A checkout screen builds its price
+// breakdown from these three fields, so a mapper that sent the total twice, or
+// sent the face value as the total, would show the buyer a number they did not
+// agree to pay while every test underneath still passed.
+func TestCheckoutResponseCarriesTheFeeSplit(t *testing.T) {
+	fee, err := pricing.PlatformFee()
+	if err != nil {
+		t.Fatalf("PlatformFee(): %v", err)
+	}
+	h := newHarnessWithFee(t, 10, fee)
+
+	const quantity = 2
+	wantFace := h.priceCents * quantity
+	wantFee := fee.On(h.priceCents) * quantity
+
+	recorder := h.post(t, testsupport.Unique("key"), h.body(quantity))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("POST /checkout = %d, want 201: %s", recorder.Code, recorder.Body.String())
+	}
+
+	var envelope struct {
+		Data OrderResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	order := envelope.Data
+
+	if order.SubtotalCents != wantFace {
+		t.Errorf("subtotalCents = %d, want %d", order.SubtotalCents, wantFace)
+	}
+	if order.ServiceFeeCents != wantFee {
+		t.Errorf("serviceFeeCents = %d, want %d", order.ServiceFeeCents, wantFee)
+	}
+	if order.TotalCents != wantFace+wantFee {
+		t.Errorf("totalCents = %d, want %d", order.TotalCents, wantFace+wantFee)
+	}
+	// The three have to be mutually consistent in the payload itself, because
+	// that is the arithmetic the screen will repeat to the buyer.
+	if order.TotalCents != order.SubtotalCents+order.ServiceFeeCents {
+		t.Errorf("the response does not add up: %d != %d + %d",
+			order.TotalCents, order.SubtotalCents, order.ServiceFeeCents)
+	}
+	if order.ServiceFeeCents == 0 {
+		t.Error("serviceFeeCents is zero on a feed box office; the rate did not reach the API")
+	}
+
+	// And the per-ticket fee on the line, which is what the event page quoted.
+	if len(order.Items) != 1 {
+		t.Fatalf("response has %d lines, want 1", len(order.Items))
+	}
+	if got := order.Items[0].UnitFeeCents; got != fee.On(h.priceCents) {
+		t.Errorf("line unitFeeCents = %d, want %d", got, fee.On(h.priceCents))
+	}
+}
+
+// Without a fee the response must show no fee line at all, rather than a zero
+// that a screen would still render as "service fee R$ 0,00".
+func TestCheckoutResponseShowsNoFeeWhenThereIsNone(t *testing.T) {
+	h := newHarnessWithFee(t, 10, pricing.Fee{})
+
+	recorder := h.post(t, testsupport.Unique("key"), h.body(2))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("POST /checkout = %d, want 201: %s", recorder.Code, recorder.Body.String())
+	}
+
+	var envelope struct {
+		Data OrderResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	order := envelope.Data
+
+	if order.ServiceFeeCents != 0 {
+		t.Errorf("serviceFeeCents = %d with no fee configured, want 0", order.ServiceFeeCents)
+	}
+	if order.TotalCents != order.SubtotalCents {
+		t.Errorf("total %d is not the subtotal %d with no fee", order.TotalCents, order.SubtotalCents)
+	}
+	if order.TotalCents != h.priceCents*2 {
+		t.Errorf("total = %d, want the tier price %d", order.TotalCents, h.priceCents*2)
 	}
 }

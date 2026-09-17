@@ -40,6 +40,13 @@ type Event struct {
 	StartsAt time.Time `gorm:"not null;index:idx_events_starts_at"`
 	EndsAt   *time.Time
 	Status   string `gorm:"not null;type:varchar(32);default:'draft';index:idx_events_status"`
+	// SalesMode is how the organiser said this event sells: `counted` by the
+	// number, `seated` by the chair. Defaults to counted, which is both the
+	// majority and what every event that predates the column was.
+	//
+	// Not indexed: nothing filters or aggregates by it. It is read with the
+	// event it belongs to, to decide what the interface asks next.
+	SalesMode string `gorm:"not null;type:varchar(16);default:'counted'"`
 
 	CreatedAt time.Time `gorm:"not null;autoCreateTime;index:idx_events_created_at"`
 	UpdatedAt time.Time `gorm:"not null;autoUpdateTime"`

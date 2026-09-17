@@ -19,6 +19,8 @@ type CheckoutRequest struct {
 	// use for a list of one. Ignored when Items is present.
 	TicketID string `json:"ticketId,omitempty" example:"tkt_a1b2c3d4"`
 	Quantity int    `json:"quantity,omitempty" example:"2"`
+	// SeatIDs is the single-tier shorthand's seats, for a reserved event.
+	SeatIDs []string `json:"seatIds,omitempty"`
 	// Method is optional and defaults to PIX, the only instrument this
 	// integration can issue from a server.
 	Method string `json:"method,omitempty" enums:"pix" example:"pix"`
@@ -36,6 +38,14 @@ type CheckoutRequest struct {
 type CheckoutItem struct {
 	TicketID string `json:"ticketId" example:"tkt_a1b2c3d4"`
 	Quantity int    `json:"quantity" example:"2"`
+	// SeatIDs names the reserved chairs this line buys, for a seated event.
+	//
+	// Its presence is what makes the line seated. Omit it and the line is
+	// counted stock, which is every line of a general-admission event and the
+	// common case. Send it and Quantity is derived from it: a mismatch is
+	// refused rather than resolved, since either number could be the one the
+	// buyer meant.
+	SeatIDs []string `json:"seatIds,omitempty"`
 }
 
 // Items resolves the basket, accepting either shape.
@@ -43,14 +53,23 @@ func (r CheckoutRequest) Lines() []domain.DraftItem {
 	if len(r.Items) > 0 {
 		lines := make([]domain.DraftItem, 0, len(r.Items))
 		for _, line := range r.Items {
-			lines = append(lines, domain.DraftItem{TicketID: line.TicketID, Quantity: line.Quantity})
+			lines = append(lines, domain.DraftItem{
+				TicketID: line.TicketID,
+				Quantity: line.Quantity,
+				// Naming seats is what makes a line seated, and the quantity
+				// is then derived from them rather than trusted. A line that
+				// says three and names four chairs is refused by
+				// NormalizeItems, because either number could be the one the
+				// buyer meant and picking one would sell them the wrong thing.
+				SeatIDs: line.SeatIDs,
+			})
 		}
 		return lines
 	}
 	if r.TicketID == "" {
 		return nil
 	}
-	return []domain.DraftItem{{TicketID: r.TicketID, Quantity: r.Quantity}}
+	return []domain.DraftItem{{TicketID: r.TicketID, Quantity: r.Quantity, SeatIDs: r.SeatIDs}}
 }
 
 // ConfirmRequest is the details step: who is buying, and how.
@@ -76,11 +95,17 @@ type CancelRequest struct {
 // The title is the one recorded at purchase, not the tier's current name: a
 // receipt has to keep saying what was bought after the organiser renames it.
 type OrderItemResponse struct {
-	TicketID       string `json:"ticketId" example:"tkt_a1b2c3d4"`
-	TicketTitle    string `json:"ticketTitle" example:"Pista"`
-	Quantity       int    `json:"quantity" example:"2"`
-	UnitPriceCents int64  `json:"unitPriceCents" example:"24000"`
-	TotalCents     int64  `json:"totalCents" example:"48000"`
+	TicketID    string `json:"ticketId" example:"tkt_a1b2c3d4"`
+	TicketTitle string `json:"ticketTitle" example:"Pista"`
+	Quantity    int    `json:"quantity" example:"2"`
+	// UnitPriceCents and TotalCents are the FACE value: what the organiser
+	// charges for one ticket, and for this line. The fee fields are the service
+	// charge on top, so what the buyer paid for this line is totalCents +
+	// feeCents.
+	UnitPriceCents int64 `json:"unitPriceCents" example:"24000"`
+	TotalCents     int64 `json:"totalCents" example:"48000"`
+	UnitFeeCents   int64 `json:"unitFeeCents" example:"2400"`
+	FeeCents       int64 `json:"feeCents" example:"4800"`
 }
 
 // OrderEventResponse is the night an order is for.
@@ -111,8 +136,18 @@ type OrderResponse struct {
 	BuyerName  string `json:"buyerName" example:"Maria Souza"`
 	BuyerEmail string `json:"buyerEmail" example:"maria@exemplo.com.br"`
 
-	TotalCents int64  `json:"totalCents" example:"48000"`
-	Currency   string `json:"currency" example:"BRL"`
+	// SubtotalCents is the tickets, ServiceFeeCents is the charge on top, and
+	// TotalCents is what the buyer pays — always the sum of the two.
+	//
+	// All three are sent rather than just the total, because a checkout screen
+	// that shows a number larger than the prices the buyer just chose, with no
+	// line explaining the difference, is the single largest cause of abandoned
+	// carts. The client cannot derive the split from a rate: the rate is not
+	// sent, deliberately, because an old order was charged an old one.
+	SubtotalCents   int64  `json:"subtotalCents" example:"48000"`
+	ServiceFeeCents int64  `json:"serviceFeeCents" example:"4800"`
+	TotalCents      int64  `json:"totalCents" example:"52800"`
+	Currency        string `json:"currency" example:"BRL"`
 
 	Status string `json:"status" enums:"pending_payment,paid,expired,cancelled,failed,refunded,refund_required" example:"pending_payment"`
 	// HoldExpiresAt is when the reserved tickets go back on sale. It is the
@@ -125,6 +160,14 @@ type OrderResponse struct {
 	Payment PaymentResponse `json:"payment"`
 	// Event is the night, resolved for listings. Omitted when unavailable.
 	Event *OrderEventResponse `json:"event,omitempty"`
+	// Refund is the cancellation state of this order: whether the buyer may
+	// still ask for their money back, until when, and the request already in
+	// flight if there is one.
+	//
+	// Attached to a LISTING as well as to a single order, resolved in one query
+	// for the whole page, so an order history can draw its buttons without
+	// asking per row.
+	Refund *RefundStateResponse `json:"refund,omitempty"`
 
 	PaidAt    *time.Time `json:"paidAt,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
@@ -162,6 +205,24 @@ type OrderListEnvelope struct {
 
 type ErrorResponse struct {
 	Error string `json:"error" example:"not enough tickets available"`
+	Code  string `json:"code,omitempty" example:"insufficient_stock"`
+}
+
+// RefundStateResponse is the cancellation state attached to an order.
+type RefundStateResponse struct {
+	// Requestable is whether the buyer may open a request RIGHT NOW.
+	Requestable bool `json:"requestable" example:"true"`
+	// Until is the deadline for the right of withdrawal, so the order page can
+	// say "você pode cancelar até 12/07" instead of "soon".
+	Until *time.Time `json:"until,omitempty"`
+	// Refusal names why not: window_closed, too_close_to_event, not_paid,
+	// already_refunded, event_passed, request_open.
+	Refusal string `json:"refusal,omitempty" example:"window_closed"`
+	// Status is the in-flight request's state — pending, approved or rejected —
+	// absent when there is no request.
+	Status string `json:"status,omitempty" example:"pending"`
+	// RequestID is the request already open on this order, if any.
+	RequestID string `json:"requestId,omitempty" example:"rfr_9f2c1d8a"`
 }
 
 func toOrderResponse(item *domain.Order) OrderResponse {
@@ -173,20 +234,25 @@ func toOrderResponse(item *domain.Order) OrderResponse {
 			Quantity:       line.Quantity,
 			UnitPriceCents: line.UnitPriceCents,
 			TotalCents:     line.TotalCents,
+			UnitFeeCents:   line.UnitFeeCents,
+			FeeCents:       line.FeeCents,
 		})
 	}
 	return OrderResponse{
-		ID:            item.ID,
-		EventID:       item.EventID,
-		Items:         lines,
-		Quantity:      item.TotalQuantity(),
-		BuyerName:     item.BuyerName,
-		BuyerEmail:    item.BuyerEmail,
-		TotalCents:    item.TotalCents,
-		Currency:      item.Currency,
-		Status:        string(item.Status),
-		HoldExpiresAt: item.HoldExpiresAt,
-		Confirmed:     item.Confirmed,
+		ID:         item.ID,
+		EventID:    item.EventID,
+		Items:      lines,
+		Quantity:   item.TotalQuantity(),
+		BuyerName:  item.BuyerName,
+		BuyerEmail: item.BuyerEmail,
+
+		SubtotalCents:   item.SubtotalCents,
+		ServiceFeeCents: item.BuyerFeeCents,
+		TotalCents:      item.TotalCents,
+		Currency:        item.Currency,
+		Status:          string(item.Status),
+		HoldExpiresAt:   item.HoldExpiresAt,
+		Confirmed:       item.Confirmed,
 		Payment: PaymentResponse{
 			Provider:        string(item.PaymentProvider),
 			ID:              item.PaymentID,
