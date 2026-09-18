@@ -86,7 +86,7 @@ var schemaConstraintIndexes = []indexDefinition{
 	{"idx_event_seats_unique_label", `
 		CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_event_seats_unique_label
 		ON event_seats (event_id, section_name, row_label, seat_label)`},
-	// One tier, one line — for COUNTED lines only.
+	// One tier, one line, for COUNTED lines only.
 	//
 	// This is the surviving half of the old UNIQUE (order_id, ticket_id), and
 	// it is what still makes a merged retry impossible to persist as two holds

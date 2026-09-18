@@ -1,0 +1,25 @@
+# Development scrape config, for docker compose.
+#
+# Deliberately separate from prometheus.production.yml so a dev-only static
+# target can never be shipped to a production monitoring host.
+global:
+  # 5s in development, because the feedback loop is a person waiting to see
+  # whether the metric they just added shows up. Production uses 15s.
+  scrape_interval: 5s
+  scrape_timeout: 4s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # The API. `api` is the compose service name, and 9213 is the metrics
+  # listener, which is never published to the host: inside the compose network
+  # the container boundary is what keeps it private.
+  - job_name: vozkot-api
+    static_configs:
+      - targets: ["api:9213"]
+
+  # Prometheus itself, so `up == 0` and scrape health mean something.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

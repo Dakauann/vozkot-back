@@ -24,6 +24,7 @@ import (
 	admissiondomain "vozkot/domain/admission"
 	authdomain "vozkot/domain/auth"
 	eventdomain "vozkot/domain/event"
+	ledgerdomain "vozkot/domain/ledger"
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
 	"vozkot/domain/queue"
@@ -43,9 +44,17 @@ type Service struct {
 	// and means no provider is configured: settlement is unchanged and no
 	// message is queued that could never be sent.
 	notifications *notificationUsecase.Purchases
-	dispatcher    *queueUsecase.Dispatcher
-	now           func() time.Time
-	newID         func() string
+	// ledger is the organiser's balance. Nil is supported and means a
+	// deployment that has not turned payouts on: settlement is unchanged and
+	// no entry is written that nothing would ever pay out.
+	ledger accruer
+	// refunds opens the box office's own refund when settlement finds the
+	// tickets gone. Nil is supported and leaves the order in refund_required
+	// for a person, which is what this system did before.
+	refunds    refunder
+	dispatcher *queueUsecase.Dispatcher
+	now        func() time.Time
+	newID      func() string
 }
 
 func NewService(
@@ -66,6 +75,46 @@ func NewService(
 		now:           time.Now,
 		newID:         randomID,
 	}
+}
+
+// accruer is the slice of usecases/payout this file uses.
+//
+// An interface declared HERE, at the consumer, rather than a package import of
+// the concrete service: it keeps the dependency one-directional and it is the
+// two methods this file actually calls, so a reader of settle() can see the
+// whole contract without opening another package.
+type accruer interface {
+	Accrue(ctx context.Context, repositories uow.Repositories, item *orderdomain.Order) error
+	Reverse(ctx context.Context, repositories uow.Repositories, item *orderdomain.Order, kind ledgerdomain.Kind) error
+}
+
+// WithLedger turns organiser accrual on.
+//
+// Optional in the same way notifications are, and for the same reason: a
+// deployment with no payouts configured must settle payments exactly as it did
+// before rather than fail on a dependency it does not have.
+func (s *Service) WithLedger(ledger accruer) *Service {
+	s.ledger = ledger
+	return s
+}
+
+// refunder is the slice of usecases/refund this file uses.
+//
+// Declared HERE, at the consumer, for the same reason accruer is, plus one this
+// package cannot avoid: usecases/refund already imports this package, because
+// the payment service is its Money port. Importing it back would be a cycle, so
+// the dependency is inverted at the seam and the container joins the two ends.
+type refunder interface {
+	OpenOperatorRefund(ctx context.Context, repositories uow.Repositories, item *orderdomain.Order) (*queue.Job, error)
+}
+
+// WithRefunds turns the automatic operator refund on.
+//
+// Optional like the ledger. Without it settlement still records
+// refund_required, which is the honest state, and the money waits for a person.
+func (s *Service) WithRefunds(refunds refunder) *Service {
+	s.refunds = refunds
+	return s
 }
 
 // CreateCharge asks the provider for the charge an order is waiting on.
@@ -260,7 +309,7 @@ func (s *Service) RequestRefund(
 //
 // The queue is a PARAMETER rather than this service's own, and that is the
 // whole reason this is exported. A refund approved by an organiser has to write
-// the approval and schedule the money in one transaction — an approval nobody
+// the approval and schedule the money in one transaction: an approval nobody
 // acts on, or money leaving with no record of who allowed it, are both states
 // this pair can reach if they commit separately. So usecases/refund passes the
 // queue bound to its unit of work, and the ordinary admin path above passes
@@ -750,6 +799,33 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 			if _, err := issueAdmissions(ctx, repositories, item); err != nil {
 				return err
 			}
+			// And what the organiser is now owed, in the same transaction and
+			// for the same reason. A balance that can disagree with the
+			// payments behind it is one somebody reconciles by hand forever.
+			if s.ledger != nil {
+				if err := s.ledger.Accrue(ctx, repositories, item); err != nil {
+					return err
+				}
+			}
+		case orderdomain.StatusRefundRequired:
+			// The money is ours and should not be. Give it back here, in the
+			// transaction that recorded the debt, so there is no window in
+			// which the system knows it owes a buyer and has done nothing
+			// about it. Before this, refund_required was written and that was
+			// the end of it: no request, no job, one log line, and the money
+			// stayed until somebody thought to query for the status.
+			//
+			// No stock is touched. The seats are gone precisely because
+			// somebody else bought them, which is what made this the outcome.
+			if s.refunds != nil {
+				job, err := s.refunds.OpenOperatorRefund(ctx, repositories, item)
+				if err != nil {
+					return err
+				}
+				if job != nil {
+					messages = append(messages, job)
+				}
+			}
 		case orderdomain.StatusExpired, orderdomain.StatusFailed, orderdomain.StatusCancelled:
 			if previous.HoldsStock() {
 				if err := releaseAll(ctx, repositories, item); err != nil {
@@ -781,6 +857,28 @@ func (s *Service) settle(ctx context.Context, orderID string, charge *paymentdom
 			}
 			if voided > 0 {
 				log.Printf("admission: voided %d admission(s) for refunded order %s", voided, item.ID)
+			}
+			// The organiser's claim goes back with the money. Available
+			// immediately, unlike the sale it reverses, which is what stops a
+			// payout run paying out a ticket that has already been refunded.
+			//
+			// The KIND follows the charge, not the order. Both a refund and a
+			// chargeback move an order to `refunded`: money left, and the
+			// order's own vocabulary has one word for that, but they are not
+			// the same event to the organiser or to us. A refund is a decision
+			// somebody made; a chargeback is a bank pulling money back under
+			// Pix's Mecanismo Especial de Devolução, which is what the reserve
+			// exists for and which the Terms bill differently. Recording both
+			// as a refund loses that distinction on the statement of the person
+			// whose money it is.
+			if s.ledger != nil {
+				kind := ledgerdomain.KindRefund
+				if charge.Status == paymentdomain.StatusChargedBack {
+					kind = ledgerdomain.KindChargeback
+				}
+				if err := s.ledger.Reverse(ctx, repositories, item, kind); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -932,7 +1030,7 @@ func reserveAll(ctx context.Context, repositories uow.Repositories, item *orderd
 // reclaimSeats takes back exactly the chairs an order already names.
 //
 // Reached only when a payment arrived after the hold lapsed, which released
-// them. It reports false — not an error — when any one of them is gone, because
+// them. It reports false, not an error, when any one of them is gone, because
 // that is the honest, frequent case the caller turns into "we owe a refund".
 //
 // Returns true immediately for a counted order, which is every order of a

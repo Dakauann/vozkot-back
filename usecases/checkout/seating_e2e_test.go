@@ -15,7 +15,7 @@ import (
 // Reserved seating, against a real PostgreSQL.
 //
 // It has to be real. The property under test is that two buyers cannot both
-// hold FILA K POLTRONA 12, and that property does not live in Go — it lives in
+// hold FILA K POLTRONA 12, and that property does not live in Go: it lives in
 // one conditional UPDATE and the row lock PostgreSQL takes to evaluate it. A
 // fake repository here would be testing the fake's mutex.
 
@@ -104,7 +104,7 @@ func (h *seatedHarness) statusOf(t *testing.T, seatID string) seatingdomain.Stat
 // The headline property: one chair, one buyer.
 //
 // Sixteen goroutines ask for the same seat at the same moment. Not "rarely two"
-// and not "usually one" — exactly one, every run, decided by the database.
+// and not "usually one": exactly one, every run, decided by the database.
 func TestOneSeatGoesToExactlyOneBuyerUnderConcurrency(t *testing.T) {
 	h := newSeatedHarness(t, 4, 6)
 	contested := h.seatIDs[9]

@@ -53,7 +53,7 @@ func (h *harness) addTier(t *testing.T, priceCents int64, capacity int) string {
 		//
 		// order_items cascades from orders, so deleting the order takes its
 		// lines with it. An earlier version of this deleted the lines directly
-		// by ticket_id, which left the ORDER standing with no lines at all —
+		// by ticket_id, which left the ORDER standing with no lines at all,
 		// and an order with a total and no items is one the charge path logs
 		// as "(0 items)" and the admission issuer silently issues nothing for.
 		// The orphans outlived the test and turned up in a running server's
@@ -274,7 +274,7 @@ func TestFeeRoundingIsPerTicketAllTheWayToTheDatabase(t *testing.T) {
 // A basket spanning two tiers at different prices.
 //
 // The order's fee has to be the sum of the lines' fees, not a rate applied to
-// the order subtotal — those differ as soon as two prices round in opposite
+// the order subtotal, those differ as soon as two prices round in opposite
 // directions, and this is the shape that catches a total recomputed from the
 // rate at the order level.
 func TestFeeOnAMixedBasketIsTheSumOfItsLines(t *testing.T) {

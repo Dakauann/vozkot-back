@@ -426,8 +426,8 @@ func TestValidatePricingAllowsAnOrderWithoutLines(t *testing.T) {
 }
 
 // Reference is what a buyer reads out to support and what a doorperson reads
-// off a scan. Short enough to say, long enough to find the row, and — the
-// reason it lives here — the SAME on both surfaces.
+// off a scan. Short enough to say, long enough to find the row, and, the
+// reason it lives here, the SAME on both surfaces.
 func TestReference(t *testing.T) {
 	cases := map[string]string{
 		"ord_a1b2c3d4e5f6": "A1B2C3D4",

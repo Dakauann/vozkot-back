@@ -14,13 +14,13 @@ import (
 // THE NUMBERS HERE MIRROR `starterPieces` in the frontend's builder-model.tsx,
 // and that duplication is the point of the test rather than an accident of it.
 // A starter that produces two sectors on the same floor makes an organiser's
-// FIRST save the thing that teaches them the collision rule exists — the worst
+// FIRST save the thing that teaches them the collision rule exists, the worst
 // possible first impression, and one only the server can detect, because a
 // seated block's footprint is its chairs and only the generator knows where
 // those land.
 //
-// So if a generator default moves — the 24-unit seat gap, the 28-unit row gap,
-// a table's radius — this test fails and names the starter whose geometry needs
+// So if a generator default moves, the 24-unit seat gap, the 28-unit row gap,
+// a table's radius, this test fails and names the starter whose geometry needs
 // new numbers. Keep the two in step.
 func TestEveryStarterRoomSavesWithoutCollisions(t *testing.T) {
 	h := newHarness(t)
@@ -109,14 +109,14 @@ func TestEveryStarterRoomSavesWithoutCollisions(t *testing.T) {
 			//
 			// The half only the eye catches. Left-aligning pieces of different
 			// spans drifts their centres apart and the stage ends up off to one
-			// side of the stalls it faces — which is what "some presets aren't
+			// side of the stalls it faces, which is what "some presets aren't
 			// well aligned" meant.
 			//
 			// Not "every piece is centred", because pieces down the SIDES are
 			// meant to be off-centre: that is what a side is. The rule is that
 			// each one either sits on the axis or has a partner mirrored across
 			// it, so a casa de show's two camarotes must be the same distance
-			// out. Eight units of slack — a third of a seat pitch, enough for a
+			// out. Eight units of slack: a third of a seat pitch, enough for a
 			// span that does not divide evenly and far too little to hide a
 			// ragged room.
 			const slack = 8.0

@@ -698,7 +698,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Os números do evento para o organizador: totais, e a divisão por sexo, faixa etária, estado, cidade, lote e dia. Ninguém é identificado aqui — são contagens sobre os dados que o comprador informou no cadastro, congelados no momento da compra. Todo valor aqui é ` + "`" + `netCents` + "`" + `: o que o organizador recebe, ou seja, o valor de face que ele definiu. A taxa de serviço da plataforma e o total pago pelo comprador não são retornados neste relatório. Restrito ao organizador do evento e a administradores.",
+                "description": "Os números do evento para o organizador: totais, e a divisão por sexo, faixa etária, estado, cidade, lote e dia. Ninguém é identificado aqui: são contagens sobre os dados que o comprador informou no cadastro, congelados no momento da compra. Todo valor aqui é ` + "`" + `netCents` + "`" + `: o que o organizador recebe, ou seja, o valor de face que ele definiu. A taxa de serviço da plataforma e o total pago pelo comprador não são retornados neste relatório. Restrito ao organizador do evento e a administradores.",
                 "produces": [
                     "application/json"
                 ],
@@ -956,7 +956,7 @@ const docTemplate = `{
         },
         "/api/v1/events/{id}/seating/best": {
             "get": {
-                "description": "Escolhe a melhor sequência de assentos vizinhos que couber no pedido. É o caminho principal e não um atalho: a maioria não quer estudar um mapa, quer quatro lugares juntos, perto da frente, agora — e é também o que dá a quem usa leitor de tela uma forma real de comprar. Devolve vazio em vez de separar o grupo em fileiras diferentes.",
+                "description": "Escolhe a melhor sequência de assentos vizinhos que couber no pedido. É o caminho principal e não um atalho: a maioria não quer estudar um mapa, quer quatro lugares juntos, perto da frente, agora, e é também o que dá a quem usa leitor de tela uma forma real de comprar. Devolve vazio em vez de separar o grupo em fileiras diferentes.",
                 "produces": [
                     "application/json"
                 ],
@@ -1044,7 +1044,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retira assentos da venda: cadeira quebrada, lugar da produção, visão obstruída. Nunca toca um assento reservado ou vendido — bloquear não cancela o ingresso de ninguém.",
+                "description": "Retira assentos da venda: cadeira quebrada, lugar da produção, visão obstruída. Nunca toca um assento reservado ou vendido: bloquear não cancela o ingresso de ninguém.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1244,7 +1244,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Quantos espaços para cadeira de rodas, assentos de mobilidade reduzida e assentos para obesos a planta deve ter pelo Decreto 5.296/2004 (art. 23, com a redação do Decreto 9.404/2018), e quantos ela tem. É um relatório, não um bloqueio: a plataforma não sabe se uma sala específica é legalmente casa de espetáculo, e a responsabilidade é do organizador — que precisa ver o número.",
+                "description": "Quantos espaços para cadeira de rodas, assentos de mobilidade reduzida e assentos para obesos a planta deve ter pelo Decreto 5.296/2004 (art. 23, com a redação do Decreto 9.404/2018), e quantos ela tem. É um relatório, não um bloqueio: a plataforma não sabe se uma sala específica é legalmente casa de espetáculo, e a responsabilidade é do organizador, que precisa ver o número.",
                 "produces": [
                     "application/json"
                 ],
@@ -1290,7 +1290,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Gera os assentos de um formulário e NÃO grava nada. É o que o editor desenha enquanto o organizador digita, e usa o mesmo gerador que a gravação vai usar — uma prévia construída por outro caminho é uma prévia que pode mentir. Funciona também em planta congelada: olhar não é editar.",
+                "description": "Gera os assentos de um formulário e NÃO grava nada. É o que o editor desenha enquanto o organizador digita, e usa o mesmo gerador que a gravação vai usar: uma prévia construída por outro caminho é uma prévia que pode mentir. Funciona também em planta congelada: olhar não é editar.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2029,6 +2029,119 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/admission.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/organiser/balance": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Quanto o organizador já tem para receber, quanto ainda não venceu e quanto está retido. ` + "`" + `availableCents` + "`" + ` pode ser negativo: um reembolso entra no saldo na hora, enquanto a venda que ele reverte só vence depois do evento: é assim que um repasse nunca paga um ingresso que já voltou para o comprador.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Repasses"
+                ],
+                "summary": "Saldo do organizador",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payout.BalanceResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/payout.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/organiser/ledger": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cada movimento do saldo, do mais recente para o mais antigo. Filtra por evento. O extrato é somente-adição: uma correção é um lançamento novo com o sinal contrário, nunca a edição de um que já foi informado.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Repasses"
+                ],
+                "summary": "Extrato do organizador",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filtra por evento",
+                        "name": "eventId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (máx. 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Deslocamento",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/payout.LedgerResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/payout.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/organiser/report": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Os mesmos números do relatório de evento, somados sobre TODOS os eventos do organizador: totais, ticket médio, e a divisão por sexo, faixa etária, estado, cidade, lote e dia. Ninguém é identificado: são contagens sobre o que o comprador informou no cadastro, congelado no momento da compra. O escopo vem da sessão: não existe parâmetro de organizador, portanto não há o que adulterar para ler a carteira de outra pessoa.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Relatórios"
+                ],
+                "summary": "Relatório geral do organizador",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/report.SalesEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
                         }
                     }
                 }
@@ -4413,7 +4526,7 @@ const docTemplate = `{
                     "example": "pending_payment"
                 },
                 "subtotalCents": {
-                    "description": "SubtotalCents is the tickets, ServiceFeeCents is the charge on top, and\nTotalCents is what the buyer pays — always the sum of the two.\n\nAll three are sent rather than just the total, because a checkout screen\nthat shows a number larger than the prices the buyer just chose, with no\nline explaining the difference, is the single largest cause of abandoned\ncarts. The client cannot derive the split from a rate: the rate is not\nsent, deliberately, because an old order was charged an old one.",
+                    "description": "SubtotalCents is the tickets, ServiceFeeCents is the charge on top, and\nTotalCents is what the buyer pays, always the sum of the two.\n\nAll three are sent rather than just the total, because a checkout screen\nthat shows a number larger than the prices the buyer just chose, with no\nline explaining the difference, is the single largest cause of abandoned\ncarts. The client cannot derive the split from a rate: the rate is not\nsent, deliberately, because an old order was charged an old one.",
                     "type": "integer",
                     "example": 48000
                 },
@@ -4484,7 +4597,7 @@ const docTemplate = `{
                     "example": true
                 },
                 "status": {
-                    "description": "Status is the in-flight request's state — pending, approved or rejected —\nabsent when there is no request.",
+                    "description": "Status is the in-flight request's state: pending, approved or rejected.\nAbsent when there is no request.",
                     "type": "string",
                     "example": "pending"
                 },
@@ -4542,7 +4655,7 @@ const docTemplate = `{
                     "example": "Festival Aurora"
                 },
                 "salesMode": {
-                    "description": "SalesMode is how this event sells: ` + "`" + `counted` + "`" + ` by the number, the way a\nparty does, or ` + "`" + `seated` + "`" + ` by the chair, with a row and a seat number. It is\na declaration and not a fact about inventory — the seats themselves\nanswer whether a night has any — but nothing else can be derived from an\nevent that has no tiers yet, and the interface has to know which question\nto ask next. Empty means counted.",
+                    "description": "SalesMode is how this event sells: ` + "`" + `counted` + "`" + ` by the number, the way a\nparty does, or ` + "`" + `seated` + "`" + ` by the chair, with a row and a seat number. It is\na declaration and not a fact about inventory, the seats themselves\nanswer whether a night has any, but nothing else can be derived from an\nevent that has no tiers yet, and the interface has to know which question\nto ask next. Empty means counted.",
                     "type": "string",
                     "enum": [
                         "counted",
@@ -4896,7 +5009,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "priceCents": {
-                    "description": "Centavos. No float ever touches a price.\n\nPriceCents is the FACE value the organiser set. FeeCents is the service\ncharge added on top of one ticket, and TotalCents is what the buyer will\nactually pay for it — the number that has to appear on the event page,\nbecause a total that first shows up at the last step of checkout is the\nsingle largest cause of an abandoned cart.",
+                    "description": "Centavos. No float ever touches a price.\n\nPriceCents is the FACE value the organiser set. FeeCents is the service\ncharge added on top of one ticket, and TotalCents is what the buyer will\nactually pay for it, the number that has to appear on the event page,\nbecause a total that first shows up at the last step of checkout is the\nsingle largest cause of an abandoned cart.",
                     "type": "integer"
                 },
                 "quantity": {
@@ -4937,7 +5050,7 @@ const docTemplate = `{
                     "example": "Festival Aurora"
                 },
                 "salesMode": {
-                    "description": "SalesMode is how this event sells: ` + "`" + `counted` + "`" + ` by the number, the way a\nparty does, or ` + "`" + `seated` + "`" + ` by the chair, with a row and a seat number. It is\na declaration and not a fact about inventory — the seats themselves\nanswer whether a night has any — but nothing else can be derived from an\nevent that has no tiers yet, and the interface has to know which question\nto ask next. Empty means counted.",
+                    "description": "SalesMode is how this event sells: ` + "`" + `counted` + "`" + ` by the number, the way a\nparty does, or ` + "`" + `seated` + "`" + ` by the chair, with a row and a seat number. It is\na declaration and not a fact about inventory, the seats themselves\nanswer whether a night has any, but nothing else can be derived from an\nevent that has no tiers yet, and the interface has to know which question\nto ask next. Empty means counted.",
                     "type": "string",
                     "enum": [
                         "counted",
@@ -4957,6 +5070,101 @@ const docTemplate = `{
                         "cancelled"
                     ],
                     "example": "draft"
+                }
+            }
+        },
+        "payout.BalanceResponse": {
+            "type": "object",
+            "properties": {
+                "availableCents": {
+                    "description": "AvailableCents is payable now. It can be NEGATIVE: a refund is counted\nthe moment it happens while the sale it reverses is not yet due, so a\nbalance below zero means refunds have outrun settlements and is shown\nrather than clamped.",
+                    "type": "integer",
+                    "example": 480600
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "BRL"
+                },
+                "pendingCents": {
+                    "description": "PendingCents is sales that have not reached their settlement date.",
+                    "type": "integer",
+                    "example": 1200000
+                },
+                "reservedCents": {
+                    "description": "ReservedCents is the slice withheld past settlement against the long tail\nof Pix reversals.",
+                    "type": "integer",
+                    "example": 53400
+                },
+                "totalCents": {
+                    "description": "TotalCents is the whole claim, due or not.",
+                    "type": "integer",
+                    "example": 1734000
+                }
+            }
+        },
+        "payout.EntryResponse": {
+            "type": "object",
+            "properties": {
+                "amountCents": {
+                    "type": "integer",
+                    "example": 480600
+                },
+                "availableAt": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "eventId": {
+                    "type": "string",
+                    "example": "evt_88"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "led_ord_9f2c_1"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "sale",
+                        "reserve",
+                        "refund",
+                        "chargeback",
+                        "gateway_fee",
+                        "payout",
+                        "adjustment"
+                    ],
+                    "example": "sale"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "orderId": {
+                    "type": "string",
+                    "example": "ord_9f2c"
+                }
+            }
+        },
+        "payout.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "payout.LedgerResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/payout.EntryResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 243
                 }
             }
         },
@@ -5348,13 +5556,22 @@ const docTemplate = `{
         "report.TotalsResponse": {
             "type": "object",
             "properties": {
+                "averageOrderCents": {
+                    "description": "AverageOrderCents and AverageTicketCents are the ticket médio, asked the\ntwo ways an organiser means it: what one buyer spends in a go, and what\none admission is worth. They differ whenever anybody buys for a group,\nand only the second is evidence for repricing a tier.\n\nSent rather than left to the client to divide, so the API, the CSV and\nevery screen round the same way.",
+                    "type": "integer",
+                    "example": 28750
+                },
+                "averageTicketCents": {
+                    "type": "integer",
+                    "example": 10000
+                },
                 "buyers": {
                     "description": "Buyers is DISTINCT accounts: how many PEOPLE, not how many purchases.",
                     "type": "integer",
                     "example": 11902
                 },
                 "netCents": {
-                    "description": "NetCents is what the organiser earned: the sum of the face values they\npriced. RefundedCents is at face value too.\n\nNeither the gross the buyer paid nor our commission is sent, and not\nbecause they are filtered out here — the query never selects them. See\nthe money note in domain/report.",
+                    "description": "NetCents is what the organiser earned: the sum of the face values they\npriced. RefundedCents is at face value too.\n\nNeither the gross the buyer paid nor our commission is sent, and not\nbecause they are filtered out here: the query never selects them. See\nthe money note in domain/report.",
                     "type": "integer",
                     "example": 357350000
                 },
@@ -5419,7 +5636,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "ticketByCategory": {
-                    "description": "TicketByCategory prices each price band: the band's NAME mapped to the\ntier its seats sell at.\n\nA band and not a section, because where a seat is and what it costs change\non different clocks — the room is fixed for years and the price list\nchanges every night. A band defaults to its section's name, so an ordinary\nroom is priced exactly as it was before bands existed; setting one lets\ntwo wings share a price, or the front three rows carry their own without\nthe room being redrawn to say so.\n\nA band left out is not sold at all, which is how a balcony is closed for\none night without editing the room. A band named here that no seat is in\nis refused, because a typo would otherwise materialise half a house and\nlook like it worked.",
+                    "description": "TicketByCategory prices each price band: the band's NAME mapped to the\ntier its seats sell at.\n\nA band and not a section, because where a seat is and what it costs change\non different clocks: the room is fixed for years and the price list\nchanges every night. A band defaults to its section's name, so an ordinary\nroom is priced exactly as it was before bands existed; setting one lets\ntwo wings share a price, or the front three rows carry their own without\nthe room being redrawn to say so.\n\nA band left out is not sold at all, which is how a balcony is closed for\none night without editing the room. A band named here that no seat is in\nis refused, because a typo would otherwise materialise half a house and\nlook like it worked.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -5512,21 +5729,21 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "bands": {
-                    "description": "Bands are the room's price bands, in the order their colour is assigned.\n\nSlot one is the first hue of a fixed categorical palette, slot two the\nsecond, and so on — so the ORDER is the colour, and it is computed here\nrather than in each client. Two answers to \"what colour is Plateia\" is a\nroom that changes colour when somebody walks between screens.",
+                    "description": "Bands are the room's price bands, in the order their colour is assigned.\n\nSlot one is the first hue of a fixed categorical palette, slot two the\nsecond, and so on, so the ORDER is the colour, and it is computed here\nrather than in each client. Two answers to \"what colour is Plateia\" is a\nroom that changes colour when somebody walks between screens.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "collisions": {
-                    "description": "Collisions are the sections drawn on top of each other, by id.\n\nReported on a preview and REFUSED on a save, and computed by the same rule\nboth times. The preview has to be able to draw a collision — that is how\nan organiser sees the one they are making — so the editor marks these and\ndisables its own save, and the server refuses the request regardless.",
+                    "description": "Collisions are the sections drawn on top of each other, by id.\n\nReported on a preview and REFUSED on a save, and computed by the same rule\nboth times. The preview has to be able to draw a collision: that is how\nan organiser sees the one they are making, so the editor marks these and\ndisables its own save, and the server refuses the request regardless.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "compliance": {
-                    "description": "Compliance is present on a PREVIEW, computed from the draft being drawn.\n\nIt travels with the preview rather than being fetched separately so the\nnumber and the room on screen can never describe different things — which\nthey did: \"against 0 places, the quotas are met\" beside a 192-seat\nsector, because the report came from the saved layout.",
+                    "description": "Compliance is present on a PREVIEW, computed from the draft being drawn.\n\nIt travels with the preview rather than being fetched separately so the\nnumber and the room on screen can never describe different things, which\nthey did: \"against 0 places, the quotas are met\" beside a 192-seat\nsector, because the report came from the saved layout.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/seating.ComplianceResponse"
@@ -5647,7 +5864,7 @@ const docTemplate = `{
                     }
                 },
                 "version": {
-                    "description": "The price bands are deliberately NOT here. By the time a room is on sale\na band has become a TIER — the seat carries its ticket id and the tier\ncarries the money — so the buyer's map colours by tier, in the order the\nprice list is given, and the legend it already has is the relief the\npalette requires. Sending a band list too would be a second answer.\nVersion is the cursor to send back as ` + "`" + `since` + "`" + ` on the next poll.",
+                    "description": "The price bands are deliberately NOT here. By the time a room is on sale\na band has become a TIER: the seat carries its ticket id and the tier\ncarries the money, so the buyer's map colours by tier, in the order the\nprice list is given, and the legend it already has is the relief the\npalette requires. Sending a band list too would be a second answer.\nVersion is the cursor to send back as ` + "`" + `since` + "`" + ` on the next poll.",
                     "type": "integer"
                 }
             }
@@ -5894,7 +6111,7 @@ const docTemplate = `{
                     "example": 12
                 },
                 "seatCategories": {
-                    "description": "SeatCategories puts individual chairs in a different price band, keyed\n\"FILA/ASSENTO\". It is what prices the front three rows above the rest, and\nthe partial-view chair behind a pillar below it — neither of which is a\ncontiguous block that could be a sector of its own.",
+                    "description": "SeatCategories puts individual chairs in a different price band, keyed\n\"FILA/ASSENTO\". It is what prices the front three rows above the rest, and\nthe partial-view chair behind a pillar below it, neither of which is a\ncontiguous block that could be a sector of its own.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -5905,7 +6122,7 @@ const docTemplate = `{
                     "example": 24
                 },
                 "seatKinds": {
-                    "description": "SeatKinds marks individual chairs, keyed \"FILA/ASSENTO\" — \"K/12\".\n\nThis is where the accessibility seats the law requires get set, and the\ncompliance report reads what lands here.",
+                    "description": "SeatKinds marks individual chairs, keyed \"FILA/ASSENTO\", as in \"K/12\".\n\nThis is where the accessibility seats the law requires get set, and the\ncompliance report reads what lands here.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -5974,7 +6191,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "category": {
-                    "description": "Category is the band this section's seats belong to by default, as it was\nSET — empty when the section's own name is doing the work. The resolved\nband travels on each seat.",
+                    "description": "Category is the band this section's seats belong to by default, as it was\nSET, empty when the section's own name is doing the work. The resolved\nband travels on each seat.",
                     "type": "string"
                 },
                 "definition": {

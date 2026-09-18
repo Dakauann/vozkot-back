@@ -11,6 +11,7 @@ import (
 	checkoutHTTP "vozkot/delivery/http/checkout"
 	eventHTTP "vozkot/delivery/http/event"
 	"vozkot/delivery/http/httpx"
+	payoutHTTP "vozkot/delivery/http/payout"
 	refundHTTP "vozkot/delivery/http/refund"
 	reportHTTP "vozkot/delivery/http/report"
 	seatingHTTP "vozkot/delivery/http/seating"
@@ -49,9 +50,11 @@ type Dependencies struct {
 	Checkout *checkoutHTTP.Handler
 	// Refunds is the cancellation surface: the buyer's request and the
 	// organiser's inbox. Nil leaves both unmounted, which is what a deployment
-	// with no payment provider gets — a refund endpoint that cannot refund is
+	// with no payment provider gets: a refund endpoint that cannot refund is
 	// worse than no endpoint.
 	Refunds *refundHTTP.Handler
+	// Payouts is the organiser's balance and extract. Read-only.
+	Payouts *payoutHTTP.Handler
 	// Reports is the organiser's audience dashboard and the attendee export.
 	Reports *reportHTTP.Handler
 	// Admissions is the door: scanning a code at an event, and a holder's own
@@ -76,12 +79,40 @@ type Dependencies struct {
 	// AuthLimit throttles the unauthenticated credential routes by client
 	// address. Nil when Redis is not configured.
 	AuthLimit Middleware
+	// Metrics counts and times every request. Nil leaves the API unmeasured,
+	// which is what a deployment with no monitoring gets; it is never a reason
+	// to refuse to serve.
+	Metrics Middleware
 	// MediaFiles is the local development asset server, nil when the object
 	// store is Cloudflare R2 and the CDN serves the bytes.
 	MediaFiles    http.Handler
 	AllowedOrigin string
 	// Health reports dependencies the load balancer should know about.
 	Health func() map[string]any
+}
+
+// ProtectedPrefixes is where the authenticated mux is actually mounted.
+//
+// THE ALLOW-LIST IS THE MOUNT, and that is the trap. A handler registering a
+// path on the protected mux is not reachable until its prefix appears here: the
+// route exists on a mux nothing routes to, so it answers 404 rather than 401
+// and reads exactly like a missing handler. It shipped that way once, for
+// /api/v1/organiser/.
+//
+// A package-level var rather than a literal inside NewRouter so the invariant
+// is testable. See TestEveryProtectedRouteHasAMount. Adding a route under a
+// NEW prefix means adding the prefix here.
+var ProtectedPrefixes = []string{
+	"/api/v1/tickets", "/api/v1/tickets/",
+	"/api/v1/orders", "/api/v1/orders/",
+	"/api/v1/events", "/api/v1/events/",
+	"/api/v1/refund-requests", "/api/v1/refund-requests/",
+	// The organiser's own account: balance, statement and portfolio report.
+	// Every one is scoped to the session rather than to a path parameter,
+	// which is why they share a prefix of their own.
+	"/api/v1/organiser", "/api/v1/organiser/",
+	"/api/v1/venues", "/api/v1/venues/",
+	"/api/v1/layouts", "/api/v1/layouts/",
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -143,6 +174,13 @@ func NewRouter(deps Dependencies) http.Handler {
 		deps.Refunds.RegisterOrderRoutes(protected)
 		deps.Refunds.Register(protected)
 	}
+	if deps.Payouts != nil {
+		// The organiser's own money, under /api/v1/organiser/. Behind the
+		// session, and scoped to the caller inside the handler rather than by
+		// a path parameter, so there is nothing to tamper with to read
+		// somebody else's balance.
+		deps.Payouts.Register(protected)
+	}
 	if deps.Admissions != nil {
 		// Split for the same reason refunds are: the door lives under the
 		// event it guards, and a holder's tickets under the order that paid
@@ -161,14 +199,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		// actor's ownership rather than here.
 		deps.Seating.Register(protected)
 	}
-	for _, pattern := range []string{
-		"/api/v1/tickets", "/api/v1/tickets/",
-		"/api/v1/orders", "/api/v1/orders/",
-		"/api/v1/events", "/api/v1/events/",
-		"/api/v1/refund-requests", "/api/v1/refund-requests/",
-		"/api/v1/venues", "/api/v1/venues/",
-		"/api/v1/layouts", "/api/v1/layouts/",
-	} {
+	for _, pattern := range ProtectedPrefixes {
 		router.Handle(pattern, deps.AuthMiddleware.Require(protected))
 	}
 
@@ -209,7 +240,18 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	router.Handle("/swagger/", httpSwagger.WrapHandler)
 
-	return middleware.SecurityHeaders(withCORS(withRequestID(router), deps.AllowedOrigin))
+	// Metrics sits INNERMOST, around the mux and nothing else.
+	//
+	// Inside withCORS so a preflight is not counted as a request the API
+	// served: an OPTIONS is answered and returned before it ever reaches a
+	// handler, and counting it would inflate the request rate with traffic no
+	// buyer made. Inside withRequestID for the same reason in reverse: the
+	// duration recorded should be the work, not the wrapper.
+	var handler http.Handler = router
+	if deps.Metrics != nil {
+		handler = deps.Metrics.Require(handler)
+	}
+	return middleware.SecurityHeaders(withCORS(withRequestID(handler), deps.AllowedOrigin))
 }
 
 func withCORS(next http.Handler, allowedOrigin string) http.Handler {

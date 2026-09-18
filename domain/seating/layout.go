@@ -82,7 +82,7 @@ const (
 //
 // A DRAFT is sellable, and that is deliberate. Requiring a publish first read
 // as prudence and worked as a trap: an organiser drew a room, reached the
-// pricing screen, and was told the venue had no published plan — about the plan
+// pricing screen, and was told the venue had no published plan, about the plan
 // they had just finished. The step was protecting against an event binding a
 // room somebody was still moving around, and the bind already freezes the
 // layout in the same transaction that writes the seats. The freeze was always
@@ -104,13 +104,13 @@ type Section struct {
 	// OffsetX and OffsetY are where this object sits: its TOP-LEFT corner.
 	//
 	// The same corner for every shape, and that uniformity is load-bearing. The
-	// generators do not agree on an origin — a block of rows starts at one, an
-	// arc of stands surrounds it — so a canvas placing a box from an offset
+	// generators do not agree on an origin: a block of rows starts at one, an
+	// arc of stands surrounds it, so a canvas placing a box from an offset
 	// would have to know the shape first, and dragging two blocks the same
 	// distance would move them by different amounts. See PlaceAt.
 	OffsetX float64
 	OffsetY float64
-	// Width and Height size a MARKER — a stage, an arena. Meaningless for a
+	// Width and Height size a MARKER: a stage, an arena. Meaningless for a
 	// block of seats, whose size is its seats.
 	//
 	// Stored rather than derived. The arena's radius used to be computed from
@@ -125,7 +125,7 @@ type Section struct {
 	//
 	// The one arrangement dragging and resizing cannot reach: a block of rows
 	// runs along x, and VIP wings down the sides of a room need one running
-	// along y. A marker or a counted area has no need of it — a tall camarote
+	// along y. A marker or a counted area has no need of it: a tall camarote
 	// is a resize.
 	Rotation float64
 	// Category is the price band this section's seats belong to by default.
@@ -140,7 +140,7 @@ type Section struct {
 	// Without it a saved room can be looked at and not edited: the seats are an
 	// output, and many different forms produce the same coordinates, so nothing
 	// can recover "ten rows of sixteen, aisle after six, odd/even from the
-	// centre" from a field of dots. Opaque on purpose — it is the editor's
+	// centre" from a field of dots. Opaque on purpose: it is the editor's
 	// format, and this package has no business having an opinion about it.
 	Definition []byte
 	// DisplayOrder is the order sections are listed in to a buyer, which is the
@@ -168,15 +168,15 @@ type Seat struct {
 	//
 	// Empty for almost every seat. It exists for the two cases a sector cannot
 	// express: the front three rows that cost more, and the partial-view seat
-	// behind a pillar that costs less — which is not a contiguous block of
+	// behind a pillar that costs less, which is not a contiguous block of
 	// anything and so can never be a sector of its own.
 	Category string
 	// RowOrder and SeatOrder are the authoritative ordering.
 	//
 	// The labels cannot be sorted: "A" through "P" skips I in most houses, seat
 	// "10" sorts before seat "9" as text, and older theatres number odd seats
-	// one way from the centre aisle and even seats the other. Adjacency — which
-	// is what "four seats together" means — is defined by these integers and
+	// one way from the centre aisle and even seats the other. Adjacency, which
+	// is what "four seats together" means, is defined by these integers and
 	// never by the labels.
 	RowOrder  int
 	SeatOrder int

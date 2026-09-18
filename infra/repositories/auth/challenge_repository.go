@@ -119,11 +119,16 @@ func (r *ChallengeRepository) CountRecent(
 	return int(total), nil
 }
 
-// DeleteExpired removes challenges that can no longer be answered.
+// DeleteOlderThan removes challenges created before the cutoff.
 //
 // Bounded, so the sweep is a short statement rather than a table-wide delete
 // that holds locks while somebody is trying to sign in.
-func (r *ChallengeRepository) DeleteExpired(ctx context.Context, before time.Time, limit int) (int, error) {
+//
+// created_at rather than expires_at, and ordered by it too: see the port for
+// why a row has to outlive the code it carries. Both the predicate and the
+// ordering ride idx_challenges_created_at, so this stays an index scan of the
+// oldest rows rather than a sort of the table.
+func (r *ChallengeRepository) DeleteOlderThan(ctx context.Context, cutoff time.Time, limit int) (int, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -131,10 +136,10 @@ func (r *ChallengeRepository) DeleteExpired(ctx context.Context, before time.Tim
 		DELETE FROM verification_challenges
 		WHERE id IN (
 			SELECT id FROM verification_challenges
-			WHERE expires_at < ?
-			ORDER BY expires_at
+			WHERE created_at < ?
+			ORDER BY created_at
 			LIMIT ?
-		)`, before.UTC(), limit)
+		)`, cutoff.UTC(), limit)
 	if result.Error != nil {
 		return 0, result.Error
 	}

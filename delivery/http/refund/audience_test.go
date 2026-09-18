@@ -17,7 +17,7 @@ import (
 //
 // A refund returns the ticket price AND the service fee to the buyer, so the
 // figure has two halves with two different owners. The buyer must be told the
-// whole number — the Terms promise the fee comes back and naming it is what
+// whole number: the Terms promise the fee comes back and naming it is what
 // prevents the dispute. The organiser must be told only their half: the face
 // value is what leaves their revenue, and our commission returning to the
 // buyer is between us and the buyer.
@@ -157,8 +157,8 @@ func TestRefundResponseHidesOurShareFromTheOrganiser(t *testing.T) {
 	}
 }
 
-// Eligibility is the other place the figure appears — the dialog that asks
-// "cancel this order?" — and it has to follow the same rule.
+// Eligibility is the other place the figure appears, the dialog that asks
+// "cancel this order?", and it has to follow the same rule.
 func TestEligibilityFollowsTheSameRule(t *testing.T) {
 	base := usecase.Eligibility{
 		AmountCents:    grossCents,
@@ -237,7 +237,7 @@ func numbersIn(t *testing.T, payload []byte) map[int64]bool {
 // The wiring, not just the mapper.
 //
 // Every test above calls toResponse directly with a boolean, so all of them
-// would still pass if writeRequest computed that boolean wrongly — passing the
+// would still pass if writeRequest computed that boolean wrongly: passing the
 // organiser's id where the buyer's belongs, or defaulting to true. This drives
 // the helper the four endpoints actually use, with the claims the middleware
 // actually puts on the request.

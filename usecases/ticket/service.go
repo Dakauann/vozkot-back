@@ -7,7 +7,7 @@
 // same reason usecases/report says so: a rule enforced at the transport edge is
 // a rule the next caller forgets, and the next caller is a CLI, a job or
 // another use case that never passes through a handler. It was in the handler
-// once, and the handler simply did not do it — every signed-in account could
+// once, and the handler simply did not do it: every signed-in account could
 // read, reprice and delete every tier on the platform.
 package ticket
 

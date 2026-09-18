@@ -477,7 +477,7 @@ func (h *Handler) deleteMedia(response http.ResponseWriter, request *http.Reques
 //
 // This package's entire involvement in authorisation: translate the session
 // into a value and pass it down. The ownership rule lives in usecases/event,
-// where every caller reaches it — including the seeder, which never builds an
+// where every caller reaches it, including the seeder, which never builds an
 // http.Request.
 func actor(request *http.Request) authdomain.Actor {
 	return authdomain.ActorFromContext(request.Context())

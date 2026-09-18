@@ -9,7 +9,7 @@
 // "refund" button with a single window models none of them, so the reason is a
 // stored field and every rule reads from it.
 //
-// Evaluate is PURE — no clock of its own, no repository, no provider. It is the
+// Evaluate is PURE: no clock of its own, no repository, no provider. It is the
 // one place a window is computed, so the checkout page that promises a deadline,
 // the order page that enables a button and the endpoint that enforces it can
 // never disagree about what the policy says.
@@ -64,14 +64,20 @@ func (r Reason) BuyerMayClaim() bool {
 // human at all.
 //
 // Withdrawal inside the window and a cancelled event are both refunds the
-// organiser has no standing to refuse — one is a statutory right, the other is
+// organiser has no standing to refuse: one is a statutory right, the other is
 // a service that will not be delivered. Queueing them for approval would be
 // offering a decision that cannot lawfully go the other way, which is worse
 // than not offering it: it invites a refusal that then has to be reversed.
 //
+// Operator joins them for a third reason: nobody is being asked. These are the
+// box office's OWN mistakes, a refund_required order above all, where the
+// buyer paid and the seat had already been resold. There is no party with
+// standing to refuse a refund of money we should not be holding, and leaving it
+// pending would put the buyer behind whoever next opens an inbox.
+//
 // Everything else lands pending for a person.
 func (r Reason) AutoApproves() bool {
-	return r == ReasonBuyerWithdrawal || r == ReasonEventCancelled
+	return r == ReasonBuyerWithdrawal || r == ReasonEventCancelled || r == ReasonOperator
 }
 
 var (
@@ -135,8 +141,8 @@ type Policy struct {
 	// RefundsFees is whether the service fee comes back too.
 	//
 	// It is always true, and it is a field rather than a constant because the
-	// CODE has to be able to express both — a future ruling, a different
-	// jurisdiction — not because the product offers the choice. Procon-SP's
+	// CODE has to be able to express both, a future ruling, a different
+	// jurisdiction, not because the product offers the choice. Procon-SP's
 	// position and recent STJ decisions are that keeping the convenience fee on
 	// a cancellation is abusive and restitution must be integral. See
 	// docs/REFUNDS_AND_PAYOUTS.md.
@@ -203,7 +209,7 @@ func (p Policy) Validate() error {
 // A narrow struct rather than the order entity, and that is deliberate: this
 // package must not import domain/order, because domain/order will eventually
 // want to ask this package a question and an import cycle is the thanks it
-// would get. It also keeps Evaluate honest — every input to a window is named
+// would get. It also keeps Evaluate honest: every input to a window is named
 // here, so nothing can quietly start depending on a field nobody declared.
 type Order struct {
 	ID string
@@ -239,7 +245,7 @@ type Decision struct {
 	//
 	// This is the date rendered at checkout and on the order page, computed by
 	// the same function that enforces it, so the promise and the enforcement
-	// cannot drift. Zero when the question has no deadline — a cancelled event
+	// cannot drift. Zero when the question has no deadline: a cancelled event
 	// is refundable with no clock on it.
 	Until   time.Time
 	Refusal RefusalCode
@@ -311,7 +317,7 @@ func Evaluate(policy Policy, order Order, event EventTiming, reason Reason, now 
 // Deliberately three values and not six. Whether the money has actually gone
 // back is the ORDER's status, written by the settlement path that reads the
 // charge back from the provider, and duplicating it here as "completed" would
-// create a second writer for one fact — the failure mode being a request that
+// create a second writer for one fact, the failure mode being a request that
 // says completed for an order that says paid, with nothing to say which is
 // right. The API reports both, and they cannot disagree because only one of
 // them is stored.
@@ -346,7 +352,7 @@ const MaxNoteRunes = 1_000
 //
 // Its own table rather than a column on the order, because "who asked, on what
 // grounds, decided by whom and when" is a record that has to outlive whatever
-// the order ends up as — including a request that was rejected, which leaves no
+// the order ends up as, including a request that was rejected, which leaves no
 // trace on the order at all and is exactly the case somebody will ask about.
 type Request struct {
 	ID      string

@@ -17,7 +17,7 @@ import (
 
 // A real HTTP server stands in for Vozko, the same way the email sender's tests
 // stand one in for Resend. What is under test is the wire format, the sign-in
-// dance and the verdict each refusal produces — none of which a mocked client
+// dance and the verdict each refusal produces, none of which a mocked client
 // would exercise, because a mock cannot disagree with the real request.
 
 func testPhoneConfig(baseURL string) config.PhoneConfig {

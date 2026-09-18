@@ -9,7 +9,7 @@
 // A breakdown needs numbers at two different GRAINS: money and order counts
 // belong to the ORDER, ticket counts belong to its ITEMS. Joining the two and
 // aggregating in one pass multiplies an order's money by the number of tiers on
-// it — a two-tier order counted twice — which is the classic fan-out. So every
+// it, a two-tier order counted twice, which is the classic fan-out. So every
 // query folds the items to one row per order FIRST (the `counted` CTE) and only
 // then joins, which keeps each order contributing its money exactly once.
 package report
@@ -59,38 +59,58 @@ const cityLimit = 50
 // sequence on purpose: they share one pooled connection sized for checkout
 // traffic, and a reporting screen must never be able to take six of those at
 // once.
-func (r *ReportRepository) Sales(ctx context.Context, eventID string) (domain.Sales, error) {
-	eventID = strings.TrimSpace(eventID)
-	sales := domain.Sales{EventID: eventID}
-	if eventID == "" {
+func (r *ReportRepository) Sales(ctx context.Context, scope domain.Scope) (domain.Sales, error) {
+	scope.EventID = strings.TrimSpace(scope.EventID)
+	scope.OrganiserID = strings.TrimSpace(scope.OrganiserID)
+	sales := domain.Sales{EventID: scope.EventID}
+	// An invalid scope returns nothing rather than everything. See Scope.Valid.
+	if !scope.Valid() {
 		return sales, nil
 	}
 
-	totals, err := r.totals(ctx, eventID)
+	totals, err := r.totals(ctx, scope)
 	if err != nil {
 		return domain.Sales{}, err
 	}
 	sales.Totals = totals
 
-	if sales.ByGender, err = r.groupBy(ctx, eventID, "o.buyer_gender", 0); err != nil {
+	if sales.ByGender, err = r.groupBy(ctx, scope, "o.buyer_gender", 0); err != nil {
 		return domain.Sales{}, err
 	}
-	if sales.ByUF, err = r.groupBy(ctx, eventID, "o.buyer_uf", 0); err != nil {
+	if sales.ByUF, err = r.groupBy(ctx, scope, "o.buyer_uf", 0); err != nil {
 		return domain.Sales{}, err
 	}
-	if sales.ByCity, err = r.groupBy(ctx, eventID, "o.buyer_city", cityLimit); err != nil {
+	if sales.ByCity, err = r.groupBy(ctx, scope, "o.buyer_city", cityLimit); err != nil {
 		return domain.Sales{}, err
 	}
-	if sales.ByAge, err = r.groupBy(ctx, eventID, ageBucketSQL, 0); err != nil {
+	if sales.ByAge, err = r.groupBy(ctx, scope, ageBucketSQL, 0); err != nil {
 		return domain.Sales{}, err
 	}
-	if sales.ByTier, err = r.byTier(ctx, eventID); err != nil {
+	if sales.ByTier, err = r.byTier(ctx, scope); err != nil {
 		return domain.Sales{}, err
 	}
-	if sales.ByDay, err = r.byDay(ctx, eventID); err != nil {
+	if sales.ByDay, err = r.byDay(ctx, scope); err != nil {
 		return domain.Sales{}, err
 	}
 	return sales, nil
+}
+
+// scopeClause is the WHERE fragment and its arguments for one report scope.
+//
+// The single place the difference between "this event" and "everything this
+// organiser sells" lives. Every breakdown below interpolates it, so a portfolio
+// total and the sum of its events are computed by the same SQL with one clause
+// swapped, which is what stops them drifting apart.
+//
+// The organiser form is a subquery on events rather than a join, deliberately:
+// a join would fan the orders out again and every aggregate here is built
+// around not doing that. `owner_id` is indexed, and the planner turns the
+// subquery into a hash semi-join over that index.
+func scopeClause(scope domain.Scope) (string, []any) {
+	if scope.EventID != "" {
+		return "o.event_id = ?", []any{scope.EventID}
+	}
+	return "o.event_id IN (SELECT e.id FROM events e WHERE e.owner_id = ?)", []any{scope.OrganiserID}
 }
 
 // ageBucketSQL mirrors domain/report.BracketFor exactly.
@@ -133,19 +153,20 @@ var groupedExpressions = map[string]bool{
 // groupBy is the body of every order-grained breakdown.
 //
 // limit of 0 means all rows.
-func (r *ReportRepository) groupBy(ctx context.Context, eventID, expression string, limit int) ([]domain.Slice, error) {
+func (r *ReportRepository) groupBy(ctx context.Context, scope domain.Scope, expression string, limit int) ([]domain.Slice, error) {
 	if !groupedExpressions[expression] {
 		return nil, fmt.Errorf("report: refusing to group by an unregistered expression")
 	}
 
 	// The items are folded to one row per order BEFORE the join, so each order
 	// contributes its money once however many tiers it spans.
+	where, args := scopeClause(scope)
 	query := `
 		WITH sold AS (
 			SELECT o.id, o.subtotal_cents,
 			       ` + expression + ` AS bucket
 			FROM orders o
-			WHERE o.event_id = ? AND o.status IN ?
+			WHERE ` + where + ` AND o.status IN ?
 		),
 		counted AS (
 			SELECT s.id, COALESCE(SUM(i.quantity), 0) AS tickets
@@ -169,25 +190,26 @@ func (r *ReportRepository) groupBy(ctx context.Context, eventID, expression stri
 	}
 
 	var rows []sliceRow
-	if err := r.db.WithContext(ctx).Raw(query, eventID, soldStatuses()).Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(query, append(args, soldStatuses())...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return toSlices(rows), nil
 }
 
 // totals is the headline, and the denominator every share on the page uses.
-func (r *ReportRepository) totals(ctx context.Context, eventID string) (domain.Totals, error) {
+func (r *ReportRepository) totals(ctx context.Context, scope domain.Scope) (domain.Totals, error) {
 	var row struct {
 		Orders   int64
 		Buyers   int64
 		Tickets  int64
 		NetCents int64
 	}
+	where, args := scopeClause(scope)
 	err := r.db.WithContext(ctx).Raw(`
 		WITH sold AS (
 			SELECT o.id, o.buyer_id, o.subtotal_cents
 			FROM orders o
-			WHERE o.event_id = ? AND o.status IN ?
+			WHERE `+where+` AND o.status IN ?
 		),
 		counted AS (
 			SELECT s.id, COALESCE(SUM(i.quantity), 0) AS tickets
@@ -205,7 +227,7 @@ func (r *ReportRepository) totals(ctx context.Context, eventID string) (domain.T
 			COALESCE(SUM(s.subtotal_cents), 0)              AS net_cents
 		FROM sold s
 		JOIN counted c ON c.id = s.id`,
-		eventID, soldStatuses(),
+		append(args, soldStatuses())...,
 	).Scan(&row).Error
 	if err != nil {
 		return domain.Totals{}, err
@@ -220,8 +242,8 @@ func (r *ReportRepository) totals(ctx context.Context, eventID string) (domain.T
 		-- the buyer as well, so a refunded figure at gross sitting beside net
 		-- sales would hand the organiser our commission by subtraction.
 		SELECT COUNT(*) AS orders, COALESCE(SUM(subtotal_cents), 0) AS cents
-		FROM orders
-		WHERE event_id = ? AND status = 'refunded'`, eventID,
+		FROM orders o
+		WHERE `+where+` AND o.status = 'refunded'`, args...,
 	).Scan(&refunded).Error
 	if err != nil {
 		return domain.Totals{}, err
@@ -240,8 +262,9 @@ func (r *ReportRepository) totals(ctx context.Context, eventID string) (domain.T
 // byTier is the one item-grained breakdown, and the only one whose money can be
 // summed straight off the join: an order_item's totals belong to that line, so
 // there is no fan-out to avoid.
-func (r *ReportRepository) byTier(ctx context.Context, eventID string) ([]domain.Slice, error) {
+func (r *ReportRepository) byTier(ctx context.Context, scope domain.Scope) ([]domain.Slice, error) {
 	var rows []sliceRow
+	where, args := scopeClause(scope)
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT
 			i.ticket_id                                   AS key,
@@ -253,9 +276,9 @@ func (r *ReportRepository) byTier(ctx context.Context, eventID string) ([]domain
 			COALESCE(SUM(i.fee_cents), 0)                 AS fee_cents
 		FROM order_items i
 		JOIN orders o ON o.id = i.order_id
-		WHERE o.event_id = ? AND o.status IN ?
+		WHERE `+where+` AND o.status IN ?
 		GROUP BY i.ticket_id
-		ORDER BY tickets DESC`, eventID, soldStatuses(),
+		ORDER BY tickets DESC`, append(args, soldStatuses())...,
 	).Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -267,22 +290,23 @@ func (r *ReportRepository) byTier(ctx context.Context, eventID string) ([]domain
 //
 // paid_at and not created_at: a basket opened on Monday and paid on Thursday is
 // Thursday's revenue, and a curve drawn on creation counts holds that never
-// became money. An order with no paid_at cannot appear, which is correct — it
+// became money. An order with no paid_at cannot appear, which is correct: it
 // was never a sale.
-func (r *ReportRepository) byDay(ctx context.Context, eventID string) ([]domain.DaySlice, error) {
+func (r *ReportRepository) byDay(ctx context.Context, scope domain.Scope) ([]domain.DaySlice, error) {
 	var rows []struct {
 		Day      string
 		Orders   int64
 		Tickets  int64
 		NetCents int64
 	}
+	where, args := scopeClause(scope)
 	err := r.db.WithContext(ctx).Raw(`
 		WITH sold AS (
 			SELECT
 				date_trunc('day', o.paid_at AT TIME ZONE 'UTC') AS day,
 				o.id, o.subtotal_cents
 			FROM orders o
-			WHERE o.event_id = ? AND o.status IN ? AND o.paid_at IS NOT NULL
+			WHERE `+where+` AND o.status IN ? AND o.paid_at IS NOT NULL
 		),
 		counted AS (
 			SELECT s.id, COALESCE(SUM(i.quantity), 0) AS tickets
@@ -298,7 +322,7 @@ func (r *ReportRepository) byDay(ctx context.Context, eventID string) ([]domain.
 		FROM sold s
 		JOIN counted c ON c.id = s.id
 		GROUP BY s.day
-		ORDER BY s.day`, eventID, soldStatuses(),
+		ORDER BY s.day`, append(args, soldStatuses())...,
 	).Scan(&rows).Error
 	if err != nil {
 		return nil, err

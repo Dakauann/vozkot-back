@@ -340,18 +340,29 @@ func (v *Verification) consume(
 	return challenge, nil
 }
 
-// SweepExpiredChallenges clears out codes that can no longer be answered.
+// SweepOldChallenges clears out challenges past the window in which they still
+// matter.
 //
 // They are deliberately short lived, and keeping them afterwards would be
 // retaining a record of who signed in and when, which is the thing this
 // table's shape is designed not to hold.
-func (v *Verification) SweepExpiredChallenges(ctx context.Context, limit int) (int, error) {
-	removed, err := v.challenges.DeleteExpired(ctx, v.now().UTC(), limit)
+//
+// The cutoff is ChallengeWindow and NOT expiry, which is the correction this
+// function exists in its current form for. Nothing about whether a code still
+// works depends on this sweep: consume() asks Live() on every attempt, so an
+// unswept row is refused exactly as a missing one is. What does depend on it
+// is the ceiling of MaxChallengesPerDestination, which counts rows over
+// ChallengeWindow. Deleting at expiry destroyed the hour of evidence that
+// ceiling is counted from after ten minutes, so a sender who simply waited for
+// the sweep got five fresh codes every ten minutes instead of five an hour.
+func (v *Verification) SweepOldChallenges(ctx context.Context, limit int) (int, error) {
+	cutoff := v.now().UTC().Add(-domain.ChallengeWindow)
+	removed, err := v.challenges.DeleteOlderThan(ctx, cutoff, limit)
 	if err != nil {
 		return 0, err
 	}
 	if removed > 0 {
-		log.Printf("auth: removed %d expired verification challenge(s)", removed)
+		log.Printf("auth: removed %d verification challenge(s) older than %s", removed, domain.ChallengeWindow)
 	}
 	return removed, nil
 }

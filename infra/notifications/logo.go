@@ -12,7 +12,7 @@ import (
 // A hosted logo is the obvious thing and it is what this did: the header
 // pointed an <img> at the frontend's /brand path. That URL is only reachable
 // from the public internet, and the default one is the frontend ORIGIN the API
-// was configured with — which in development is http://localhost:3000. A mail
+// was configured with, which in development is http://localhost:3000. A mail
 // client resolves that against the reader's own machine, and Gmail resolves it
 // through an image proxy that has never heard of it, so the header rendered as
 // a broken image in every message anyone actually opened.

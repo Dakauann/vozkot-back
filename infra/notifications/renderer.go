@@ -126,7 +126,7 @@ func (r *Renderer) Render(channel domain.Channel, name domain.Template, data map
 	//
 	// html/template will not emit a cid: URL into a src attribute: the scheme
 	// is not on its allowlist, so it rewrites the whole attribute to
-	// #ZgotmplZ and the wordmark disappears — which is a silent, inbox-only
+	// #ZgotmplZ and the wordmark disappears, which is a silent, inbox-only
 	// failure of exactly the kind this package has had once already. The value
 	// is operator configuration read at boot, never user input or anything
 	// from a job payload, so trusting it here is a statement about where it

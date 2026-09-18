@@ -27,7 +27,7 @@ var _ domain.Repository = (*RefundRepository)(nil)
 // The partial unique index on (order_id) WHERE status IN ('pending','approved')
 // is the authority. A prior SELECT would be decoration: a buyer double-tapping
 // "cancelar" sends two requests that both read "nothing open" and both insert,
-// which is two refunds for one order — the one failure this whole feature must
+// which is two refunds for one order, the one failure this whole feature must
 // not have. The conflict comes back as ErrAlreadyOpen, which is ordinary
 // traffic rather than an error to log.
 func (r *RefundRepository) Create(ctx context.Context, item *domain.Request) error {

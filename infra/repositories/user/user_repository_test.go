@@ -138,8 +138,8 @@ func TestProfileDemographicsAreOptional(t *testing.T) {
 // freshCPF builds a CPF nothing in the database is using yet.
 //
 // A fixed number cannot work here: the blind index on the document is UNIQUE
-// across accounts — it is what stops one CPF being spread over several of them
-// to get around the per-document purchase caps — and these tests share a
+// across accounts: it is what stops one CPF being spread over several of them
+// to get around the per-document purchase caps, and these tests share a
 // database that keeps its rows between runs. A literal would pass once and then
 // collide with the account the previous run created.
 //

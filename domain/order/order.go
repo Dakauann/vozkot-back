@@ -223,7 +223,7 @@ type Item struct {
 	// line, still excluding the fee.
 	TotalCents int64
 	// UnitFeeCents is the service fee on ONE ticket of this tier, and FeeCents
-	// is that times the quantity — never a fee taken on the line total, so an
+	// is that times the quantity, never a fee taken on the line total, so an
 	// event page that quotes one ticket has told the truth about three.
 	//
 	// Both are snapshots for the same reason the price is: a rate change must
@@ -395,8 +395,8 @@ func (o *Order) ValidatePricing() error {
 // the internal prefix, but still enough of the id to find the row.
 //
 // One definition, because more than one surface shows it and they have to
-// agree. It was briefly written twice — the receipt took the first eight
-// characters of the id and the door took the last eight — which would have had
+// agree. It was briefly written twice: the receipt took the first eight
+// characters of the id and the door took the last eight, which would have had
 // a buyer reading a reference off their email that the doorperson could not
 // find.
 func Reference(orderID string) string {

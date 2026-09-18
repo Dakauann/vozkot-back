@@ -20,8 +20,8 @@ import (
 
 // MaxSeatsPerRequest bounds a generated block.
 //
-// A layout is written by one organiser in an editor, so this is not a hot path
-// — but it is an unauthenticated-shaped request that materialises rows, and an
+// A layout is written by one organiser in an editor, so this is not a hot path,
+// but it is an unauthenticated-shaped request that materialises rows, and an
 // unbounded one lets a single call write a million of them. Twelve thousand is
 // larger than any Brazilian theatre and smaller than a denial of service.
 const MaxSeatsPerRequest = 12_000
@@ -217,7 +217,7 @@ func (s *Service) GenerateLayout(
 	}
 	// Refused on the SAVE and not on the preview.
 	//
-	// The preview has to be able to draw a collision — that is how the organiser
+	// The preview has to be able to draw a collision: that is how the organiser
 	// sees the one they are making, mid-drag, and a canvas that went blank
 	// whenever two things touched would be unusable. What must not happen is a
 	// room being STORED with two sectors on the same floor, because the seats
@@ -242,7 +242,7 @@ func (s *Service) GenerateLayout(
 // is to be trustworthy.
 //
 // Ownership is still checked. It writes nothing, so the risk is compute rather
-// than data — but an unauthenticated generator that will lay out twelve
+// than data, but an unauthenticated generator that will lay out twelve
 // thousand seats on request is a denial of service with a polite name.
 //
 // A FROZEN layout previews happily. Looking is not editing, and an organiser
@@ -293,7 +293,7 @@ func (s *Service) SuggestAccessibleSeats(
 //
 // Shared by GenerateLayout, which persists the result, and PreviewLayout, which
 // does not. One builder rather than two, so what the organiser sees on the
-// canvas is what the save will store — a preview built by a second code path is
+// canvas is what the save will store: a preview built by a second code path is
 // a preview that can lie.
 func (s *Service) buildSections(
 	layoutID string,

@@ -9,8 +9,8 @@ import "sort"
 // sentence: given a room and what it is short of, choose the chairs.
 //
 // It is a suggestion and not a decision. A real house knows things this cannot
-// — which end has the ramp, where the platform is, which row the lift opens
-// onto — so the organiser can move any of them afterwards. What it removes is
+//: which end has the ramp, where the platform is, which row the lift opens
+// onto, so the organiser can move any of them afterwards. What it removes is
 // the blank page.
 
 // SuggestAccessibleSeats picks chairs to satisfy the quotas a room is missing.

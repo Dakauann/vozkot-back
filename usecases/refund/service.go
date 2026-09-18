@@ -15,7 +15,7 @@
 //     offering a decision that cannot lawfully go the other way.
 //   - Everything else lands pending, and an organiser or an operator decides.
 //
-// Both leave a row saying who asked, on what grounds, who decided, and when —
+// Both leave a row saying who asked, on what grounds, who decided, and when,
 // including the rejections, which leave no trace on the order at all and are
 // exactly the case support will be asked about.
 package refund
@@ -48,7 +48,7 @@ var ErrForbidden = fmt.Errorf("%w: this refund belongs to another account", auth
 // Money schedules the actual movement. It is satisfied by usecases/payment.
 //
 // An interface rather than the concrete service because this package does not
-// need — and must not acquire — the ability to talk to a payment provider. All
+// need, and must not acquire, the ability to talk to a payment provider. All
 // it may do is put the work on the same durable queue the rest of the money
 // path already uses.
 type Money interface {
@@ -360,7 +360,7 @@ func (s *Service) OpenByOrders(ctx context.Context, orderIDs []string) (map[stri
 // value they priced; the rest of the figure is our commission returning to the
 // buyer, which is a matter between us and them.
 //
-// owners are the account ids that make this the caller's own money — the
+// owners are the account ids that make this the caller's own money: the
 // order's buyer, or the person who filed the request. Empty ones never match,
 // so a door sale with no account behind it does not make every caller an owner.
 func SeesPlatformShare(actor authdomain.Actor, owners ...string) bool {
@@ -522,4 +522,73 @@ func randomID() string {
 		return "rfr_" + time.Now().UTC().Format("20060102150405000000000")
 	}
 	return "rfr_" + hex.EncodeToString(buffer)
+}
+
+// OpenOperatorRefund gives back money the box office should not be holding,
+// inside the caller's transaction.
+//
+// THE CASE THIS EXISTS FOR: a payment that arrived after its hold lapsed, for
+// seats that had already been resold. The buyer paid, the tickets are gone, and
+// the order says refund_required. Until this existed that status was written
+// and nothing else happened at all: no request, no job, no message, one log
+// line. The money stayed with us until somebody happened to query for it.
+//
+// It takes the caller's repositories rather than opening a unit of work of its
+// own, so the refund commits with the settlement that owed it. Either the order
+// is refund_required AND the money is scheduled, or neither is true; there is
+// no window in which the system has recorded the debt without acting on it.
+//
+// No window check, deliberately. Evaluate() asks whether a BUYER may claim
+// their money back, and the answers it can give, the event has passed, the
+// seven days are up, are about a buyer changing their mind. None of them apply
+// to our own mistake, and running them here would find reasons to refuse a
+// refund nobody is entitled to refuse.
+func (s *Service) OpenOperatorRefund(
+	ctx context.Context,
+	repositories uow.Repositories,
+	item *orderdomain.Order,
+) (*queue.Job, error) {
+	if item == nil {
+		return nil, nil
+	}
+	policy, err := domain.PolicyFor(item.RefundPolicyVersion)
+	if err != nil {
+		policy = oldestPolicy()
+	}
+	amount, fee := refundable(item, policy)
+	if amount <= 0 {
+		// Nothing was taken, so there is nothing to give back.
+		return nil, nil
+	}
+
+	request, err := domain.New(s.newID(), domain.Draft{
+		OrderID:     item.ID,
+		EventID:     item.EventID,
+		BuyerID:     item.BuyerID,
+		Reason:      domain.ReasonOperator,
+		AmountCents: amount,
+		FeeCents:    fee,
+		// RequestedBy and Note stay empty: nobody asked for this and nobody
+		// typed anything. What it means is a property of the reason, so the
+		// screens say it in the reader's own language instead of storing one
+		// language in a column.
+	}, s.now())
+	if err != nil {
+		return nil, err
+	}
+
+	if err := repositories.Refunds().Create(ctx, request); err != nil {
+		if errors.Is(err, domain.ErrAlreadyOpen) {
+			// A redelivered webhook settling the same order again, or an
+			// operator who got there first. The partial unique index is what
+			// decides this, not a prior read, and one refund is the correct
+			// outcome either way.
+			return nil, nil
+		}
+		return nil, err
+	}
+	// Approved on arrival, because ReasonOperator auto-approves, so the money
+	// is scheduled here rather than waiting for a decision nobody should be
+	// asked to make.
+	return s.money.EnqueueRefund(ctx, repositories.Jobs(), item)
 }

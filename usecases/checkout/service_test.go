@@ -66,8 +66,8 @@ func newHarnessWithLimits(t *testing.T, capacity int, limits orderdomain.HoldLim
 // newHarnessWithFee is the same box office, charging a real commission.
 //
 // The fee is a parameter rather than a second harness because everything else
-// about the setup — the seeded owner, event, tier and the cleanup that removes
-// them — is identical, and two copies of it would drift.
+// about the setup, the seeded owner, event, tier and the cleanup that removes
+// them, is identical, and two copies of it would drift.
 func newHarnessWithFee(t *testing.T, capacity int, fee pricing.Fee) *harness {
 	t.Helper()
 	return newHarnessWith(t, capacity, orderdomain.HoldLimits{}, fee)

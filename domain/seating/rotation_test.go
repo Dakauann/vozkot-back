@@ -39,7 +39,7 @@ func TestAQuarterTurnMakesRowsRunDownTheSide(t *testing.T) {
 // Rotation moves coordinates and nothing else.
 //
 // RowOrder and SeatOrder are the ONLY definition of adjacency in this system, so
-// a turned block still seats four people together — and the labels a ticket
+// a turned block still seats four people together, and the labels a ticket
 // prints are untouched, because a chair does not get renamed by being moved.
 func TestRotationLeavesAdjacencyAndLabelsAlone(t *testing.T) {
 	spec := seating.RowSpec{Rows: 4, SeatsPerRow: 6, Shape: seating.ShapeLinear}

@@ -17,7 +17,7 @@ import (
 
 // The use case layer, against a real PostgreSQL.
 //
-// What is under test here is not the claim — usecases/checkout owns that — but
+// What is under test here is not the claim, usecases/checkout owns that, but
 // the two things this layer is responsible for: who may reach a room, and
 // whether "melhor disponível" hands back seats a party can actually sit in.
 

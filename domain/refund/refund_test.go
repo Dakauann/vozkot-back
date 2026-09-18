@@ -253,7 +253,12 @@ func TestNewAutoApprovesOnlyTheUndeclinableGrounds(t *testing.T) {
 	now := instant("2026-09-02T09:00:00Z")
 	draft := Draft{OrderID: "ord_1", AmountCents: 11_000, FeeCents: 1_000}
 
-	for _, reason := range []Reason{ReasonBuyerWithdrawal, ReasonEventCancelled} {
+	// Operator joined these when settlement started opening its own refunds.
+	// The other two are refunds nobody has STANDING to refuse; this one is a
+	// refund nobody is being ASKED about, because it is the box office's own
+	// mistake. Leaving it pending put a buyer whose seat we resold behind
+	// whoever next opened an inbox.
+	for _, reason := range []Reason{ReasonBuyerWithdrawal, ReasonEventCancelled, ReasonOperator} {
 		draft.Reason = reason
 		request, err := New("rfr_1", draft, now)
 		if err != nil {
@@ -270,7 +275,10 @@ func TestNewAutoApprovesOnlyTheUndeclinableGrounds(t *testing.T) {
 		}
 	}
 
-	for _, reason := range []Reason{ReasonOrganiserGoodwill, ReasonOperator} {
+	// Goodwill is the one that still waits: it is an organiser choosing to
+	// give money back when they do not have to, which is a decision and not a
+	// consequence.
+	for _, reason := range []Reason{ReasonOrganiserGoodwill} {
 		draft.Reason = reason
 		request, err := New("rfr_1", draft, now)
 		if err != nil {

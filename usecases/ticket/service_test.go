@@ -262,7 +262,7 @@ func TestDeleteRemovesATierWithNoOrders(t *testing.T) {
 // actor is the harness's owner, as the use case now expects it.
 //
 // The ownership rule moved from the HTTP handler into the use case, so a test
-// that drives the service directly has to say who it is — which is exactly the
+// that drives the service directly has to say who it is, which is exactly the
 // property that makes the rule reachable from a CLI or a job.
 func (h *harness) actor() authdomain.Actor {
 	return authdomain.Actor{ID: h.ownerID, Role: userdomain.RoleUser}
@@ -300,8 +300,8 @@ func (h *harness) onSaleTier(t *testing.T) *domain.Ticket {
 // This is the leak that prompted the refactor: an account that had never
 // created an event opened the Ingressos tab and saw 601 tiers, every row
 // reading "Evento não encontrado" because they belonged to box offices whose
-// events it could not read. The listing was unscoped — the HTTP handler was the
-// only thing that could have narrowed it, and it did not — and the by-id routes
+// events it could not read. The listing was unscoped: the HTTP handler was the
+// only thing that could have narrowed it, and it did not, and the by-id routes
 // had no ownership check at all, so a price could be rewritten and an on-sale
 // tier cancelled by anybody signed in.
 //

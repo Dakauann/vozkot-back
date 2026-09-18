@@ -1,0 +1,124 @@
+# What is worth waking somebody for.
+#
+# Every rule here answers a question an operator would otherwise only learn
+# from a customer complaint. The severities are the routing keys an
+# Alertmanager will use: critical means money or stock is stuck right now,
+# warning means it will be if nobody looks.
+groups:
+  - name: vozkot_money
+    rules:
+      # The most urgent row this system can produce: the buyer paid, the seat
+      # was already resold, and the platform owes the money back. Settlement
+      # opens the refund automatically, so a number that STAYS above zero means
+      # the automatic path is not completing.
+      - alert: RefundRequiredOrders
+        expr: max(app_orders_by_status{status="refund_required"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} order(s) are owed a refund"
+          description: >-
+            An order was paid after its hold lapsed and the tickets were gone.
+            Settlement opens an operator refund for this automatically, so a
+            count that persists for five minutes means the refund is not
+            completing: check the queue for parked refund jobs and the payment
+            provider for a rejected estorno.
+
+      # A parked job is work that will never be retried again. A create_charge
+      # is a buyer holding a reservation with no PIX to pay; a notification is
+      # a buyer with no ticket in their inbox.
+      - alert: JobsParked
+        expr: increase(app_queue_jobs_parked_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "A {{ $labels.type }} job was parked"
+          description: >-
+            {{ $value | humanize }} {{ $labels.type }} job(s) exhausted their
+            attempts in the last 10 minutes and will not run again. Each one is
+            money or stock that needs a person. Find them with
+            `SELECT id, last_error FROM jobs WHERE status = 'dead'`.
+
+      - alert: DeadJobBacklog
+        expr: max(app_queue_jobs{status="dead"}) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} job(s) are parked and unresolved"
+          description: >-
+            Parked jobs are kept rather than deleted, so this stays up until
+            somebody clears them. If they are known and handled, resolve the
+            rows; the count is meant to be zero on a healthy system.
+
+      # Pending includes forward-dated sweeps and hold expiries, so it is never
+      # zero. A backlog an order of magnitude above that baseline is the queue
+      # falling behind ingest, which on a sale night is buyers waiting for PIX.
+      - alert: QueueBacklogGrowing
+        expr: max(app_queue_jobs{status="pending"}) > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The job queue is {{ $value }} deep"
+          description: >-
+            Pending work is well above the handful of scheduled sweeps that are
+            always queued. Check that workers are running and that the database
+            pool is not exhausted.
+
+  - name: vozkot_http
+    rules:
+      # Fail-OPEN is the local behaviour, and it inverts this alert relative to
+      # systems that fail closed. A limiter erroring here does NOT turn traffic
+      # away; it lets it through unthrottled, so the credential routes are
+      # standing unguarded while this fires.
+      - alert: RateLimiterFailingOpen
+        expr: sum(rate(app_rate_limited_total{reason="limiter_error"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The rate limiter is failing open"
+          description: >-
+            The limiter backend (Redis) is erroring, and this system allows the
+            request when it cannot judge it. Login is a bcrypt compare, so the
+            credential routes are currently unthrottled. Check Redis.
+
+      - alert: HighHTTPErrorRate
+        expr: sum(rate(app_http_requests_total{status=~"5.."}[5m])) / sum(rate(app_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of responses are 5xx"
+          description: >-
+            More than one request in twenty is failing. If a sale is running,
+            buyers are being turned away mid-checkout.
+
+      - alert: HighHTTPLatency
+        expr: histogram_quantile(0.95, sum(rate(app_http_request_duration_seconds_bucket[5m])) by (le, method, path)) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 above 2s on {{ $labels.method }} {{ $labels.path }}"
+          description: >-
+            The slow route is {{ $labels.method }} {{ $labels.path }} at
+            {{ $value | humanize }}s. Checkout above two seconds is abandoned
+            carts; a report endpoint is merely unpleasant.
+
+  - name: vozkot_scrape
+    rules:
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Target {{ $labels.job }} is down"
+          description: >-
+            {{ $labels.instance }} has been unreachable for two minutes. Either
+            the process is gone or its metrics listener is not bound where
+            Prometheus is looking. Every other alert here is blind until this
+            recovers.

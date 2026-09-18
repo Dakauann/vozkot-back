@@ -53,7 +53,7 @@ type ScanRequest struct {
 // ScanResponse is the verdict a door screen draws.
 //
 // It deliberately does NOT echo the code back. There is no use for it on the
-// screen — the doorperson is holding the thing it came from — and an endpoint
+// screen, the doorperson is holding the thing it came from, and an endpoint
 // that returns codes is one XSS or one screenshot away from being a way to
 // collect them.
 type ScanResponse struct {

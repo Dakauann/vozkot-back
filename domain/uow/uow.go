@@ -17,6 +17,7 @@ import (
 
 	"vozkot/domain/admission"
 	"vozkot/domain/event"
+	"vozkot/domain/ledger"
 	"vozkot/domain/order"
 	"vozkot/domain/queue"
 	"vozkot/domain/refund"
@@ -54,6 +55,13 @@ type Repositories interface {
 	// the whole story for a party, and this port is only touched by a line that
 	// names seats.
 	Seats() seating.Repository
+	// Ledger is written in the transaction that moves an order's money.
+	//
+	// An accrual that can exist without the payment that earned it, or be lost
+	// for one that committed, is a balance nobody can trust and that has to be
+	// reconciled by hand forever. The same argument the stock above rests on,
+	// applied to the number the organiser is eventually paid.
+	Ledger() ledger.Repository
 	Jobs() queue.Queue
 }
 

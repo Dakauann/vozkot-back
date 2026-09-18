@@ -14,7 +14,7 @@ import (
 // The age bands exist twice: once in Go, for the CSV and anything that reads a
 // single row, and once in SQL, because bucketing a whole event in memory would
 // mean reading every order of it. Duplication of a rule is a real cost and this
-// test is what pays for it — every age is walked through BOTH, so a boundary
+// test is what pays for it: every age is walked through BOTH, so a boundary
 // edited in one place and not the other fails here rather than quietly putting
 // the same person in two different bands depending on which screen asked.
 func TestSQLBucketsMatchTheDomain(t *testing.T) {
@@ -63,7 +63,7 @@ func TestSalesForAnEventWithNoOrders(t *testing.T) {
 	db := testsupport.Database(t)
 	repository := NewReportRepository(db)
 
-	sales, err := repository.Sales(context.Background(), fmt.Sprintf("evt_empty_%d", time.Now().UnixNano()))
+	sales, err := repository.Sales(context.Background(), domain.EventScope(fmt.Sprintf("evt_empty_%d", time.Now().UnixNano())))
 	if err != nil {
 		t.Fatalf("Sales(): %v", err)
 	}
@@ -93,7 +93,7 @@ func TestGroupByRefusesAnUnregisteredExpression(t *testing.T) {
 	db := testsupport.Database(t)
 	repository := NewReportRepository(db)
 
-	_, err := repository.groupBy(context.Background(), "evt_1", "o.buyer_name; DROP TABLE orders", 0)
+	_, err := repository.groupBy(context.Background(), domain.EventScope("evt_1"), "o.buyer_name; DROP TABLE orders", 0)
 	if err == nil {
 		t.Fatal("an unregistered grouping expression was accepted")
 	}

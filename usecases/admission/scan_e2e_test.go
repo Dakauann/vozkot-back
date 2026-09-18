@@ -314,7 +314,7 @@ func TestScanChecksTheOrderIsStillPaid(t *testing.T) {
 	ctx := context.Background()
 	issued := h.issue(t)
 
-	// The order moves without the admission being voided — a status corrected
+	// The order moves without the admission being voided: a status corrected
 	// by hand, or a bug in the refund path.
 	if err := h.db.Exec("UPDATE orders SET status = 'refunded' WHERE id = ?", h.orderID).Error; err != nil {
 		t.Fatalf("move the order: %v", err)

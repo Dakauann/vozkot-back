@@ -8,7 +8,7 @@ import (
 )
 
 // A canvas drags a box. For that to work, "where is this block" has to mean the
-// same thing for every shape — and it did not: a block of rows was generated
+// same thing for every shape, and it did not: a block of rows was generated
 // from its offset, an arc of stands was generated AROUND it. Dragging two
 // blocks by the same distance moved them by different amounts, and no box could
 // be drawn from an offset without first knowing the shape inside it.
@@ -60,7 +60,7 @@ func TestPlaceAtGivesEveryShapeTheSameCorner(t *testing.T) {
 
 // A shift moves the whole block and changes nothing about it. If it could
 // change the spacing, a room saved after a drag would not be the room that was
-// drawn, and adjacency — which is what seats a party together — is measured
+// drawn, and adjacency, which is what seats a party together, is measured
 // from these coordinates.
 func TestPlaceAtPreservesTheShape(t *testing.T) {
 	spec := seating.RowSpec{Rows: 3, SeatsPerRow: 5, Shape: seating.ShapeLinear}

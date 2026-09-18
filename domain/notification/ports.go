@@ -56,7 +56,7 @@ type Message struct {
 	// Inline are images the body references by content id.
 	//
 	// A ticket has to carry a QR into an inbox, and there are only two ways to
-	// do that. A data: URI does not work — Gmail strips it out of an img src,
+	// do that. A data: URI does not work. Gmail strips it out of an img src,
 	// so the buyer sees a broken image where their ticket should be. A hosted
 	// URL works but puts the code into Google's image proxy and its cache. So
 	// the image travels WITH the message, as a multipart/related part the body

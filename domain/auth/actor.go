@@ -10,15 +10,15 @@ import (
 //
 // An authenticated principal reduced to the two facts every authorisation
 // decision in this system needs: which account is asking, and whether that
-// account is an operator of the platform. Nothing else about a session — the
-// email, the token version, the JTI — has ever decided whether a caller may
+// account is an operator of the platform. Nothing else about a session, the
+// email, the token version, the JTI, has ever decided whether a caller may
 // read a row, so nothing else is here.
 //
 // It exists so that a use case can enforce its own rules. Before it, five
 // transport packages each declared their own `adminRole = "admin"` and their
 // own forbidden error and made the decision next to the HTTP writer, which put
-// every authorisation rule in the one layer that a new caller — a CLI, a job,
-// another use case — does not go through. Passing this value into a use case
+// every authorisation rule in the one layer that a new caller, a CLI, a job,
+// another use case, does not go through. Passing this value into a use case
 // moves the rule to where the data is, and leaves transport with the two jobs
 // it should have: turn a session into an Actor, and turn an error into a status
 // code.
@@ -58,8 +58,8 @@ func (a Actor) IsAdmin() bool { return a.Role == user.RoleAdmin }
 
 // Owns reports whether ownerID is this caller's own.
 //
-// Both empty strings are refused rather than matched. A row with no owner — a
-// door sale with no account behind it — must not become everybody's, and an
+// Both empty strings are refused rather than matched. A row with no owner, a
+// door sale with no account behind it, must not become everybody's, and an
 // unauthenticated Actor must not own the rows that have no owner either.
 func (a Actor) Owns(ownerID string) bool {
 	return a.ID != "" && ownerID != "" && ownerID == a.ID
@@ -69,6 +69,6 @@ func (a Actor) Owns(ownerID string) bool {
 //
 // The rule every resource in this system shares: an operator may reach
 // anything, and everybody else may reach only their own. A use case that needs
-// something different — an event's organiser reaching a buyer's refund, say —
+// something different, an event's organiser reaching a buyer's refund, say,
 // composes it from Owns and IsAdmin rather than restating this.
 func (a Actor) MayReach(ownerID string) bool { return a.IsAdmin() || a.Owns(ownerID) }

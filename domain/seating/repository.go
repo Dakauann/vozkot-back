@@ -12,8 +12,8 @@ import "context"
 type Repository interface {
 	// Claim holds the named seats for an order. All or nothing.
 	//
-	// It must be ONE conditional update — status moved to held only WHERE it is
-	// still available, scoped to the event AND the tier — so that two buyers
+	// It must be ONE conditional update: status moved to held only WHERE it is
+	// still available, scoped to the event AND the tier, so that two buyers
 	// asking for the same chair in the same instant produce exactly one holder.
 	//
 	// When it cannot take every seat it takes NONE, and reports which ones were
@@ -40,7 +40,7 @@ type Repository interface {
 	// The refund path, and only it. Scoped to sold for the mirror of the reason
 	// ReleaseForOrder is scoped to held: a refund must return the chair, and
 	// nothing else in the system may. The tier's own ReleaseSold has the same
-	// shape and the same justification — refunding an order that never
+	// shape and the same justification: refunding an order that never
 	// completed would credit inventory that was already released.
 	ReleaseSoldForOrder(ctx context.Context, orderID string) (int, error)
 
@@ -91,7 +91,7 @@ type MaterialisePlan struct {
 	//
 	// A band rather than a section, because where a seat is and what it costs
 	// change on different clocks: the room is fixed for years and the price
-	// list changes every night. A band is a NAME — see Category — so two wings
+	// list changes every night. A band is a NAME, see Category, so two wings
 	// of a plateia can share one price, and the front three rows can carry
 	// their own without the room being redrawn to express it.
 	//

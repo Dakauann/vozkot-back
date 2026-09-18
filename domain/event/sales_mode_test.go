@@ -51,7 +51,7 @@ func TestAnInvalidSalesModeIsRefused(t *testing.T) {
 // An edit that says nothing about the mode leaves it alone.
 //
 // It is a structural choice made once, and there are two callers that rebuild a
-// whole Draft from the stored event to change one unrelated thing — the map pin
+// whole Draft from the stored event to change one unrelated thing: the map pin
 // is one of them. If an omitted field meant "counted", dragging a pin would
 // quietly stop a theatre from selling seats.
 func TestAnEditWithoutASalesModeKeepsWhatItHad(t *testing.T) {

@@ -116,8 +116,8 @@ type OrderItem struct {
 	// It stopped being expressible as a tag when reserved seating arrived. A
 	// seated line is one row per CHAIR, so four seats of one tier are four rows
 	// sharing an order and a tier, and this index would reject a legitimate
-	// purchase. It is replaced by two PARTIAL unique indexes in indexes.go —
-	// one per tier for counted lines, one per seat for seated ones — because
+	// purchase. It is replaced by two PARTIAL unique indexes in indexes.go:
+	// one per tier for counted lines, one per seat for seated ones, because
 	// widening it to include seat_id would have quietly dropped the counted
 	// guarantee: PostgreSQL treats NULLs as distinct, so two counted lines for
 	// the same tier would both be accepted.

@@ -11,6 +11,7 @@ import (
 
 	"vozkot/domain/admission"
 	"vozkot/domain/event"
+	"vozkot/domain/ledger"
 	"vozkot/domain/order"
 	"vozkot/domain/queue"
 	"vozkot/domain/refund"
@@ -19,6 +20,7 @@ import (
 	domain "vozkot/domain/uow"
 	admissionRepository "vozkot/infra/repositories/admission"
 	eventRepository "vozkot/infra/repositories/event"
+	ledgerRepository "vozkot/infra/repositories/ledger"
 	orderRepository "vozkot/infra/repositories/order"
 	queueRepository "vozkot/infra/repositories/queue"
 	refundRepository "vozkot/infra/repositories/refund"
@@ -61,5 +63,8 @@ func (r *repositories) Admissions() admission.Repository {
 }
 func (r *repositories) Seats() seating.Repository {
 	return seatingRepository.NewSeatRepository(r.tx)
+}
+func (r *repositories) Ledger() ledger.Repository {
+	return ledgerRepository.NewLedgerRepository(r.tx)
 }
 func (r *repositories) Jobs() queue.Queue { return queueRepository.NewJobRepository(r.tx) }

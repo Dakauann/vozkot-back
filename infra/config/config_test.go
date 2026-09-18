@@ -39,8 +39,8 @@ func TestLoadRequiresDatabaseCredentialsInProduction(t *testing.T) {
 //
 // This is the test that keeps it that way. The reason the rate was moved into
 // code is that both ways of misconfiguring it move real money before anyone
-// notices — a forgotten variable charges nothing and silently eats the
-// commission on every sale, a mistyped one overcharges buyers — so a future
+// notices: a forgotten variable charges nothing and silently eats the
+// commission on every sale, a mistyped one overcharges buyers, so a future
 // change that reintroduces an override would undo the whole point. Setting the
 // old variable to a wildly different value must therefore change nothing.
 func TestServiceFeeComesFromCodeAndNotTheEnvironment(t *testing.T) {
@@ -79,5 +79,58 @@ func TestTheInCodeRateIsTenPerCent(t *testing.T) {
 			"If that is intended, update this test, README.md and the service-fee clause of the "+
 			"Terms of Service in all four locales, and give buyers the 30 days' notice those Terms promise",
 			pricing.PlatformBasisPoints)
+	}
+}
+
+// Redis is a production requirement, because the rate limits live in it.
+//
+// The reason this is a boot check and not a runtime one: a deployment that
+// forgets REDIS_URL serves its whole life with the credential routes
+// unthrottled and nothing says so, while a Redis that dies AFTER boot leaves
+// the limiters failing open on purpose, so an outage cannot close the front
+// door. See TestWithoutRedisTheRoutesStillWork in delivery/http/auth.
+//
+// loadCache is called directly rather than through Load, matching
+// notifications_test.go: a Load-level test would have to satisfy every other
+// production guard first, which tests those guards rather than this one.
+func TestRedisIsRequiredInProduction(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("REDIS_URL", "")
+
+	_, err := loadCache()
+	if err == nil || !strings.Contains(err.Error(), "REDIS_URL is required in production") {
+		t.Fatalf("loadCache() error = %v, want REDIS_URL required", err)
+	}
+	// The message has to name the consequence. "REDIS_URL is not set" reads as
+	// a caching preference and gets deployed around.
+	if !strings.Contains(err.Error(), "rate limits") {
+		t.Errorf("error %q does not say what is lost; it must name the rate limits", err)
+	}
+}
+
+func TestRedisSatisfiesProductionWhenSet(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+
+	cache, err := loadCache()
+	if err != nil {
+		t.Fatalf("loadCache() error = %v", err)
+	}
+	if !cache.Enabled() {
+		t.Fatal("cache is not enabled with a REDIS_URL set")
+	}
+}
+
+// A clone with no Redis still has to run, or the development story breaks.
+func TestRedisStaysOptionalInDevelopment(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("REDIS_URL", "")
+
+	cache, err := loadCache()
+	if err != nil {
+		t.Fatalf("loadCache() error = %v, want development to run without Redis", err)
+	}
+	if cache.Enabled() {
+		t.Fatal("cache reports enabled with no REDIS_URL")
 	}
 }

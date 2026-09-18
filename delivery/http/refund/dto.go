@@ -219,7 +219,7 @@ func StatusFor(err error) int {
 	case errors.Is(err, domain.ErrNotFound), errors.Is(err, orderdomain.ErrNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, domain.ErrAlreadyOpen), errors.Is(err, domain.ErrNotDecidable):
-		// 409: a conflict with state the caller can see and act on — there is
+		// 409: a conflict with state the caller can see and act on. There is
 		// already a request, or somebody already answered it.
 		return http.StatusConflict
 	case errors.Is(err, domain.ErrWindowClosed),

@@ -157,6 +157,13 @@ type harness struct {
 
 func newHarness(t *testing.T, capacity int) *harness {
 	t.Helper()
+	// Settling a payment issues admissions, and an admission code is sealed at
+	// rest. Installed here rather than in the handful of tests that obviously
+	// touch admissions: piigorm holds the service as package state behind a
+	// sync.Once, so the suite only passed because SOME earlier test in this
+	// package happened to install it, and any `go test -run` that filtered that
+	// test out failed on an unrelated-looking encryption error.
+	testsupport.Encryption(t)
 	db := testsupport.Database(t)
 	ctx := context.Background()
 

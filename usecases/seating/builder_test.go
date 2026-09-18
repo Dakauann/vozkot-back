@@ -20,7 +20,7 @@ import (
 // Every block keeps its own place.
 //
 // The old room generated every section at the same origin, so a stage, a
-// plateia and two VIP wings came out as one pile of dots on top of each other —
+// plateia and two VIP wings came out as one pile of dots on top of each other,
 // which is why no arrangement more complicated than "one block of rows" could
 // be built at all.
 func TestEachBlockKeepsItsOwnPlace(t *testing.T) {
@@ -93,7 +93,7 @@ func TestEachBlockKeepsItsOwnPlace(t *testing.T) {
 //
 // It used to be a word on the layout with a position derived from the seats, so
 // nothing could move it, nothing could resize it, and a room could have a stage
-// or an arena and never both — which a rodeo with a show stage at one end has.
+// or an arena and never both, which a rodeo with a show stage at one end has.
 func TestMarkersAreStoredAsPlacedObjects(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -102,8 +102,8 @@ func TestMarkersAreStoredAsPlacedObjects(t *testing.T) {
 	if _, _, err := h.service.GenerateLayout(ctx, h.actor, layoutID, []SectionSpec{
 		// A rodeo: a ring of stands, the arena in the hole, and a show stage
 		// clear of both. The arena is CONCENTRIC with the ring and inside its
-		// first row, which is the only way the two are not on top of each other
-		// — and the room refuses to save if they are.
+		// first row, which is the only way the two are not on top of each other,
+		// and the room refuses to save if they are.
 		//
 		// The ring is placed by its top-left corner, so its centre is that
 		// corner plus the outer radius: 60 + (180 + 2 x 28) = 296.
@@ -291,7 +291,7 @@ func TestTheMapCarriesTheMarkers(t *testing.T) {
 //
 // This is the concert hall's shape: a stage, a standing pista between it and
 // the chairs, and a box out on each wing. The map used to send the stage alone,
-// which drew a room with holes in it — a 180 unit gap where the pista is, and
+// which drew a room with holes in it: a 180 unit gap where the pista is, and
 // no camarotes at all, which also put the widest things in the room outside the
 // bounding box the client fits to. A buyer reading that map sees a distance the
 // plan does not have, and asks why.
@@ -374,8 +374,8 @@ func TestTheMapCarriesTheCountedFloorAndNotOnlyTheScenery(t *testing.T) {
 // A save with two sectors on the same floor is refused, and a preview of the
 // same room is not.
 //
-// Both halves matter. The canvas has to be able to DRAW a collision — that is
-// how the organiser sees the one they are making, mid-drag — and the store must
+// Both halves matter. The canvas has to be able to DRAW a collision: that is
+// how the organiser sees the one they are making, mid-drag, and the store must
 // never hold one, because the seats underneath generate and sell regardless of
 // whether the room makes physical sense.
 func TestAnOverlappingRoomIsRefusedOnSaveAndDrawnOnPreview(t *testing.T) {
@@ -423,7 +423,7 @@ func TestAnOverlappingRoomIsRefusedOnSaveAndDrawnOnPreview(t *testing.T) {
 	}
 }
 
-// The same two pieces, moved apart, save without complaint — including when
+// The same two pieces, moved apart, save without complaint, including when
 // they share an edge, which is what a balcony behind the stalls looks like.
 func TestSectorsThatOnlyTouchStillSave(t *testing.T) {
 	h := newHarness(t)
@@ -455,7 +455,7 @@ func TestSectorsThatOnlyTouchStillSave(t *testing.T) {
 // THE FEATURE: the front rows of one sector cost more than the rest.
 //
 // This is what price bands were built for. Before them the only way to charge
-// more for Fila A was to make the front rows a different SECTION — changing the
+// more for Fila A was to make the front rows a different SECTION, changing the
 // room's geography to express a price, and splitting the meia-entrada quota in
 // the process. Now one section carries two bands.
 func TestFrontRowsCanCostMoreThanTheRestOfTheirSection(t *testing.T) {
@@ -484,7 +484,7 @@ func TestFrontRowsCanCostMoreThanTheRestOfTheirSection(t *testing.T) {
 		t.Fatalf("GenerateLayout(): %v", err)
 	}
 	if len(sections) != 1 {
-		t.Fatalf("got %d sections, want one — the whole point is that it is ONE sector",
+		t.Fatalf("got %d sections, want one: the whole point is that it is ONE sector",
 			len(sections))
 	}
 
@@ -633,7 +633,7 @@ func TestAPriceListNamingAnUnknownBandIsRefused(t *testing.T) {
 //
 // The separate publish step was the worst dead end in the product: an organiser
 // drew a room, reached the pricing screen, and was told the venue had no
-// published plan — about the plan they had just finished. The bind already
+// published plan, about the plan they had just finished. The bind already
 // freezes the layout in the transaction that writes the seats, so the freeze was
 // always the protection and the publish was a second lock on a self-locking
 // door. Eventbrite's reserved-seating flow has no publish step for a venue map

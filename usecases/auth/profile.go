@@ -64,7 +64,7 @@ func (p *Profiles) Save(ctx context.Context, input SaveInput) (*user.User, error
 	// On an account that has already filled the block in, a BLANK identity field
 	// means "leave it as it is" rather than "clear it".
 	//
-	// This is what lets a buyer edit the optional answers — their city, say —
+	// This is what lets a buyer edit the optional answers, their city, say,
 	// without the screen having to send a CPF back. It could not send one: the
 	// API returns the document masked and never in full, by design, so a form
 	// that had to echo it would either have to be given the real thing or would
@@ -112,8 +112,8 @@ func (p *Profiles) Save(ctx context.Context, input SaveInput) (*user.User, error
 // carryForward fills blank identity fields from what is already stored.
 //
 // Only the three that cannot be re-sent by an edit screen. The optional
-// demographics are deliberately absent: for those, blank is a real answer —
-// somebody clearing their city means they want it cleared — and carrying them
+// demographics are deliberately absent: for those, blank is a real answer:
+// somebody clearing their city means they want it cleared, and carrying them
 // forward would make the fields impossible to empty once set.
 func carryForward(draft *user.ProfileDraft, stored user.Profile) {
 	if strings.TrimSpace(draft.Document) == "" {

@@ -40,8 +40,8 @@ type CreateRequest struct {
 	Status      string          `json:"status" enums:"draft,published,cancelled" example:"draft"`
 	// SalesMode is how this event sells: `counted` by the number, the way a
 	// party does, or `seated` by the chair, with a row and a seat number. It is
-	// a declaration and not a fact about inventory — the seats themselves
-	// answer whether a night has any — but nothing else can be derived from an
+	// a declaration and not a fact about inventory, the seats themselves
+	// answer whether a night has any, but nothing else can be derived from an
 	// event that has no tiers yet, and the interface has to know which question
 	// to ask next. Empty means counted.
 	SalesMode string `json:"salesMode" enums:"counted,seated" example:"counted"`
@@ -156,7 +156,7 @@ type TierResponse struct {
 	//
 	// PriceCents is the FACE value the organiser set. FeeCents is the service
 	// charge added on top of one ticket, and TotalCents is what the buyer will
-	// actually pay for it — the number that has to appear on the event page,
+	// actually pay for it, the number that has to appear on the event page,
 	// because a total that first shows up at the last step of checkout is the
 	// single largest cause of an abandoned cart.
 	PriceCents int64  `json:"priceCents"`

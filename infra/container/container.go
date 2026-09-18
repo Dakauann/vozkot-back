@@ -18,6 +18,7 @@ import (
 	authHTTP "vozkot/delivery/http/auth"
 	checkoutHTTP "vozkot/delivery/http/checkout"
 	eventHTTP "vozkot/delivery/http/event"
+	payoutHTTP "vozkot/delivery/http/payout"
 	refundHTTP "vozkot/delivery/http/refund"
 	reportHTTP "vozkot/delivery/http/report"
 	seatingHTTP "vozkot/delivery/http/seating"
@@ -26,6 +27,7 @@ import (
 	authdomain "vozkot/domain/auth"
 	cachedomain "vozkot/domain/cache"
 	idempotencydomain "vozkot/domain/idempotency"
+	ledgerdomain "vozkot/domain/ledger"
 	notificationdomain "vozkot/domain/notification"
 	orderdomain "vozkot/domain/order"
 	paymentdomain "vozkot/domain/payment"
@@ -41,6 +43,7 @@ import (
 	"vozkot/infra/imaging"
 	"vozkot/infra/mercadopago"
 	"vozkot/infra/notifications"
+	prometheusMetrics "vozkot/infra/prometheus"
 	"vozkot/infra/qrcode"
 	"vozkot/infra/rabbitmq"
 	redisCache "vozkot/infra/redis"
@@ -66,6 +69,7 @@ import (
 	mediaUsecase "vozkot/usecases/media"
 	notificationUsecase "vozkot/usecases/notification"
 	paymentUsecase "vozkot/usecases/payment"
+	payoutUsecase "vozkot/usecases/payout"
 	queueUsecase "vozkot/usecases/queue"
 	refundUsecase "vozkot/usecases/refund"
 	reportUsecase "vozkot/usecases/report"
@@ -83,6 +87,12 @@ type Container struct {
 	// process exits rather than being reclaimed minutes later by another node.
 	stopWorkers context.CancelFunc
 	workersDone sync.WaitGroup
+	// recorder is what the workers and sweeps report to. Never nil; a Service
+	// with no listener still records, it is simply never scraped.
+	recorder *prometheusMetrics.Service
+	// metrics serves /metrics on its own listener. Nil when METRICS_LISTEN_ADDR
+	// is empty, and then nothing is exposed and nothing is scraped.
+	metrics *metricsServer
 	// challenges sweeps spent sign-in codes. Nil when passwordless sign-in is
 	// not configured, and the sweep is simply not scheduled.
 	challenges *authUsecase.Verification
@@ -135,8 +145,9 @@ func New(cfg config.Config) (*Container, error) {
 
 	container := &Container{database: databaseSQL}
 
-	// Redis: read cache and rate limiter. Both are load shedding, so a missing
-	// Redis degrades performance and nothing else.
+	// Redis: read cache and rate limiter. The cache half is load shedding; the
+	// limiter half is a security control, which is why production refuses to
+	// start without a REDIS_URL and only development reaches the else branch.
 	var readCache cachedomain.Cache
 	var limiter cachedomain.RateLimiter
 	if cfg.Cache.Enabled() {
@@ -149,7 +160,13 @@ func New(cfg config.Config) (*Container, error) {
 		limiter = redisCache.NewRateLimiter(connected)
 		log.Printf("cache: Redis connected, key prefix %q", cfg.Cache.KeyPrefix)
 	} else {
-		log.Printf("cache: REDIS_URL is not set; reads go straight to PostgreSQL and the checkout rate limit is off")
+		// Development only: config.Load refuses to build a production
+		// configuration without a REDIS_URL. Worth naming the missing CONTROLS
+		// and not just the missing cache, so nobody reads this line as
+		// "reads will be a bit slower" while the credential routes sit
+		// unthrottled.
+		log.Printf("cache: REDIS_URL is not set; reads go straight to PostgreSQL and " +
+			"the auth, login and checkout rate limits are OFF (development only)")
 	}
 
 	mediaLibrary := mediaUsecase.NewService(mediaRepository.NewMediaRepository(db), fileStorage, imaging.NewLibrary(cfg.MediaProcessors))
@@ -308,7 +325,7 @@ func New(cfg config.Config) (*Container, error) {
 		//
 		// It used to read `notifier == nil`, which was the same question while email
 		// was the only channel. Once a phone channel could exist on its own, that
-		// test started passing on a deployment with WhatsApp and no mail provider —
+		// test started passing on a deployment with WhatsApp and no mail provider,
 		// so the one warning that explains a 503 on the sign-in screen went silent
 		// exactly when it was still true. Handles is nil-safe, so this also covers
 		// "no notifier at all".
@@ -330,7 +347,15 @@ func New(cfg config.Config) (*Container, error) {
 		HoldLimits:  holdLimits,
 		Fee:         cfg.ServiceFee,
 	})
-	paymentService := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, purchases)
+	// The organiser's balance. Standard terms for everyone today; the tier is
+	// a lookup the moment there is anything to look up. Weekends only until a
+	// holiday calendar is wired, which makes a settlement date land at worst a
+	// day early on a feriado, visible, and never money moving that should not.
+	payoutService := payoutUsecase.NewService(
+		unit, payoutUsecase.AlwaysStandard, ledgerdomain.BankingCalendar, time.Now, prefixedID,
+	)
+	paymentService := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, purchases).
+		WithLedger(payoutService)
 
 	// Refunds and reporting hang off the sale rather than being part of it: both
 	// read what checkout wrote, and neither can move stock. The refund service
@@ -338,6 +363,11 @@ func New(cfg config.Config) (*Container, error) {
 	// it authorises commit together.
 	refundRequests := refundRepository.NewRefundRepository(db)
 	refundService := refundUsecase.NewService(unit, refundRequests, orders, events, paymentService, dispatcher)
+	// And back the other way, which is why it is a second statement rather
+	// than a constructor argument: settlement opens the box office's own refund
+	// when it finds the tickets gone, and the refund service is built from the
+	// payment service, so the two are joined here after both exist.
+	paymentService.WithRefunds(refundService)
 	reportService := reportUsecase.NewService(reportRepository.NewReportRepository(db), events)
 
 	// The door. The repository above serves reads and scans; issuing goes
@@ -403,12 +433,20 @@ func New(cfg config.Config) (*Container, error) {
 	}
 	checkoutAdmission := authMiddleware.NewConcurrencyLimit(cfg.CheckoutMaxInFlight)
 
+	// Metrics. Built here and handed both to the router, which measures
+	// requests, and to the sweeps below, which publish queue depth and the
+	// order statuses worth alerting on.
+	metrics := prometheusMetrics.New(prometheusMetrics.ReplicaID())
+	container.recorder = metrics
+	container.metrics = newMetricsServer(cfg.MetricsListenAddr, metrics.Handler())
+
 	router := delivery.NewRouter(delivery.Dependencies{
 		Auth:              authHandler,
 		Tickets:           ticketHandler,
 		Events:            eventHandler,
 		Checkout:          checkoutHandler,
 		Refunds:           refundHandler,
+		Payouts:           payoutHTTP.NewHandler(payoutService),
 		Reports:           reportHandler,
 		Admissions:        admissionHandler,
 		Seating:           seatingHandler,
@@ -417,6 +455,7 @@ func New(cfg config.Config) (*Container, error) {
 		CheckoutLimit:     checkoutLimit,
 		CheckoutAdmission: checkoutAdmission,
 		AuthLimit:         authLimit,
+		Metrics:           authMiddleware.NewMetrics(metrics),
 		MediaFiles:        mediaFiles,
 		AllowedOrigin:     cfg.CORSAllowedOrigin,
 		Health:            queueHealth(jobs, container),
@@ -430,7 +469,7 @@ func New(cfg config.Config) (*Container, error) {
 		IdleTimeout:  cfg.IdleTimeout,
 	}
 
-	container.startWorkers(cfg, jobs, keys, consumer, dispatcher, checkoutService, paymentService, messenger)
+	container.startWorkers(cfg, jobs, orders, keys, consumer, dispatcher, checkoutService, paymentService, messenger)
 	return container, nil
 }
 
@@ -562,6 +601,7 @@ func buildWebhookHandler(
 func (c *Container) startWorkers(
 	cfg config.Config,
 	jobs queuedomain.Queue,
+	orders orderdomain.Repository,
 	keys idempotencydomain.Store,
 	consumer queuedomain.Consumer,
 	dispatcher *queueUsecase.Dispatcher,
@@ -581,6 +621,7 @@ func (c *Container) startWorkers(
 		if consumer != nil {
 			options = append(options, queueUsecase.WithBroker(consumer))
 		}
+		options = append(options, queueUsecase.WithMetrics(c.recorder))
 		worker := queueUsecase.NewWorker(jobs, options...)
 
 		worker.Handle(queuedomain.TypeCreateCharge, func(ctx context.Context, job queuedomain.Job) error {
@@ -617,15 +658,29 @@ func (c *Container) startWorkers(
 				log.Printf("queue: released %d expired hold(s)", released)
 			}
 			// Spent sign-in codes ride the same sweep rather than getting a
-			// timer of their own. They expire on the same order of minutes as a
-			// hold, and keeping them afterwards would be retaining a record of
-			// who signed in and when, which is exactly what that table's shape
-			// avoids holding.
+			// timer of their own, and keeping them afterwards would be
+			// retaining a record of who signed in and when, which is exactly
+			// what that table's shape avoids holding.
+			//
+			// This runs every minute while a challenge is kept for an hour, so
+			// the sweep is mostly a no-op and deliberately so: the row outlives
+			// its own code by design, because the per-destination ceiling is
+			// counted from those rows. See SweepOldChallenges.
 			if c.challenges != nil {
-				if _, sweepErr := c.challenges.SweepExpiredChallenges(ctx, 500); sweepErr != nil {
-					log.Printf("auth: sweeping expired challenges: %v", sweepErr)
+				if _, sweepErr := c.challenges.SweepOldChallenges(ctx, 500); sweepErr != nil {
+					log.Printf("auth: sweeping old challenges: %v", sweepErr)
 				}
 			}
+			// The gauges ride this sweep too, for the same reason the codes do:
+			// a minute is the resolution an operator needs and a timer of its
+			// own would be a second thing to start, stop and get wrong.
+			//
+			// Published from ONE worker's sweep and not from every replica: the
+			// numbers are table-wide counts, so each replica would otherwise
+			// publish the same figure under its own replica_id and a naive
+			// sum() across replicas would multiply the backlog by the fleet
+			// size. The dedupe key on the sweep job is what makes it one.
+			c.publishGauges(ctx, jobs, orders)
 			return err
 		})
 
@@ -735,12 +790,55 @@ func queueHealth(jobs queuedomain.Queue, container *Container) func() map[string
 	}
 }
 
+// publishGauges puts the queue depth and the order statuses worth alerting on
+// in front of Prometheus.
+//
+// Counts rather than events, because these are questions about NOW: how much
+// work is waiting, and how many buyers are owed their money back. A counter
+// would answer "how many ever", which is not what wakes somebody up.
+//
+// Every failure here is logged and swallowed. A monitoring read that took down
+// the sweep it rides on would cost expired holds their release, which is stock
+// nobody can buy; being unable to publish a number is never worth that.
+func (c *Container) publishGauges(ctx context.Context, jobs queuedomain.Queue, orders orderdomain.Repository) {
+	if c.recorder == nil {
+		return
+	}
+	for _, status := range []queuedomain.Status{
+		queuedomain.StatusPending, queuedomain.StatusProcessing, queuedomain.StatusDead,
+	} {
+		count, err := jobs.CountByStatus(ctx, status)
+		if err != nil {
+			log.Printf("metrics: counting %s jobs: %v", status, err)
+			continue
+		}
+		c.recorder.SetQueueJobs(string(status), count)
+	}
+
+	// refund_required only. It is the one status that means money was taken
+	// for tickets that no longer exist, so anything above zero is a person
+	// owed a refund; the rest of the statuses are already on the report pages
+	// and counting them all here would be a query per status per minute for
+	// numbers nobody alerts on.
+	count, err := orders.Count(ctx, orderdomain.Filter{Status: orderdomain.StatusRefundRequired})
+	if err != nil {
+		log.Printf("metrics: counting refund_required orders: %v", err)
+		return
+	}
+	c.recorder.SetOrdersByStatus(string(orderdomain.StatusRefundRequired), count)
+}
+
 func (c *Container) Start() error {
+	// The scrape listener first, and in the background: it is a separate
+	// server, so a port already in use there must not stop the API from
+	// serving buyers. Nil-safe when METRICS_LISTEN_ADDR is empty.
+	c.metrics.Start()
 	return c.server.ListenAndServe()
 }
 
 func (c *Container) Shutdown(ctx context.Context) error {
 	serverErr := c.server.Shutdown(ctx)
+	c.metrics.Shutdown(ctx)
 	if c.stopWorkers != nil {
 		c.stopWorkers()
 	}

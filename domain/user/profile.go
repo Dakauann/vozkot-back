@@ -148,8 +148,8 @@ type Profile struct {
 	//
 	// They are sealed at rest like everything else on this struct. Not because
 	// a city identifies anybody on its own, but because the report never reads
-	// them from here — it reads the coarse snapshot copied onto the order at
-	// purchase — so there is no query that encryption costs anything, and a
+	// them from here: it reads the coarse snapshot copied onto the order at
+	// purchase, so there is no query that encryption costs anything, and a
 	// rule of "everything a person told us about themselves is encrypted" is
 	// one nobody has to relitigate per field.
 	Gender Gender

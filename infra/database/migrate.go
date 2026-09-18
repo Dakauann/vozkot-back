@@ -105,6 +105,11 @@ func RunMigrations(ctx context.Context, db *gorm.DB) error {
 			// to one, and AutoMigrate cannot create it against a table that
 			// does not exist yet.
 			&schema.RefundRequest{},
+			// The organiser's balance. After orders only so the ids it carries
+			// resolve during a backfill; it holds no foreign key of its own,
+			// deliberately, so a retention purge of old orders cannot be
+			// blocked by the ledger that has to outlive them.
+			&schema.LedgerEntry{},
 			// Admissions come after orders and tiers for the same reason: a
 			// credential names the order it was issued for and the tier it was
 			// sold as.
@@ -212,7 +217,7 @@ func dropLayoutFocus(tx *gorm.DB) error {
 // rejects the fourth.
 //
 // Dropped here rather than widened, because the replacements are two PARTIAL
-// unique indexes that together say more than one combined index could — see
+// unique indexes that together say more than one combined index could. See
 // indexes.go. AutoMigrate never drops an index, so it has to be done by hand,
 // and it is guarded on the index actually being unique so a boot that already
 // ran this does no DDL at all.

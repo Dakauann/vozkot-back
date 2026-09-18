@@ -138,7 +138,7 @@ func (h *harness) seed(t *testing.T, item seed) *domain.Event {
 // actor is the harness's owner, as the use case now expects it.
 //
 // The ownership rule moved from the HTTP handler into the use case, so a test
-// that drives the service directly has to say who it is — which is exactly the
+// that drives the service directly has to say who it is, which is exactly the
 // property that makes the rule reachable from a CLI or a job.
 func (h *harness) actor() authdomain.Actor {
 	return authdomain.Actor{ID: h.ownerID, Role: userdomain.RoleUser}

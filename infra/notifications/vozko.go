@@ -27,7 +27,7 @@ import (
 // is /whatsapp/outreach/conversations, the platform's one paid single-target
 // template send: it is synchronous, it honours an idempotency key, and it answers
 // with a specific code when it refuses. The campaign quick-send route was the
-// other candidate and is unusable for codes — it skips a repeat to the same
+// other candidate and is unusable for codes: it skips a repeat to the same
 // number as a duplicate, serialises behind a per-campaign lock, and reports
 // nothing per message.
 //
@@ -77,7 +77,7 @@ const (
 // not configured.
 //
 // A nil Sender is never registered, so nothing above can queue a message that
-// could not have been delivered — and phone confirmation keeps answering 503,
+// could not have been delivered, and phone confirmation keeps answering 503,
 // which is the honest reply when no channel exists.
 func NewVozkoCodeSender(cfg config.PhoneConfig) *VozkoCodeSender {
 	if !cfg.Enabled() {
@@ -108,8 +108,8 @@ func NewVozkoCodeSender(cfg config.PhoneConfig) *VozkoCodeSender {
 //
 // The endpoint behind this sender delivers an approved WhatsApp template; there is
 // nothing SMS about it. When SMS arrives it is a second Sender registered for
-// domain.ChannelSMS — the domain, the renderer and the use case already handle
-// that channel — and not a flag here. An adapter that claimed both channels and
+// domain.ChannelSMS, the domain, the renderer and the use case already handle
+// that channel, and not a flag here. An adapter that claimed both channels and
 // sent one would make a screen say "check your SMS" while a WhatsApp message
 // arrived.
 func (s *VozkoCodeSender) Channel() domain.Channel { return domain.ChannelWhatsApp }
@@ -303,7 +303,7 @@ func (s *VozkoCodeSender) login(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%w: sign-in rejected", domain.ErrUndeliverable)
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		// Everything else — a 429 on the login route, a 5xx, a proxy error — is
+		// Everything else, a 429 on the login route, a 5xx, a proxy error, is
 		// worth another attempt.
 		return "", fmt.Errorf("sign in to deliver code: unexpected status %d", response.StatusCode)
 	}
@@ -343,7 +343,7 @@ type codedError struct {
 // "this code will never be delivered" and must park the job immediately, while a
 // couple of its 409s mean "try again shortly". Each of the permanent ones is
 // logged, because every one of them is a configuration or policy problem on the
-// platform side that is otherwise invisible from here — the customer just never
+// platform side that is otherwise invisible from here: the customer just never
 // receives a code.
 //
 // Nothing from the response body is echoed into the returned error beyond the
@@ -413,9 +413,9 @@ func classifyCodeDelivery(status int, body []byte, code string) error {
 // codeBackoff returns how long to wait before the next attempt: the platform's
 // own Retry-After when it gave one, capped, and exponential growth otherwise.
 //
-// Retry-After is not parsed from the response here — the platform sends it on its
+// Retry-After is not parsed from the response here: the platform sends it on its
 // rate-limit replies and this client has already discarded the headers by the time
-// a verdict is formed — so the growth curve carries it. Kept deliberately short:
+// a verdict is formed, so the growth curve carries it. Kept deliberately short:
 // three attempts inside 25 seconds, then the job row takes over with minutes.
 func codeBackoff(attempt int, _ error) time.Duration {
 	if attempt < 1 {

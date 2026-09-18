@@ -3,7 +3,7 @@
 //
 // Every route here is behind the session, and none of them decides anything.
 // Who may ask on which grounds, and who may answer, is decided in
-// usecases/refund — a rule enforced at this layer is a rule the next caller
+// usecases/refund: a rule enforced at this layer is a rule the next caller
 // forgets.
 package refund
 
@@ -177,7 +177,14 @@ func (h *Handler) list(response http.ResponseWriter, request *http.Request) {
 	}
 	// No event named means "my own requests". Scoped HERE, where the caller's
 	// identity is known, so an omitted filter can never widen into everybody's.
-	if filter.EventID == "" {
+	//
+	// Except for an admin, who is the platform: the operator refunds this
+	// system opens for its own mistakes belong to no organiser and to no
+	// event the admin bought from, so narrowing to their own purchases hid the
+	// one listing that could see them at all. usecases/refund.List makes the
+	// same distinction, and the narrowing is the only thing that was in the
+	// way.
+	if filter.EventID == "" && !actor(request).IsAdmin() {
 		filter.BuyerID = claims.UserID
 	}
 

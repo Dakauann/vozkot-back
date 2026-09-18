@@ -83,7 +83,7 @@ func (r *AdmissionRepository) IssueForOrder(
 	// counted quantity: one line per tier meant the two were the same thing.
 	// A seated line is one CHAIR, so four seats of Plateia Premium are four
 	// lines of the same tier, and restarting would mint four admissions all
-	// numbered 1 — which collides on the unique index that makes issuing
+	// numbered 1, which collides on the unique index that makes issuing
 	// idempotent, and aborts the settlement transaction that was taking the
 	// money.
 	//
@@ -123,8 +123,8 @@ func (r *AdmissionRepository) IssueForOrder(
 	// these and we should stand down, the code one means a draw collided and
 	// we should try again. GORM translates both to the same
 	// gorm.ErrDuplicatedKey and does not say which, so the two are told apart
-	// by asking the question that actually matters — does this order have
-	// admissions now? — rather than by parsing a constraint name out of a
+	// by asking the question that actually matters, whether this order has
+	// admissions now, rather than by parsing a constraint name out of a
 	// driver error, which is the kind of string matching that breaks on a
 	// driver upgrade.
 	for attempt := 1; ; attempt++ {
@@ -151,7 +151,7 @@ func (r *AdmissionRepository) IssueForOrder(
 		}
 
 		// Nothing landed, so the collision was on a code. Redraw every code in
-		// the batch — the cheap thing — rather than work out which one lost.
+		// the batch, the cheap thing, rather than work out which one lost.
 		for index := range issued {
 			code, codeErr := domain.NewCode()
 			if codeErr != nil {

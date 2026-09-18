@@ -31,8 +31,8 @@ type Admission struct {
 	// record of who was let in on it.
 	OrderID string `gorm:"not null;type:varchar(32);index:idx_admissions_order_id;uniqueIndex:idx_admissions_order_line_sequence,priority:1"`
 	// EventID is the door this admits to, denormalised onto the row on
-	// purpose. It is checked on every scan — a valid ticket for the wrong
-	// stage is a real and frequent case — and reaching the order to find it
+	// purpose. It is checked on every scan, a valid ticket for the wrong
+	// stage is a real and frequent case, and reaching the order to find it
 	// would put a join on the turnstile.
 	EventID string `gorm:"not null;type:varchar(32);index:idx_admissions_event_id;index:idx_admissions_event_status,priority:1"`
 	// TicketID and TicketTitle are the tier, the title frozen at issue so
@@ -60,7 +60,7 @@ type Admission struct {
 
 	// Code is the secret, sealed at rest. CodeBlind is its searchable
 	// companion and is UNIQUE, which is the guarantee that no two admissions
-	// ever share a code — the generator makes that unlikely, this makes it
+	// ever share a code: the generator makes that unlikely, this makes it
 	// impossible.
 	//
 	// Sealed rather than hashed, because the holder has to be able to see it

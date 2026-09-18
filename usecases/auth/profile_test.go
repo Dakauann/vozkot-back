@@ -13,7 +13,7 @@ import (
 // Editing the optional answers must not disturb the identity block.
 //
 // This is the test that guards the "blank means leave it" rule. The settings
-// screen cannot send a CPF back — the API returns it masked and never in full —
+// screen cannot send a CPF back: the API returns it masked and never in full,
 // so it sends blanks, and if those blanks ever started CLEARING the document
 // instead of preserving it, every buyer who edited their city would lose the
 // document their ticket is checked against at the door.

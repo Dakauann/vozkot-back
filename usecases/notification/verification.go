@@ -47,8 +47,8 @@ func NewCodeSender(notifier *Notifier, dispatcher *queueUsecase.Dispatcher) *Cod
 // The channel is a parameter rather than a constant because this use case does
 // not care which one it is: WhatsApp today, SMS when a Sender is registered for
 // it, and the only difference either way is which adapter the container wired.
-// Everything below — the durable job, the dedupe rule, the refusal to log a code
-// — is identical, which is the reason this is a second constructor and not a
+// Everything below, the durable job, the dedupe rule, the refusal to log a code,
+// is identical, which is the reason this is a second constructor and not a
 // second type.
 func NewPhoneCodeSender(notifier *Notifier, dispatcher *queueUsecase.Dispatcher, channel domain.Channel) *CodeSender {
 	return &CodeSender{notifier: notifier, dispatcher: dispatcher, channel: channel}
@@ -84,8 +84,8 @@ func (s *CodeSender) Send(ctx context.Context, destination, code string, purpose
 	}
 	if s.channel == domain.ChannelEmail {
 		// Meaningful to email and ignored everywhere else. It carries the code by
-		// design — a subject line that hides it makes the reader open the message
-		// to read six digits — and that is a property of INBOXES, where the
+		// design: a subject line that hides it makes the reader open the message
+		// to read six digits, and that is a property of INBOXES, where the
 		// preview is the feature. It would be a leak on a channel whose wording
 		// somebody else controls.
 		request.Subject = "Seu código de acesso: " + code
@@ -108,7 +108,7 @@ func (s *CodeSender) Send(ctx context.Context, destination, code string, purpose
 // recipient addresses the code for whichever channel carries it.
 //
 // One place rather than a branch at each call site, so a channel added to the
-// domain is handled here or nowhere — and "nowhere" is safe: Recipient.Address
+// domain is handled here or nowhere, and "nowhere" is safe: Recipient.Address
 // returns "" for a channel it cannot address, and the Service parks the job
 // instead of sending a code into the void.
 func (s *CodeSender) recipient(destination string) domain.Recipient {

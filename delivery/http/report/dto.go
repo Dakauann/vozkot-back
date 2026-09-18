@@ -18,7 +18,7 @@ type ErrorResponse struct {
 
 // SliceResponse is one row of a breakdown.
 //
-// Keys are stable identifiers — `female`, `SP`, `24_28`, `unknown` — and never
+// Keys are stable identifiers, `female`, `SP`, `24_28`, `unknown`, and never
 // translated strings. The client owns the wording, which is what lets the same
 // payload render in four locales, and `unknown` is a real row rather than an
 // omission so the percentages add up.
@@ -54,11 +54,20 @@ type TotalsResponse struct {
 	// priced. RefundedCents is at face value too.
 	//
 	// Neither the gross the buyer paid nor our commission is sent, and not
-	// because they are filtered out here — the query never selects them. See
+	// because they are filtered out here: the query never selects them. See
 	// the money note in domain/report.
 	NetCents       int64 `json:"netCents" example:"357350000"`
 	RefundedOrders int   `json:"refundedOrders" example:"87"`
 	RefundedCents  int64 `json:"refundedCents" example:"2750000"`
+	// AverageOrderCents and AverageTicketCents are the ticket médio, asked the
+	// two ways an organiser means it: what one buyer spends in a go, and what
+	// one admission is worth. They differ whenever anybody buys for a group,
+	// and only the second is evidence for repricing a tier.
+	//
+	// Sent rather than left to the client to divide, so the API, the CSV and
+	// every screen round the same way.
+	AverageOrderCents  int64 `json:"averageOrderCents" example:"28750"`
+	AverageTicketCents int64 `json:"averageTicketCents" example:"10000"`
 }
 
 // SalesResponse is the whole dashboard for one event.
@@ -125,6 +134,9 @@ func toSalesResponse(sales domain.Sales) SalesResponse {
 			NetCents:       sales.Totals.NetCents,
 			RefundedOrders: sales.Totals.RefundedOrders,
 			RefundedCents:  sales.Totals.RefundedCents,
+			// Derived in the domain so the ratio has one definition.
+			AverageOrderCents:  sales.Totals.AverageOrderCents(),
+			AverageTicketCents: sales.Totals.AverageTicketCents(),
 		},
 		ByGender: toSlices(sales.ByGender),
 		ByAge:    toSlices(sales.ByAge),

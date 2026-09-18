@@ -212,7 +212,7 @@ func (r *LayoutRepository) FreezeLayout(ctx context.Context, id string) error {
 //
 // Refused outright on a frozen layout. A frozen layout has an event bound to it
 // and possibly seats sold from it, and the only safe edit is a copy at the next
-// version — which the use case does, so that the two events keep pointing at
+// version, which the use case does, so that the two events keep pointing at
 // the rooms they actually sold.
 func (r *LayoutRepository) ReplaceSections(
 	ctx context.Context,

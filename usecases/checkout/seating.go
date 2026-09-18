@@ -13,7 +13,7 @@ import (
 // The seated half of a checkout, kept in one file.
 //
 // Everything here is reached only by a line that NAMES CHAIRS. A general
-// admission event — a party selling Pista and two camarotes — never calls any
+// admission event, a party selling Pista and two camarotes, never calls any
 // of it, and that is the whole shape of the feature: seats are additive, and
 // the counted path is byte for byte what it was.
 
@@ -22,7 +22,7 @@ import (
 //
 // "Not enough tickets available" is the right answer for counted stock: one
 // number went down and there is nothing more to say. For seats it is the wrong
-// answer twice over — the buyer picked specific chairs, and a picker told only
+// answer twice over: the buyer picked specific chairs, and a picker told only
 // that "something" went has to grey the whole selection and make them start
 // again. Named seats let it grey exactly the one that moved.
 type SeatsUnavailableError struct {

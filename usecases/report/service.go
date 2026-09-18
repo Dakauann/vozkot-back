@@ -6,7 +6,7 @@
 // an organiser seeing their own audience and seeing somebody else's is one
 // forgotten ownership check.
 //
-// So the check is in ONE place — authorise — and every exported method starts
+// So the check is in ONE place, authorise, and every exported method starts
 // with it. Not in the handler: a rule enforced at the transport edge is a rule
 // the next caller forgets.
 package report
@@ -36,7 +36,7 @@ func (s *Service) Sales(ctx context.Context, eventID string, actor authdomain.Ac
 	if err != nil {
 		return domain.Sales{}, err
 	}
-	sales, err := s.reports.Sales(ctx, happening.ID)
+	sales, err := s.reports.Sales(ctx, domain.EventScope(happening.ID))
 	if err != nil {
 		return domain.Sales{}, err
 	}
@@ -102,8 +102,8 @@ func (s *Service) prepare(
 // An attendee list defaults to PAID orders. "Who is coming" is a question about
 // people who actually paid, and a list that quietly included expired holds
 // would have an organiser emailing a stadium's worth of people who never bought
-// anything. A caller may still ask for another status explicitly — reconciling
-// refunds needs exactly that — but they have to ask.
+// anything. A caller may still ask for another status explicitly, reconciling
+// refunds needs exactly that, but they have to ask.
 func (s *Service) defaults(filter domain.AttendeeFilter) domain.AttendeeFilter {
 	if strings.TrimSpace(filter.Status) == "" {
 		filter.Status = "paid"
@@ -133,7 +133,7 @@ func (s *Service) authorise(
 		return nil, err
 	}
 	// ErrForbidden and not ErrNotFound, deliberately. Hiding the existence of
-	// an event here buys nothing — the catalogue is public — and a 404 for an
+	// an event here buys nothing, the catalogue is public, and a 404 for an
 	// event the organiser can see on their own listing is the kind of answer
 	// that generates a support ticket instead of a correction.
 	if err := happening.AuthorizeReach(actor); err != nil {
@@ -144,3 +144,23 @@ func (s *Service) authorise(
 
 // IsForbidden reports whether an error is an ownership refusal.
 func IsForbidden(err error) bool { return errors.Is(err, authdomain.ErrForbidden) }
+
+// Portfolio is the same dashboard across everything one organiser sells.
+//
+// The scope is taken from the ACTOR and never from a parameter, which is what
+// makes this method safe by construction: there is no id to pass, so there is
+// no id to tamper with, and the question "whose numbers are these" has exactly
+// one answer for a given session. An admin asking is asking about their own
+// account like anybody else: a platform-wide view is a different feature with
+// a different audience and would need its own deliberate design.
+//
+// It reuses domain.Sales rather than a second shape. A portfolio total and the
+// sum of an organiser's events are computed by the same SQL with one clause
+// swapped (see Scope), so the two can never drift into disagreement about what
+// a refund is or which orders count as a sale.
+func (s *Service) Portfolio(ctx context.Context, actor authdomain.Actor) (domain.Sales, error) {
+	if !actor.Authenticated() {
+		return domain.Sales{}, authdomain.ErrForbidden
+	}
+	return s.reports.Sales(ctx, domain.OrganiserScope(actor.ID))
+}

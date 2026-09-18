@@ -9,7 +9,7 @@ import (
 //
 // Both are pure geometry, so these tests assert on coordinates directly. What
 // they are really protecting is that the LABELS, the ordering and the adjacency
-// come out identical to a theatre's — because everything downstream of the
+// come out identical to a theatre's, because everything downstream of the
 // generator (the claim, "best available", the door) reads those and must not
 // have to know what shape the room is.
 

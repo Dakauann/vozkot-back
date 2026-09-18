@@ -38,8 +38,8 @@ type Repository interface {
 	// spent it.
 	//
 	// The single most important method in this package. It must be one
-	// conditional UPDATE — status moved to admitted only WHERE it is still
-	// issued — so that two doors scanning the same ticket in the same instant
+	// conditional UPDATE: status moved to admitted only WHERE it is still
+	// issued, so that two doors scanning the same ticket in the same instant
 	// result in exactly one admission and one refusal. A read-then-write in
 	// the use case would let both through, and at a turnstile that is two
 	// people through one ticket.
@@ -107,7 +107,7 @@ func (o OrderLines) Total() int {
 //
 // A port rather than a direct dependency, for the usual reason and one
 // specific one: rendering is the only part of issuing a ticket that can fail
-// for a reason nobody can fix at runtime — a library that cannot encode — and
+// for a reason nobody can fix at runtime, a library that cannot encode, and
 // a caller that holds an interface can carry on without the image. A receipt
 // with a printed code and no QR is a worse ticket; a receipt that was never
 // sent is not a ticket at all.

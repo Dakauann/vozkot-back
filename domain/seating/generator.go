@@ -12,7 +12,7 @@ import (
 // This exists instead of a vector editor, and that is a deliberate ordering of
 // the work. Theatres and cinemas here are overwhelmingly rectangular or gently
 // curved blocks of rows, so a handful of numbers describes one completely, and
-// per-seat editing is only needed for the exceptions — mark this chair for a
+// per-seat editing is only needed for the exceptions: mark this chair for a
 // wheelchair, block that broken one. Building the canvas first would have been
 // months spent on the part that generates the fewest seats.
 //
@@ -33,8 +33,8 @@ const RowLetters = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 // Two shapes cover the venues that actually exist here, and the second is not
 // an embellishment: a rodeo, a stadium, a gymnasium and a circus all put the
 // action in the MIDDLE and wrap the stands around it. A model that could only
-// draw rows along a line could sell those venues — the claim, the adjacency
-// and the labels are all shape-agnostic — but the map would not resemble the
+// draw rows along a line could sell those venues: the claim, the adjacency
+// and the labels are all shape-agnostic. But the map would not resemble the
 // room, and resemblance is the entire function of a seat map. Somebody orients
 // themselves by "I am behind the chutes", not by a row letter.
 type RowShape string
@@ -95,7 +95,7 @@ type RowSpec struct {
 	// SeatsPerRow is the count in every row, before Skips.
 	SeatsPerRow int
 	// FirstRowLetter offsets the lettering, for a section that continues
-	// another one's alphabet — a balcony that starts at N because the stalls
+	// another one's alphabet: a balcony that starts at N because the stalls
 	// ended at M.
 	FirstRowLetter string
 	// Numbering is how seats are labelled within a row.
@@ -128,7 +128,7 @@ type RowSpec struct {
 	// of the map. Zero is straight up, 90 is to the right.
 	//
 	// Clockwise from the top because that is how a venue describes its own
-	// sectors — "the stand at twelve o'clock" — and because it matches screen
+	// sectors, "the stand at twelve o'clock", and because it matches screen
 	// coordinates, where y grows downward, without a sign flip at the call
 	// site.
 	StartAngle float64
@@ -146,7 +146,7 @@ type RowSpec struct {
 	// the whole point of a map is that those are in different places.
 	//
 	// For a LINEAR block the offset moves its centre. For an ARC it moves the
-	// centre of the circle, so two stands can wrap two different arenas —
+	// centre of the circle, so two stands can wrap two different arenas,
 	// though a single round venue leaves both at zero, which puts the arena at
 	// the origin where the clients draw it.
 	OffsetX float64
@@ -155,7 +155,7 @@ type RowSpec struct {
 	// only means anything for an arc.
 	//
 	// When set, each row is filled at this spacing and therefore gains seats as
-	// it gets further from the centre — which is what a real stand does, and
+	// it gets further from the centre, which is what a real stand does, and
 	// what makes one look like a stand rather than a fan. SeatsPerRow then
 	// describes the FIRST row only.
 	//
@@ -178,7 +178,7 @@ type RowSpec struct {
 //
 // The generators disagree about where a block begins: RowSpec lays a plateia out
 // from its offset, generateArc wraps an arena centred on one. Both are right for
-// the geometry and neither is usable as a position — "where is this block" has
+// the geometry and neither is usable as a position: "where is this block" has
 // to mean one thing before anything can drag it.
 //
 // So placement is not a generator concern at all. A block is generated wherever
@@ -212,8 +212,8 @@ func PlaceAt(seats []Seat, x, y float64) {
 // the spot and is then set down by its top-left corner like any other.
 //
 // It moves coordinates and NOTHING else. RowOrder and SeatOrder are the only
-// definition of adjacency in this system — two seats are neighbours when they
-// share a row order and their seat orders differ by one — so a block turned on
+// definition of adjacency in this system: two seats are neighbours when they
+// share a row order and their seat orders differ by one, so a block turned on
 // its side still seats four people together, and the labels a ticket prints are
 // untouched. The per-seat Rotation is carried along so a client can orient the
 // chair it draws.
@@ -386,7 +386,7 @@ func rowName(index int, lettered bool) string {
 //
 // This is the rodeo, the stadium, the gymnasium and the circus: the action is
 // in the middle and the stands wrap around it. The geometry is the only thing
-// that differs from a theatre — the labels, the ordering, the adjacency, the
+// that differs from a theatre: the labels, the ordering, the adjacency, the
 // accessibility kinds and every claim downstream are identical, which is why
 // this is a branch in one generator rather than a second model.
 func (s RowSpec) generateArc(sectionID string, start int, lettered bool) ([]Seat, error) {
@@ -517,8 +517,8 @@ func (s RowSpec) generateArc(sectionID string, start int, lettered bool) ([]Seat
 // gala dinner, a churrascaria floor at a rodeo. Each table is a RING of seats,
 // and the tables themselves sit in a grid.
 //
-// A table is modelled as a ROW — RowLabel is the table's number, SeatOrder runs
-// around it — which is not a trick. It means "four seats together" resolves to
+// A table is modelled as a ROW: RowLabel is the table's number, SeatOrder runs
+// around it. That is not a trick. It means "four seats together" resolves to
 // "four seats at the same table", which is exactly what a party booking a table
 // means, and it needs no new concept anywhere downstream.
 type TableSpec struct {
@@ -620,7 +620,7 @@ func label(numbering Numbering, position, perRow int) string {
 // latter built for obese persons.
 //
 // Computed here, in the domain, because it is arithmetic on a capacity and not
-// a database question — and reported rather than enforced, because the platform
+// a database question, and reported rather than enforced, because the platform
 // cannot know whether a given room is legally one of those venues. Getting that
 // guess wrong in the blocking direction stops a legitimate sale; getting it
 // wrong in the warning direction costs a dialog. The organiser carries the

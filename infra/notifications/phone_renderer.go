@@ -13,7 +13,7 @@ import (
 // the two have nothing in common: the email renderer parses an HTML tree against
 // a layout and a component library at boot, and this one returns a six-character
 // string. Putting both behind one type would mean a phone send carrying the
-// machinery — and the failure modes — of a template engine it never uses.
+// machinery, and the failure modes, of a template engine it never uses.
 //
 // Channels is what makes them one Renderer to everything above: the use cases see
 // the single domain.Renderer port they always did, and which implementation
@@ -48,7 +48,7 @@ func (PhoneCodeRenderer) Render(channel domain.Channel, name domain.Template, da
 		return "", fmt.Errorf("%w: %s", domain.ErrUnknownChannel, channel)
 	}
 	if name != domain.TemplateSignInCode {
-		// Not "unsupported yet" — undeliverable. The Service turns this into a
+		// Not "unsupported yet": undeliverable. The Service turns this into a
 		// parked job rather than twenty attempts, which is right: no retry adds a
 		// template to this renderer.
 		return "", fmt.Errorf("%w: %s is not rendered for %s", domain.ErrUnknownTemplate, name, channel)
@@ -59,7 +59,7 @@ func (PhoneCodeRenderer) Render(channel domain.Channel, name domain.Template, da
 	if code == "" {
 		// The data is wrong for the template, which is exactly the case the
 		// Service treats as permanent. Refusing here means the provider is never
-		// asked to deliver an empty code — which, on a WhatsApp authentication
+		// asked to deliver an empty code, which, on a WhatsApp authentication
 		// template, Meta answers with a parameter-count error that names neither
 		// the template nor the missing value.
 		return "", fmt.Errorf("%w: %s carries no %s", domain.ErrUnknownTemplate, name, codeDataKey)
@@ -69,7 +69,7 @@ func (PhoneCodeRenderer) Render(channel domain.Channel, name domain.Template, da
 
 // Channels dispatches a render to whichever Renderer serves that channel.
 //
-// The Service takes ONE Renderer, and that is the right shape — it renders for
+// The Service takes ONE Renderer, and that is the right shape: it renders for
 // the channel on the request and does not care how many implementations exist
 // behind it. This is the adapter that keeps it true while there is more than one.
 type Channels map[domain.Channel]domain.Renderer

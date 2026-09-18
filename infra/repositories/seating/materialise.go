@@ -62,7 +62,7 @@ func (r *SeatRepository) Materialise(ctx context.Context, plan domain.Materialis
 	// EVERY section of the layout, not only the priced ones.
 	//
 	// The plan is keyed by price band now, and a band is a property of the
-	// seats — a section can hold two of them. So which chairs are sold cannot
+	// seats: a section can hold two of them. So which chairs are sold cannot
 	// be decided before the chairs are read, and the filtering happens below,
 	// per seat. It costs reading the layout's seats rather than a subset, on a
 	// write that happens once per event before anything is on sale.
@@ -176,8 +176,8 @@ func (r *SeatRepository) Materialise(ctx context.Context, plan domain.Materialis
 			// insert rather than per row during it.
 			//
 			// Without this they are all born at version 0, and a client that
-			// fetched the whole map would compute a cursor of 0 — which
-			// ListByEvent reads as "send me everything" — so its first delta
+			// fetched the whole map would compute a cursor of 0, which
+			// ListByEvent reads as "send me everything", so its first delta
 			// poll would re-download the entire house. It matters most on the
 			// biggest maps, where it is also least affordable.
 			//

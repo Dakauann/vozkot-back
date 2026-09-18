@@ -15,8 +15,8 @@ import "time"
 // would delete the evidence of the asking.
 type RefundRequest struct {
 	ID string `gorm:"primaryKey;type:varchar(32)"`
-	// OrderID carries no unique index here. Uniqueness is PARTIAL — one OPEN
-	// request per order, any number of closed ones — and a partial index cannot
+	// OrderID carries no unique index here. Uniqueness is PARTIAL: one OPEN
+	// request per order, any number of closed ones, and a partial index cannot
 	// be expressed in a struct tag, so it is built in indexes.go. A total unique
 	// index would let one rejected request block every future one.
 	OrderID string `gorm:"not null;type:varchar(32);index:idx_refund_requests_order_id"`

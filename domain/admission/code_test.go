@@ -34,7 +34,7 @@ func TestNewCodeShape(t *testing.T) {
 	}
 }
 
-// Never the same twice. Not proof of uniqueness — that is the database's job —
+// Never the same twice. Not proof of uniqueness, that is the database's job,
 // but a generator that repeats itself within ten thousand draws is broken in a
 // way no constraint would hide.
 func TestNewCodeDoesNotRepeat(t *testing.T) {

@@ -85,8 +85,8 @@ func TestOnlyEmailCarriesTheWordmark(t *testing.T) {
 // The palette the emails are allowed to use, as hex, taken from the light theme
 // in vozkot-front/src/app/globals.css.
 //
-// The templates cannot read that file — they are embedded in a Go binary in a
-// different project — so this is the join between them. A colour picked by eye
+// The templates cannot read that file, they are embedded in a Go binary in a
+// different project, so this is the join between them. A colour picked by eye
 // is the way a transactional email drifts away from the product it belongs to,
 // one near-miss grey at a time, and that is exactly what this set replaced.
 var emailPalette = map[string]string{

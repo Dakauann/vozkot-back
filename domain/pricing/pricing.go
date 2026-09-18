@@ -4,8 +4,8 @@
 // Those are two different numbers and the whole package exists to keep them
 // apart. The organiser prices a tier at R$ 100; the box office adds its
 // commission ON TOP, so the buyer pays R$ 110 and the organiser is still owed
-// exactly the R$ 100 they asked for. The alternative — deducting the fee from
-// the face value — is the same arithmetic and a different promise, and it is
+// exactly the R$ 100 they asked for. The alternative, deducting the fee from
+// the face value, is the same arithmetic and a different promise, and it is
 // the one that makes an organiser's payout disagree with the price they typed.
 //
 // Nothing here knows about orders, tiers or providers. It is the arithmetic
@@ -39,8 +39,8 @@ const PlatformBasisPoints = 1_000
 
 // MaxBasisPoints bounds what an operator can configure.
 //
-// A fee above the ticket itself is not a fee, it is a typo — almost always an
-// extra zero — and the cost of accepting one is every buyer being charged
+// A fee above the ticket itself is not a fee, it is a typo, almost always an
+// extra zero, and the cost of accepting one is every buyer being charged
 // double before anybody notices. A ceiling turns that into a refusal to start.
 const MaxBasisPoints = BasisPointsPerUnit
 
@@ -77,7 +77,7 @@ func PlatformFee() (Fee, error) { return NewFee(PlatformBasisPoints) }
 
 // On is the fee owed on ONE ticket at faceCents.
 //
-// Per unit, and then multiplied — never taken on the line total. The two differ
+// Per unit, and then multiplied, never taken on the line total. The two differ
 // by up to a centavo per ticket, and only the per-unit number is the one a
 // buyer can check: an event page that says "R$ 100,00 + R$ 10,00 de taxa" has
 // promised that three of them cost R$ 330,00, and a line-total rounding that
@@ -87,7 +87,7 @@ func PlatformFee() (Fee, error) { return NewFee(PlatformBasisPoints) }
 // the buyer will compute by hand if they check.
 //
 // A free ticket is free. Ten per cent of nothing is nothing, so the guard below
-// is arithmetic rather than policy — but it is worth saying out loud, because a
+// is arithmetic rather than policy, but it is worth saying out loud, because a
 // free-admission event that started charging a service fee would be the single
 // most visible way this package could be wrong.
 func (f Fee) On(faceCents int64) int64 {

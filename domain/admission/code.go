@@ -18,7 +18,7 @@ import (
 //  1. UNGUESSABLE. Fifty-four bits from crypto/rand. An attacker who knows the
 //     format and can ask the door a thousand times a second needs some 10^8
 //     years, and the scan endpoint is rate limited besides. It is deliberately
-//     not sized to make collisions unlikely — see NewCode for why that is the
+//     not sized to make collisions unlikely: see NewCode for why that is the
 //     database's job and not the alphabet's.
 //  2. TYPABLE. Crockford's base32 alphabet, which drops I, L, O and U: the
 //     first three because they are the characters people confuse with 1 and 0
@@ -32,7 +32,7 @@ import (
 // The alphabet is THIRTY-ONE characters, not thirty-two, and the missing one
 // is the reason the check character works. See checkCharacter: a weighted sum
 // modulo a prime detects every single-character substitution and every
-// transposition, and a modulus of 32 provably cannot — with any even weight,
+// transposition, and a modulus of 32 provably cannot: with any even weight,
 // changing a character by exactly 16 leaves the sum unmoved. Dropping one
 // character to reach a prime costs half a bit of entropy and buys a check
 // character with no blind spot. S is the one dropped, because 5 is the digit
@@ -78,8 +78,8 @@ type Code string
 func NewCode() (Code, error) {
 	// One byte per character, rejected and redrawn when it falls outside the
 	// largest whole multiple of the alphabet size. Taking the modulo of a raw
-	// byte would make the first few characters likelier than the rest — 256 is
-	// not a multiple of 31 — which costs a fraction of a bit and is the kind of
+	// byte would make the first few characters likelier than the rest: 256 is
+	// not a multiple of 31, which costs a fraction of a bit and is the kind of
 	// thing that is embarrassing to explain later.
 	const limit = 256 - (256 % len(Alphabet))
 
@@ -109,7 +109,7 @@ func NewCode() (Code, error) {
 //
 // Forgiving about presentation and strict about content. It accepts the
 // grouped form, lower case, stray whitespace and the substitutions a person
-// actually makes — O for zero, I or L for one — because a doorperson typing
+// actually makes: O for zero, I or L for one, because a doorperson typing
 // from a printed ticket will make exactly those. It rejects anything whose
 // check character does not agree, which is what turns a typo into an
 // immediate "try again" instead of a database lookup that finds nothing.
@@ -183,14 +183,14 @@ func (c Code) String() string { return string(c) }
 //     a character that changed.
 //   - Every transposition is caught, adjacent or not. Swapping positions i and
 //     j moves the sum by (w(j) - w(i))·(a - b). Neither factor can be a
-//     multiple of the modulus — the weights differ by less than it, and the
-//     values differ by less than it — so the product is never zero.
+//     multiple of the modulus: the weights differ by less than it, and the
+//     values differ by less than it, so the product is never zero.
 //
 // Both arguments need the modulus to be PRIME, which is the whole reason the
 // alphabet is 31 characters. A modulus of 32 fails the first property for any
 // even weight: a character changed by exactly 16 leaves an even-weighted sum
 // unmoved, so half the positions would accept a wrong character. That is not a
-// hypothetical — it is what the first version of this function did, and the
+// hypothetical: it is what the first version of this function did, and the
 // property test above caught it.
 //
 // It is not a cryptographic check and is not meant to be. Forging a code means

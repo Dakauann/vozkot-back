@@ -13,8 +13,8 @@ import (
 // The buyer's own list asks a question no single status answers.
 //
 // An abandoned checkout is persisted here as an `expired` order, so "every
-// order I have" is mostly carts nobody finished, and the ones that are alive —
-// paid, still awaiting payment, owed a refund — are buried among them. The
+// order I have" is mostly carts nobody finished, and the ones that are alive,
+// paid, still awaiting payment, owed a refund, are buried among them. The
 // screen therefore asks for a SET of statuses, which has to be one query: three
 // separate requests could not be paged as a single list, and `total` would be
 // wrong, which is the number the pager trusts.

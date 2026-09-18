@@ -18,6 +18,15 @@ type Config struct {
 	AppName           string
 	Port              string
 	CORSAllowedOrigin string
+	// MetricsListenAddr is where /metrics is served, on a listener of its own
+	// rather than on the API port.
+	//
+	// Loopback by default, and that default is the security control: a scrape
+	// endpoint published to the internet hands out this system's internals, and
+	// binding it to every interface makes that one misconfigured firewall away.
+	// A local Prometheus, a sidecar or an SSH tunnel all reach 127.0.0.1.
+	// Port 9213 keeps clear of node_exporter's 9100. Empty disables it.
+	MetricsListenAddr string
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
@@ -79,9 +88,18 @@ func (b BrokerConfig) Enabled() bool { return strings.TrimSpace(b.URL) != "" }
 
 // CacheConfig points the read cache and the rate limiter at Redis.
 //
-// Also optional, and with the same reasoning: without it every read goes to
-// PostgreSQL and the rate limiter is off. Both are load shedding, not
-// correctness.
+// HALF of this is load shedding and half of it is not, which is the distinction
+// the old comment here got wrong. Without Redis every read goes to PostgreSQL,
+// and that is merely slower. But the rate limiters live here too, and without
+// them the credential routes are not throttled at all: a login is a bcrypt
+// compare at cost twelve, so an unthrottled flood is both a credential-stuffing
+// surface and a way to spend the fleet's CPU. That is a missing control, not a
+// missing optimisation, which is why production refuses to start without a
+// REDIS_URL while development still runs happily on nothing.
+//
+// The boot-time requirement is deliberately NOT a runtime one. A Redis that
+// dies after boot leaves the limiters failing open, because a cache outage must
+// not close the box office's front door; see TestWithoutRedisTheRoutesStillWork.
 type CacheConfig struct {
 	URL       string
 	KeyPrefix string
@@ -148,8 +166,8 @@ type NotificationsConfig struct {
 // authenticates people, not systems: every route that can send a template sits
 // behind the same access token a person gets by signing in, and there is no API
 // key, service account or machine credential anywhere in it. So this integration
-// signs in as an operator, and the account it uses should be one created for it —
-// not a human's login — with only the workspace and the permissions template
+// signs in as an operator, and the account it uses should be one created for it,
+// not a human's login, with only the workspace and the permissions template
 // sending needs.
 type PhoneConfig struct {
 	// BaseURL is the platform's root, without a trailing slash. In development
@@ -451,6 +469,7 @@ func Load() (Config, error) {
 		AppName:                value("APP_NAME", "Vozkot API"),
 		Port:                   port,
 		CORSAllowedOrigin:      value("CORS_ALLOW_ORIGIN", "http://localhost:3000"),
+		MetricsListenAddr:      strings.TrimSpace(value("METRICS_LISTEN_ADDR", "127.0.0.1:9213")),
 		ReadTimeout:            readTimeout,
 		WriteTimeout:           writeTimeout,
 		IdleTimeout:            idleTimeout,
@@ -528,6 +547,15 @@ func loadBroker() (BrokerConfig, error) {
 }
 
 func loadCache() (CacheConfig, error) {
+	// Checked before anything else is parsed, because a production box office
+	// with no Redis has no rate limits at all and that is worse than a bad
+	// duration string. The message names what is lost rather than only what is
+	// missing: "REDIS_URL is not set" reads like a caching preference, and this
+	// is not one.
+	if os.Getenv("APP_ENV") == "production" && strings.TrimSpace(os.Getenv("REDIS_URL")) == "" {
+		return CacheConfig{}, fmt.Errorf("REDIS_URL is required in production; " +
+			"without it the auth, login and checkout rate limits do not exist")
+	}
 	limit, err := integer("CHECKOUT_RATE_LIMIT", 30)
 	if err != nil {
 		return CacheConfig{}, err

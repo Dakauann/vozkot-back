@@ -32,8 +32,8 @@ import (
 //
 // Those two requirements point in opposite directions through the same
 // database columns, which is why this is tested on the response BYTES rather
-// than on struct fields. A field added back to any nested response type — a
-// slice, a day, a totals block, an attendee row — would make the substring
+// than on struct fields. A field added back to any nested response type, a
+// slice, a day, a totals block, an attendee row, would make the substring
 // reappear, and no amount of remembering to update an assertion is needed for
 // this test to catch it.
 
@@ -237,7 +237,7 @@ func TestSalesReportHidesThePlatformCommission(t *testing.T) {
 	}
 }
 
-// An administrator is us. They reach the same route, and it stays net —
+// An administrator is us. They reach the same route, and it stays net,
 // deliberately, because this report is the organiser's report whoever opens it.
 // Our revenue is not reported here at all; it lives on orders.service_fee_cents.
 func TestSalesReportIsNetForAdministratorsToo(t *testing.T) {
@@ -322,7 +322,7 @@ func formatCents(cents int64) string {
 // Every "the commission is absent" test in this file looks for something NOT
 // being present, and a test like that passes just as happily when the fixture
 // never had a fee in the first place. This one reads the seeded order straight
-// out of Postgres and insists the commission is on it — so the absence proved
+// out of Postgres and insists the commission is on it, so the absence proved
 // elsewhere is a decision the report made, not an accident of the fixture.
 func TestTheCommissionIsInTheDatabaseItIsJustNotReported(t *testing.T) {
 	h := newHarness(t)

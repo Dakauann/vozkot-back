@@ -63,8 +63,8 @@ var (
 	// ErrWrongEvent is a valid code presented at the wrong door.
 	//
 	// Its own error rather than a not-found, because it is a real thing that
-	// happens — a festival with three stages, a venue running two shows in one
-	// night — and the doorperson needs to be told to send the holder next door
+	// happens: a festival with three stages, a venue running two shows in one
+	// night. The doorperson needs to be told to send the holder next door
 	// rather than told their ticket is fake.
 	ErrWrongEvent = errors.New("this admission is for another event")
 	// ErrNotPayable is an attempt to issue against an order that has not paid.

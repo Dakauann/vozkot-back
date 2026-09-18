@@ -94,7 +94,7 @@ func (s Status) valid() bool {
 // It carries the law. Decreto 5.296/2004 art. 23, as amended by Decreto
 // 9.404/2018, requires a Brazilian house to reserve spaces for wheelchair users
 // and seats for people with reduced mobility, half of those built for obese
-// persons — which is exactly the legend on any Brazilian seat map: "cadeira
+// persons, which is exactly the legend on any Brazilian seat map: "cadeira
 // para obesos", "mobilidade reduzida".
 //
 // Marking them is not decoration. An accessible seat sold to a buyer who did
@@ -165,7 +165,7 @@ const (
 	// They are sections rather than a property of the layout because that is
 	// what they are: objects with a position and a size. As a layout-level
 	// enum a stage could only ever be in one place, could not be moved, and a
-	// room could not have both an arena and a show stage — which a rodeo does.
+	// room could not have both an arena and a show stage, which a rodeo does.
 	SectionStage SectionKind = "stage"
 	SectionArena SectionKind = "arena"
 )
@@ -201,14 +201,14 @@ const (
 //
 // Three levels, most specific first: the seat's own category, then its
 // section's, then the section's NAME. That last fallback is what makes an
-// ordinary room need no pricing decisions at all — a plateia is one band called
+// ordinary room need no pricing decisions at all: a plateia is one band called
 // "Plateia" because that is what it is called, and an organiser who never opens
 // the pricing controls gets exactly the behaviour they had before categories
 // existed.
 //
-// A name and not an id, deliberately. Two sections can share a band — "Plateia
+// A name and not an id, deliberately. Two sections can share a band: "Plateia
 // Esquerda" and "Plateia Direita" both priced as "Plateia" is one dropdown
-// instead of two — and that is only expressible if the key is the band's name.
+// instead of two, and that is only expressible if the key is the band's name.
 //
 // One function because three callers need the same answer: the materialise that
 // assigns a tier to a chair, the validation that refuses a price list naming a
@@ -229,7 +229,7 @@ func Category(seatCategory, sectionCategory, sectionName string) string {
 // Every band gets a hue, and the ORDER is the hue: slot one is blue, slot two is
 // orange, and so on down a fixed categorical palette. That makes the order
 // load-bearing rather than cosmetic, so it is computed once, here, and handed to
-// every surface that draws the room — the organiser's canvas, the buyer's map,
+// every surface that draws the room: the organiser's canvas, the buyer's map,
 // the preview and both legends. Two answers to "what colour is Plateia" is a
 // room that changes colour when you walk between screens.
 //

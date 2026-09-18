@@ -3,7 +3,7 @@
 //
 // Admissions are minted inside the transaction that crosses an order into
 // paid. That is deliberate and is what stops a buyer ever holding a receipt
-// with no way through the door — but it also means an order that reached paid
+// with no way through the door, but it also means an order that reached paid
 // BEFORE this feature existed has no tickets, and its buyer opens their wallet
 // to "no tickets issued for this order yet" for good.
 //

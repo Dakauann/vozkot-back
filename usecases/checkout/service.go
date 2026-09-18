@@ -502,7 +502,7 @@ type audience struct {
 // reads is optional, the thing it feeds is a report, and the worst outcome of
 // this read going wrong is one order counted as "not informed" in a breakdown.
 // Weighed against that, a buyer being told their purchase failed because the
-// users table was briefly unavailable is not a trade anybody would make — so a
+// users table was briefly unavailable is not a trade anybody would make, so a
 // failure is logged and the sale proceeds.
 //
 // An anonymous sale (an operator at the door, the load harness) has no profile
@@ -568,8 +568,8 @@ func (s *Service) Get(ctx context.Context, actor authdomain.Actor, id string) (*
 
 // owned loads an order and refuses one belonging to another buyer.
 //
-// The single authorisation point for reading an order. An order with NO buyer
-// — a door sale taken by an operator — is reachable only by an operator:
+// The single authorisation point for reading an order. An order with NO buyer,
+// a door sale taken by an operator, is reachable only by an operator:
 // MayReach refuses an empty owner rather than treating it as everybody's.
 func (s *Service) owned(ctx context.Context, actor authdomain.Actor, id string) (*orderdomain.Order, error) {
 	item, err := s.orders.GetByID(ctx, id)

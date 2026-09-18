@@ -18,8 +18,8 @@ import (
 
 // seatedBuyer is the real checkout service on the harness's database.
 //
-// The property under test spans two use cases — a claim in checkout, a commit
-// in settlement — and a hand-written order row would skip the claim that makes
+// The property under test spans two use cases: a claim in checkout, a commit
+// in settlement, and a hand-written order row would skip the claim that makes
 // it true. So the order is placed the way a buyer places it.
 func seatedBuyer(h *harness) *checkout.Service {
 	return checkout.NewService(
@@ -33,7 +33,7 @@ func seatedBuyer(h *harness) *checkout.Service {
 //
 // usecases/checkout proves a chair cannot be claimed twice. This proves that
 // paying for it turns it from held into SOLD, mints exactly one admission per
-// chair, and that the admission carries the seat — which is the whole reason a
+// chair, and that the admission carries the seat, which is the whole reason a
 // door can tell somebody where to sit.
 
 // seatFor lays out a room for the payment harness's event and returns the

@@ -23,7 +23,7 @@ import (
 // every tier creation in the product answered 422 "a ticket tier must belong to
 // an event" while the client was sending a perfectly good one. Every usecase
 // test constructs CreateInput directly, which is exactly the line that was
-// broken — so 517 passing tests said nothing about it.
+// broken, so 517 passing tests said nothing about it.
 //
 // The lesson generalises: a field that is read at one layer and used at another
 // needs a test that crosses the boundary between them.

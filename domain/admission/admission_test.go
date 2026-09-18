@@ -70,7 +70,7 @@ func TestNewRefusesAnAdmissionThatNamesNothing(t *testing.T) {
 		}
 	}
 
-	// A missing sequence is not a failure — one admission is the first one.
+	// A missing sequence is not a failure: one admission is the first one.
 	input := draft()
 	input.Sequence = 0
 	item, err := New("adm_1", input, now)

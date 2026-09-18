@@ -137,7 +137,7 @@ type OrderResponse struct {
 	BuyerEmail string `json:"buyerEmail" example:"maria@exemplo.com.br"`
 
 	// SubtotalCents is the tickets, ServiceFeeCents is the charge on top, and
-	// TotalCents is what the buyer pays — always the sum of the two.
+	// TotalCents is what the buyer pays, always the sum of the two.
 	//
 	// All three are sent rather than just the total, because a checkout screen
 	// that shows a number larger than the prices the buyer just chose, with no
@@ -218,8 +218,8 @@ type RefundStateResponse struct {
 	// Refusal names why not: window_closed, too_close_to_event, not_paid,
 	// already_refunded, event_passed, request_open.
 	Refusal string `json:"refusal,omitempty" example:"window_closed"`
-	// Status is the in-flight request's state — pending, approved or rejected —
-	// absent when there is no request.
+	// Status is the in-flight request's state: pending, approved or rejected.
+	// Absent when there is no request.
 	Status string `json:"status,omitempty" example:"pending"`
 	// RequestID is the request already open on this order, if any.
 	RequestID string `json:"requestId,omitempty" example:"rfr_9f2c1d8a"`

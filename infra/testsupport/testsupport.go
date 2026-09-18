@@ -121,9 +121,9 @@ func databaseConfig() (config.DatabaseConfig, error) {
 		// `vozkot` database a running server was polling. Everything about
 		// that was wrong and all of it was visible in the dev log: the
 		// server's queue picked up notification jobs the tests had raised,
-		// then failed to decrypt their admission codes — the tests install
+		// then failed to decrypt their admission codes: the tests install
 		// their own encryption keyring, so a code sealed under the test KEK
-		// cannot be opened with the deployment's — and a test's cleanup
+		// cannot be opened with the deployment's, and a test's cleanup
 		// deleted job rows out from under a worker that had already claimed
 		// them.
 		//
@@ -264,6 +264,38 @@ func SeedEvent(t *testing.T, db *gorm.DB, ownerID string) string {
 	return id
 }
 
+// SeedChallenge writes one verification challenge, dated exactly as the
+// sign-in path would have dated it: created at `createdAt`, answerable for
+// domain/auth.CodeTTL after that.
+//
+// Raw SQL, and the sealed columns get placeholder bytes rather than real
+// ciphertext, because nothing that reads a challenge's AGE ever decrypts its
+// destination. That keeps this helper out of the encryption keyring and, more
+// importantly, out of an import cycle: the repository's own test lives in the
+// package this would otherwise have to import.
+//
+// `age` is how long ago it was issued, which is the only axis the sweep and the
+// per-destination ceiling disagree about and therefore the only one worth
+// parameterising.
+func SeedChallenge(t *testing.T, db *gorm.DB, destinationBlind []byte, purpose string, age, codeTTL time.Duration) string {
+	t.Helper()
+	id := Unique("vch")
+	created := time.Now().UTC().Add(-age)
+	err := db.Exec(`
+		INSERT INTO verification_challenges
+			(id, purpose, destination_blind, destination, code_hash, attempts,
+			 user_id, expires_at, created_at)
+		VALUES (?, ?, ?, ?, '$2a$04$placeholder', 0, '', ?, ?)`,
+		id, purpose, destinationBlind, []byte("sealed"), created.Add(codeTTL), created).Error
+	if err != nil {
+		t.Fatalf("seed challenge aged %s: %v", age, err)
+	}
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM verification_challenges WHERE id = ?", id)
+	})
+	return id
+}
+
 // CountJobs counts jobs of one type in one status. Tests give their jobs a
 // unique type, so counting by type is what keeps packages that run in parallel
 // against the same database from seeing each other's rows: the alternative,
@@ -309,7 +341,7 @@ var encryptionOnce sync.Once
 // to start without them.
 //
 // Without this, any test touching a profile fails with "encryption service not
-// configured" — which is the correct behaviour for the application and an
+// configured", which is the correct behaviour for the application and an
 // unhelpful one for a suite that has to cover those columns.
 func Encryption(t *testing.T) {
 	t.Helper()
@@ -340,7 +372,7 @@ func Encryption(t *testing.T) {
 // SeatedRoom is a materialised seat map: what a test needs to buy a chair.
 // SeatedRoomCategory is the price band SeedSeatedRoom's section falls in.
 //
-// A band defaults to its section's NAME, so this is the section's name — and
+// A band defaults to its section's NAME, so this is the section's name, and
 // binding a layout is keyed by band, not by section id.
 const SeatedRoomCategory = "Plateia A"
 
@@ -360,9 +392,9 @@ type SeatedRoom struct {
 // It seeds the DEFINITION only and does not materialise: binding a layout to an
 // event is the thing under test in some of these, so the caller does it.
 //
-// It lives here rather than in a test file because two packages need it —
+// It lives here rather than in a test file because two packages need it:
 // checkout proves a chair cannot be claimed twice, payment proves a settled
-// chair becomes an admission — and a second copy of a room would be a second
+// chair becomes an admission, and a second copy of a room would be a second
 // place for the row letters and the seat ordering to drift.
 func SeedSeatedRoom(t *testing.T, db *gorm.DB, ownerID string, rows, perRow int) SeatedRoom {
 	t.Helper()

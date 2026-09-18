@@ -35,7 +35,7 @@ const nextVersion = "nextval('" + schema.SeatVersionSequence + "')"
 // Claim holds the named seats for an order, all or nothing.
 //
 // ONE conditional UPDATE. That is the entire concurrency design, and it is the
-// same design tier stock already uses — the row lock PostgreSQL takes to
+// same design tier stock already uses: the row lock PostgreSQL takes to
 // evaluate `status = 'available'` IS the mutual exclusion, so two buyers
 // asking for FILA K POLTRONA 12 in the same instant produce exactly one
 // holder and one loser, with no lock held in application code.
@@ -145,7 +145,7 @@ func (r *SeatRepository) ReleaseForOrder(ctx context.Context, orderID string) (i
 //
 // Runs in the transaction that marks the order paid, beside the tier's Commit.
 // Scoped to held, so a redelivered settlement moves nothing and says so by
-// returning zero — which is how a caller tells a first settlement from a
+// returning zero, which is how a caller tells a first settlement from a
 // repeat without asking a second question.
 func (r *SeatRepository) CommitForOrder(ctx context.Context, orderID string) (int, error) {
 	result := r.db.WithContext(ctx).Exec(`

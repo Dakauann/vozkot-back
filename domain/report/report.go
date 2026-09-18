@@ -4,18 +4,18 @@
 // Two shapes, and the difference between them is the whole privacy posture of
 // this feature:
 //
-//   - AGGREGATES — how many tickets went to which state, age band, gender and
+//   - AGGREGATES: how many tickets went to which state, age band, gender and
 //     day. Nobody is named. This is what the organiser's dashboard renders and
 //     it is computed by GROUP BY over the coarse snapshot frozen onto each
 //     order, never by decrypting anybody's profile.
-//   - ATTENDEES — the list, one row per order line, with a name and an email on
+//   - ATTENDEES: the list, one row per order line, with a name and an email on
 //     it, because an organiser genuinely has to be able to contact the people
 //     coming to their event and to check somebody in at the door.
 //
 // What is deliberately NOT here: the buyer's document in full, their date of
 // birth, and their phone. A CPF is what makes identity theft possible and an
 // organiser has no operational use for one, so the export carries a masked
-// document — enough to match a person to their ID at the door, not enough to
+// document, enough to match a person to their ID at the door, not enough to
 // be them anywhere else. See docs/REFUNDS_AND_PAYOUTS.md and the note on
 // sealing in domain/user.
 //
@@ -26,9 +26,9 @@
 // gross the buyer actually paid, are deliberately absent from these types.
 //
 // That is a privacy decision about OUR commercial terms, and it is enforced by
-// absence rather than by a permission check. The alternative — carrying gross
+// absence rather than by a permission check. The alternative, carrying gross
 // and fee through the repository, the use case and the DTO and stripping them
-// for non-administrators at the edge — puts the whole thing one forgotten
+// for non-administrators at the edge, puts the whole thing one forgotten
 // conditional away from showing an organiser our margin, and a response shape
 // that varies by role is exactly the kind of surface where that conditional
 // gets forgotten. There is nothing to strip here because there is nothing to
@@ -78,7 +78,7 @@ const (
 	AgeUnknown AgeBracket = UnknownKey
 )
 
-// AgeBrackets is every band, youngest first, with the unknown bucket last —
+// AgeBrackets is every band, youngest first, with the unknown bucket last,
 // the order a table should render them in.
 func AgeBrackets() []AgeBracket {
 	return []AgeBracket{
@@ -131,7 +131,7 @@ type Slice struct {
 	// Key is the bucket: a UF, a gender, an age bracket, a tier id, a date.
 	// UnknownKey when the buyer did not say.
 	Key string
-	// Label is a human-readable name where the key is an id — a tier's title.
+	// Label is a human-readable name where the key is an id: a tier's title.
 	// Empty where the key is already the label, and the client translates it.
 	Label   string
 	Orders  int
@@ -161,10 +161,40 @@ type Totals struct {
 	// RefundedCents is NET too, for a reason that is easy to miss: a refund
 	// returns the service fee to the buyer as well, so a refunded figure at
 	// gross next to a sales figure at net would let the fee be recovered by
-	// subtracting one from the other. It is also the more useful number —
+	// subtracting one from the other. It is also the more useful number:
 	// what the organiser gave back is their share, not ours.
 	RefundedOrders int
 	RefundedCents  int64
+}
+
+// AverageOrderCents is the ticket médio every platform of this kind reports:
+// what a buyer spends in one go.
+//
+// DERIVED, not stored and not a seventh query. It is a ratio of two numbers
+// already here, and computing it in SQL would be a second definition of "an
+// order" that could disagree with Totals.Orders the first time either changed.
+//
+// Integer division, rounded half-up, so it is a centavo figure like every other
+// amount in this package rather than a float that renders differently in three
+// places. Zero orders is zero rather than a division by zero: an event that has
+// sold nothing has no average, and reporting one would be inventing a number.
+func (t Totals) AverageOrderCents() int64 {
+	if t.Orders <= 0 {
+		return 0
+	}
+	return (t.NetCents*2 + int64(t.Orders)) / (int64(t.Orders) * 2)
+}
+
+// AverageTicketCents is the same question asked per ADMISSION rather than per
+// order, which is the one an organiser uses to price a tier. A party where one
+// buyer takes eight tickets has a high average order and an ordinary average
+// ticket, and confusing the two is how a tier gets repriced on the wrong
+// evidence.
+func (t Totals) AverageTicketCents() int64 {
+	if t.Tickets <= 0 {
+		return 0
+	}
+	return (t.NetCents*2 + int64(t.Tickets)) / (int64(t.Tickets) * 2)
 }
 
 // Sales is the whole dashboard for one event.
@@ -294,8 +324,9 @@ type Page struct {
 // Repository reads the numbers. It is READ-ONLY by design: nothing in this
 // package may write, so no reporting change can ever move money or inventory.
 type Repository interface {
-	// Sales computes every breakdown for one event.
-	Sales(ctx context.Context, eventID string) (Sales, error)
+	// Sales computes every breakdown for one scope: an event, or an
+	// organiser's whole portfolio. See Scope.
+	Sales(ctx context.Context, scope Scope) (Sales, error)
 	// Attendees lists the people who bought.
 	Attendees(ctx context.Context, filter AttendeeFilter) (Page, error)
 	// StreamAttendees hands rows to fn in batches, for the export.
@@ -304,4 +335,37 @@ type Repository interface {
 	// arena's worth of rows in memory to write them one at a time to a socket;
 	// fn is called with each batch and the rows are written and dropped.
 	StreamAttendees(ctx context.Context, filter AttendeeFilter, fn func([]Attendee) error) error
+}
+
+// Scope is WHOSE numbers a report covers: one event, or everything one
+// organiser has ever sold.
+//
+// A value rather than two methods on the repository, because the six breakdowns
+// below differ only in that clause. Two sets of near-identical SQL is how a
+// portfolio total and an event total start disagreeing about what a refund is,
+// and the disagreement surfaces months later as a number an organiser cannot
+// reconcile with the sum of their own events.
+//
+// Exactly one field is set. Both, or neither, is a programming error rather
+// than a query: an empty scope would read every order on the platform.
+type Scope struct {
+	// EventID narrows to a single show.
+	EventID string
+	// OrganiserID covers every event that organiser owns.
+	OrganiserID string
+}
+
+// EventScope and OrganiserScope are the two constructors. Named so a call site
+// reads as the question it is asking.
+func EventScope(eventID string) Scope         { return Scope{EventID: eventID} }
+func OrganiserScope(organiserID string) Scope { return Scope{OrganiserID: organiserID} }
+
+// Valid reports whether this scope names exactly one subject.
+//
+// The zero Scope is INVALID on purpose. A report that silently covered the
+// whole platform because an id was empty is the one bug in this package that
+// would leak every organiser's revenue to whoever asked first, so the failure
+// mode is no rows rather than all of them.
+func (s Scope) Valid() bool {
+	return (s.EventID != "") != (s.OrganiserID != "")
 }

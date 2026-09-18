@@ -70,8 +70,8 @@ func (r *ReportRepository) Attendees(ctx context.Context, filter domain.Attendee
 // Keyset pagination rather than OFFSET, and the reason matters at this size:
 // OFFSET re-walks every row it skips, so exporting fifty thousand rows a
 // page at a time is quadratic and the last page costs fifty thousand rows of
-// work to return five hundred. Ordering by (created_at, order_id, ticket_id) —
-// which is unique, because one order has one line per tier — lets each batch
+// work to return five hundred. Ordering by (created_at, order_id, ticket_id),
+// which is unique, because one order has one line per tier, lets each batch
 // start exactly where the last one ended.
 func (r *ReportRepository) StreamAttendees(
 	ctx context.Context,
@@ -228,7 +228,7 @@ func toAttendee(row *attendeeRow) domain.Attendee {
 // door; they do not need to be able to be that person at a bank, so the whole
 // number never leaves this layer.
 //
-// Exported because the CSV writer and the JSON DTO must mask identically — two
+// Exported because the CSV writer and the JSON DTO must mask identically: two
 // maskings that differ by a digit is a leak in whichever one is looser.
 func MaskDocument(document string) string {
 	runes := []rune(strings.TrimSpace(document))

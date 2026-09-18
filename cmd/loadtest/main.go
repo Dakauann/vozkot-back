@@ -451,7 +451,7 @@ func run(cfg config.Config, opts options) error {
 	perBuyer := opts.orders/max(opts.buyers, 1) + 1
 	holdLimits := orderdomain.HoldLimits{Orders: perBuyer * 2}
 	// nil buyers: the harness has no profiles to snapshot, and the audience
-	// report is not what it measures. No fee either — the harness audits that
+	// report is not what it measures. No fee either: the harness audits that
 	// every centavo charged is a centavo owed, and a commission on top would
 	// be a second number to reconcile for no gain.
 	checkout := checkoutUsecase.NewService(unit, orders, tickets, nil, dispatcher, checkoutUsecase.Settings{

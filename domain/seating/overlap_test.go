@@ -59,7 +59,7 @@ func TestOverlapsFindsTwoBlocksOnTheSameFloor(t *testing.T) {
 }
 
 // THE RODEO. A ring of stands wrapped around an arena is the most ordinary
-// round venue there is, and its bounding box swallows the arena whole — which
+// round venue there is, and its bounding box swallows the arena whole, which
 // is exactly why a footprint is not a bounding box. No chair is inside the
 // arena, so nothing meets.
 func TestARingOfStandsMaySurroundAnArena(t *testing.T) {
@@ -88,7 +88,7 @@ func TestARingOfStandsMaySurroundAnArena(t *testing.T) {
 	}
 
 	// And a SQUARE arena of the same half-width would not fit, because its
-	// corners reach 41% further out than a disc's edge — which is exactly why
+	// corners reach 41% further out than a disc's edge, which is exactly why
 	// the arena's footprint is round.
 	square := rect("Arena quadrada", 400-150, 400-150, 400+150, 400+150)
 	if err := seating.Overlaps([]seating.Footprint{stand, square}); err == nil {

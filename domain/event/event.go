@@ -34,7 +34,7 @@ import (
 //
 // It is the organiser's DECLARATION, and deliberately not the authority on
 // anything. Whether a night actually has seats is answered by the seats
-// themselves, and that has to stay the single answer — two sources of truth
+// themselves, and that has to stay the single answer: two sources of truth
 // about what is on sale is how a room gets sold twice.
 //
 // It exists because the interface has to know before any of that is decidable.
@@ -51,7 +51,7 @@ const (
 	// events are this and a default that matches the majority is a question
 	// most people never have to think about.
 	SalesCounted SalesMode = "counted"
-	// SalesSeated is stock with an identity — fila K, poltrona 12. A theatre, a
+	// SalesSeated is stock with an identity: fila K, poltrona 12. A theatre, a
 	// rodeo, an arena, a circus.
 	SalesSeated SalesMode = "seated"
 )
@@ -434,8 +434,8 @@ func fold(char rune) (rune, bool) {
 
 // AuthorizeReach refuses an actor who may not act on this event.
 //
-// The composition every operator-facing use case needs — load the event, check
-// the caller against its owner — written once. Three use cases ask this
+// The composition every operator-facing use case needs: load the event, check
+// the caller against its owner. Written once. Three use cases ask this
 // question: the sales report, the refund inbox and the door. The RULE is
 // Actor.MayReach in domain/auth; this is the two lines around it, and having
 // them here is what keeps the refusal message and the semantics identical

@@ -5,7 +5,7 @@ import "fmt"
 // Two things cannot occupy the same floor.
 //
 // A room is a physical place. Two sectors sharing the same square metres is not
-// an unusual layout, it is a mistake — and a silent one, because the seats
+// an unusual layout, it is a mistake, and a silent one, because the seats
 // underneath still generate, still materialise and still sell. The buyer finds
 // out when two people arrive at the same chair from different sectors.
 //
@@ -14,8 +14,8 @@ import "fmt"
 // and "the canvas would not let you do that" is not a rule, it is a habit.
 //
 // WHAT A SECTION OCCUPIES is the whole difficulty, and a bounding box is the
-// wrong answer. A ring of stands wrapped around an arena is a rodeo — the most
-// ordinary round venue there is — and its bounding box swallows the arena
+// wrong answer. A ring of stands wrapped around an arena is a rodeo, the most
+// ordinary round venue there is, and its bounding box swallows the arena
 // whole. So a block of chairs occupies where its CHAIRS are, and scenery
 // occupies its rectangle, and a collision is the two genuinely meeting.
 
@@ -52,7 +52,7 @@ func (b Box) holds(x, y float64) bool {
 //
 // An arena is drawn as a circle, so its floor is a circle, and its bounding box
 // is not it. The corners of that box reach a full 41% further from the centre
-// than the edge does — enough that an organiser who sizes the disc to sit
+// than the edge does, enough that an organiser who sizes the disc to sit
 // neatly inside a ring of stands would be told it collides with them, at four
 // corners that are not on screen. That is the original arena complaint in a new
 // disguise.
@@ -74,7 +74,7 @@ type Point struct{ X, Y float64 }
 //
 // Exactly one of the two is set. A marker or a counted area is a rectangle it
 // declared; a block of named chairs is the chairs themselves, and never their
-// bounding box — see the package comment above for the rodeo that proves it.
+// bounding box: see the package comment above for the rodeo that proves it.
 type Footprint struct {
 	ID   string
 	Name string
@@ -91,8 +91,8 @@ const (
 	// closer together than this are the same piece of floor.
 	chair = 12.0
 	// touching is how much two rectangles may share before it counts. Not zero:
-	// adjacent sectors share an edge — a balcony directly behind the stalls,
-	// two stands meeting at a corner — and calling that a collision would
+	// adjacent sectors share an edge, a balcony directly behind the stalls,
+	// two stands meeting at a corner. Calling that a collision would
 	// refuse almost every real venue.
 	touching = 1.0
 )
@@ -189,7 +189,7 @@ func meet(a, b Footprint, gridA, gridB *grid) bool {
 		// Two shapes with no chairs, compared as rectangles even when one is
 		// round. Deliberately conservative: a stage tucked into the corner of an
 		// arena's bounding box is flagged, which is stricter than the geometry
-		// needs and much simpler than ellipse-to-rectangle intersection — and
+		// needs and much simpler than ellipse-to-rectangle intersection, and
 		// two pieces of scenery overlapping at all is almost always the mistake
 		// it looks like.
 		if a.Box.Empty() || b.Box.Empty() {

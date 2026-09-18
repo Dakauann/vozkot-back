@@ -1,12 +1,12 @@
 // Package admission is the door.
 //
-// One entry point that matters — Scan — and it is written for a queue of people
+// One entry point that matters, Scan, and it is written for a queue of people
 // waiting outside in the cold. Three things follow from that:
 //
 //   - It ALWAYS answers. A refusal is a result, not an error: "already used at
 //     21:14" and "that is for the other stage" are the two things a doorperson
 //     most needs to be told, and an HTTP 4xx with a generic message tells them
-//     neither. Only a genuine fault — the database is gone — comes back as an
+//     neither. Only a genuine fault, the database is gone, comes back as an
 //     error.
 //   - It is cheap. A malformed code is refused by arithmetic before any query
 //     runs, and the happy path is one indexed read plus one conditional UPDATE.
@@ -49,7 +49,7 @@ const (
 	// OutcomeWrongEvent is a real ticket for another door.
 	OutcomeWrongEvent Outcome = "wrong_event"
 	// OutcomeNotPaid is a code whose order has stopped being paid without
-	// having been refunded — an expired hold that was somehow issued against,
+	// having been refunded: an expired hold that was somehow issued against,
 	// or a status moved by hand. It should not happen; it is answered rather
 	// than hidden.
 	OutcomeNotPaid Outcome = "not_paid"

@@ -6,7 +6,7 @@
 // authorization for it lives in usecases/seating behind one owned() per
 // aggregate. Everything under /events/{id}/seating is a buyer LOOKING, is
 // public, and is deliberately served by a view type that carries no order id
-// and no hold deadline — a picker that told every visitor which account holds
+// and no hold deadline: a picker that told every visitor which account holds
 // which chair would be telling them exactly when to race for it.
 //
 // This package decides nothing about access. It turns a session into an actor,
@@ -282,10 +282,10 @@ type SectionRequest struct {
 	FirstTable    int     `json:"firstTable" example:"1"`
 	// SeatCategories puts individual chairs in a different price band, keyed
 	// "FILA/ASSENTO". It is what prices the front three rows above the rest, and
-	// the partial-view chair behind a pillar below it — neither of which is a
+	// the partial-view chair behind a pillar below it, neither of which is a
 	// contiguous block that could be a sector of its own.
 	SeatCategories map[string]string `json:"seatCategories,omitempty"`
-	// SeatKinds marks individual chairs, keyed "FILA/ASSENTO" — "K/12".
+	// SeatKinds marks individual chairs, keyed "FILA/ASSENTO", as in "K/12".
 	//
 	// This is where the accessibility seats the law requires get set, and the
 	// compliance report reads what lands here.
@@ -322,7 +322,7 @@ type SectionResponse struct {
 	Width    float64 `json:"width"`
 	Height   float64 `json:"height"`
 	// Category is the band this section's seats belong to by default, as it was
-	// SET — empty when the section's own name is doing the work. The resolved
+	// SET, empty when the section's own name is doing the work. The resolved
 	// band travels on each seat.
 	Category     string    `json:"category,omitempty"`
 	Rotation     float64   `json:"rotation,omitempty"`
@@ -340,7 +340,7 @@ type LayoutDetailEnvelope struct {
 	// Compliance is present on a PREVIEW, computed from the draft being drawn.
 	//
 	// It travels with the preview rather than being fetched separately so the
-	// number and the room on screen can never describe different things — which
+	// number and the room on screen can never describe different things, which
 	// they did: "against 0 places, the quotas are met" beside a 192-seat
 	// sector, because the report came from the saved layout.
 	Compliance *ComplianceResponse `json:"compliance,omitempty"`
@@ -352,15 +352,15 @@ type LayoutDetailEnvelope struct {
 	// Bands are the room's price bands, in the order their colour is assigned.
 	//
 	// Slot one is the first hue of a fixed categorical palette, slot two the
-	// second, and so on — so the ORDER is the colour, and it is computed here
+	// second, and so on, so the ORDER is the colour, and it is computed here
 	// rather than in each client. Two answers to "what colour is Plateia" is a
 	// room that changes colour when somebody walks between screens.
 	Bands []string `json:"bands,omitempty"`
 	// Collisions are the sections drawn on top of each other, by id.
 	//
 	// Reported on a preview and REFUSED on a save, and computed by the same rule
-	// both times. The preview has to be able to draw a collision — that is how
-	// an organiser sees the one they are making — so the editor marks these and
+	// both times. The preview has to be able to draw a collision: that is how
+	// an organiser sees the one they are making, so the editor marks these and
 	// disables its own save, and the server refuses the request regardless.
 	Collisions []string `json:"collisions,omitempty"`
 }
@@ -460,7 +460,7 @@ func toSpecs(sections []SectionRequest) []usecase.SectionSpec {
 }
 
 // @Summary		Prévia da planta
-// @Description	Gera os assentos de um formulário e NÃO grava nada. É o que o editor desenha enquanto o organizador digita, e usa o mesmo gerador que a gravação vai usar — uma prévia construída por outro caminho é uma prévia que pode mentir. Funciona também em planta congelada: olhar não é editar.
+// @Description	Gera os assentos de um formulário e NÃO grava nada. É o que o editor desenha enquanto o organizador digita, e usa o mesmo gerador que a gravação vai usar: uma prévia construída por outro caminho é uma prévia que pode mentir. Funciona também em planta congelada: olhar não é editar.
 // @Tags			Assentos
 // @Accept		json
 // @Produce		json
@@ -563,7 +563,7 @@ func toSectionResponses(sections []domain.Section) []SectionResponse {
 // RESOLVED.
 //
 // Resolved here rather than handed over as three fields to combine, because the
-// fallback — the seat's band, then its section's, then the section's name — is
+// fallback, the seat's band, then its section's, then the section's name, is
 // a rule, and a rule repeated in a browser is a rule with two answers. The
 // editor and the pricing screen both just read `category`.
 func toSeatResponses(sections []domain.Section, seats []domain.Seat) []SeatResponse {
@@ -603,7 +603,7 @@ type ComplianceResponse struct {
 }
 
 // @Summary		Acessibilidade da planta
-// @Description	Quantos espaços para cadeira de rodas, assentos de mobilidade reduzida e assentos para obesos a planta deve ter pelo Decreto 5.296/2004 (art. 23, com a redação do Decreto 9.404/2018), e quantos ela tem. É um relatório, não um bloqueio: a plataforma não sabe se uma sala específica é legalmente casa de espetáculo, e a responsabilidade é do organizador — que precisa ver o número.
+// @Description	Quantos espaços para cadeira de rodas, assentos de mobilidade reduzida e assentos para obesos a planta deve ter pelo Decreto 5.296/2004 (art. 23, com a redação do Decreto 9.404/2018), e quantos ela tem. É um relatório, não um bloqueio: a plataforma não sabe se uma sala específica é legalmente casa de espetáculo, e a responsabilidade é do organizador, que precisa ver o número.
 // @Tags			Assentos
 // @Produce		json
 // @Security		BearerAuth
@@ -662,7 +662,7 @@ type BindRequest struct {
 	// tier its seats sell at.
 	//
 	// A band and not a section, because where a seat is and what it costs change
-	// on different clocks — the room is fixed for years and the price list
+	// on different clocks: the room is fixed for years and the price list
 	// changes every night. A band defaults to its section's name, so an ordinary
 	// room is priced exactly as it was before bands existed; setting one lets
 	// two wings share a price, or the front three rows carry their own without
@@ -730,7 +730,7 @@ type BlockResponse struct {
 }
 
 // @Summary		Bloquear assentos
-// @Description	Retira assentos da venda: cadeira quebrada, lugar da produção, visão obstruída. Nunca toca um assento reservado ou vendido — bloquear não cancela o ingresso de ninguém.
+// @Description	Retira assentos da venda: cadeira quebrada, lugar da produção, visão obstruída. Nunca toca um assento reservado ou vendido: bloquear não cancela o ingresso de ninguém.
 // @Tags			Assentos
 // @Accept		json
 // @Produce		json
@@ -784,7 +784,7 @@ func (h *Handler) unblock(response http.ResponseWriter, request *http.Request) {
 // MapSeatResponse is one chair on a picker.
 //
 // Note what is absent: the order holding it and when that hold expires. Both
-// are on the row and neither belongs here — a picker that published them would
+// are on the row and neither belongs here: a picker that published them would
 // tell every visitor which account to race and exactly when.
 type MapSeatResponse struct {
 	ID       string `json:"id"`
@@ -834,8 +834,8 @@ type MapEnvelope struct {
 	// between two polls.
 	Markers []MapMarkerResponse `json:"markers,omitempty"`
 	// The price bands are deliberately NOT here. By the time a room is on sale
-	// a band has become a TIER — the seat carries its ticket id and the tier
-	// carries the money — so the buyer's map colours by tier, in the order the
+	// a band has become a TIER: the seat carries its ticket id and the tier
+	// carries the money, so the buyer's map colours by tier, in the order the
 	// price list is given, and the legend it already has is the relief the
 	// palette requires. Sending a band list too would be a second answer.
 	// Version is the cursor to send back as `since` on the next poll.
@@ -903,7 +903,7 @@ func (h *Handler) availability(response http.ResponseWriter, request *http.Reque
 }
 
 // @Summary		Melhor disponível
-// @Description	Escolhe a melhor sequência de assentos vizinhos que couber no pedido. É o caminho principal e não um atalho: a maioria não quer estudar um mapa, quer quatro lugares juntos, perto da frente, agora — e é também o que dá a quem usa leitor de tela uma forma real de comprar. Devolve vazio em vez de separar o grupo em fileiras diferentes.
+// @Description	Escolhe a melhor sequência de assentos vizinhos que couber no pedido. É o caminho principal e não um atalho: a maioria não quer estudar um mapa, quer quatro lugares juntos, perto da frente, agora, e é também o que dá a quem usa leitor de tela uma forma real de comprar. Devolve vazio em vez de separar o grupo em fileiras diferentes.
 // @Tags			Assentos
 // @Produce		json
 // @Param		id path string true "ID do evento"

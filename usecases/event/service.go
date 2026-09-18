@@ -309,8 +309,8 @@ func (s *Service) ListPublic(ctx context.Context, filter domain.Filter) (domain.
 
 // ByIDs resolves events the caller already holds ids for.
 //
-// It exists for hydrating a name onto something else — a buyer's own order
-// list — and is deliberately NOT ownership-scoped: a buyer does not own the
+// It exists for hydrating a name onto something else, a buyer's own order
+// list, and is deliberately NOT ownership-scoped: a buyer does not own the
 // event they bought a ticket to. It takes ids rather than a filter so it can
 // never be turned into a general listing of somebody else's catalogue.
 func (s *Service) ByIDs(ctx context.Context, ids []string) (domain.Page, error) {

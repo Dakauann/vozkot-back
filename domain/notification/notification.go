@@ -51,8 +51,8 @@ func (c Channel) Valid() bool {
 }
 
 // Phone reports whether a channel delivers to a phone number rather than an
-// inbox. Used where the distinction is genuinely about the ADDRESS — which
-// field of a Recipient applies, which renderer produces the body — and nowhere
+// inbox. Used where the distinction is genuinely about the ADDRESS, which
+// field of a Recipient applies, which renderer produces the body, and nowhere
 // else: anything that needs to know more than that wants a Channel.
 func (c Channel) Phone() bool {
 	switch c {
@@ -101,8 +101,8 @@ type Recipient struct {
 	Name  string
 	Email string
 	// Phone is digits with a country code, as domain/user.NormalizePhone
-	// produces. Provider-specific re-addressing — the ninth digit a Brazilian
-	// mobile carries on WhatsApp, say — belongs to whoever is sending, not to
+	// produces. Provider-specific re-addressing, the ninth digit a Brazilian
+	// mobile carries on WhatsApp, say, belongs to whoever is sending, not to
 	// the recipient.
 	Phone string
 }

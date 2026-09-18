@@ -1,8 +1,8 @@
 // Package qrcode renders an admission code as a scannable image.
 //
 // Behind a port in domain/admission so the use cases never import an encoder,
-// and so a future change — a different library, a vector output, a provider
-// that renders server-side — is one adapter rather than a change everywhere a
+// and so a future change, a different library, a vector output, a provider
+// that renders server-side, is one adapter rather than a change everywhere a
 // ticket is drawn.
 package qrcode
 
@@ -39,7 +39,7 @@ var _ domain.CodeRenderer = (*Renderer)(nil)
 
 // PNG renders one code.
 //
-// The payload is the BARE code — the same twelve characters the printed line
+// The payload is the BARE code, the same twelve characters the printed line
 // shows, without the grouping hyphens. Not a URL: a URL would make every
 // ticket depend on a hostname that has to stay valid for as long as anybody
 // holds one, would triple the payload and therefore the density, and would send

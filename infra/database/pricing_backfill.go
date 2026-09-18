@@ -56,7 +56,7 @@ func backfillOrderPricing(tx *gorm.DB) error {
 
 	// The refund policy an order was bought under. Orders written before
 	// refunds existed carry 0, and usecases/refund reads that as the oldest
-	// known policy rather than as today's — see the comment there. They are
+	// known policy rather than as today's. See the comment there. They are
 	// deliberately NOT stamped with the current version: claiming an August
 	// buyer agreed to rules written in September is exactly the lie freezing
 	// exists to prevent.

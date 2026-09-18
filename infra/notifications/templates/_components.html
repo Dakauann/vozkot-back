@@ -9,8 +9,8 @@
   THE ONE RULE THESE ALL FOLLOW, taken from globals.css's .notice and from
   TicketStatusChip: a status changes the INK and nothing else. The ground stays
   the same quiet neutral whatever the tone is. That is the frontend's own stated
-  reasoning — one tinted ground renders as several colours depending on what is
-  behind it — and these components used to contradict it with a tinted panel,
+  reasoning: one tinted ground renders as several colours depending on what is
+  behind it, and these components used to contradict it with a tinted panel,
   a tinted pill and a tinted border per tone.
 
     canvas #f6f8f9   card #ffffff   muted #eaeef0   border #dce1e5
@@ -130,7 +130,7 @@
 </table>
 {{end}}
 
-{{- /* badge: a status, carried the way TicketStatusChip carries one — as ink on
+{{- /* badge: a status, carried the way TicketStatusChip carries one, as ink on
        the surface it sits on, with no pill and no tint behind it.
        tone: info|success|warning|danger|neutral. */ -}}
 {{define "badge"}}<span style="font-family:Inter,Arial,sans-serif; font-size:13px; font-weight:600; letter-spacing:-0.005em; color:{{if eq .tone "success"}}#036d3c{{else if eq .tone "warning"}}#8f4f04{{else if eq .tone "danger"}}#ac1529{{else if eq .tone "info"}}#0754a6{{else}}#58626a{{end}};">{{.text}}</span>{{end}}

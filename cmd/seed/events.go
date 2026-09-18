@@ -309,7 +309,7 @@ func mockTiers(category mockCategory, eventIndex int) []mockTier {
 // is seeding, and deliberately NOT an administrator.
 //
 // The seeder is the caller that proves the ownership check belongs in the use
-// case rather than in the HTTP handler — it never touches one. Giving it an
+// case rather than in the HTTP handler: it never touches one. Giving it an
 // operator actor would have let it edit anybody's tiers, so it gets exactly the
 // rights of the account it is seeding for.
 func seedActor(ownerID string) authdomain.Actor {

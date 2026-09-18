@@ -77,3 +77,49 @@ func TestNormalizeClampsAPage(t *testing.T) {
 		t.Fatalf("negative offset survived: %d", got)
 	}
 }
+
+// The ticket médio, asked the two ways an organiser means it.
+func TestAverageSpendIsReportedPerOrderAndPerAdmission(t *testing.T) {
+	// One buyer taking eight tickets and one taking one: the average ORDER is
+	// high and the average TICKET is ordinary, and confusing them is how a tier
+	// gets repriced on the wrong evidence.
+	totals := Totals{Orders: 2, Tickets: 9, NetCents: 90_00}
+	if got := totals.AverageOrderCents(); got != 45_00 {
+		t.Errorf("average order = %d, want 4500", got)
+	}
+	if got := totals.AverageTicketCents(); got != 10_00 {
+		t.Errorf("average ticket = %d, want 1000", got)
+	}
+}
+
+func TestAverageSpendRoundsHalfUpAndNeverDividesByZero(t *testing.T) {
+	// 100 / 3 = 33.33 -> 33; 101 / 2 = 50.5 -> 51.
+	if got := (Totals{Orders: 3, NetCents: 100}).AverageOrderCents(); got != 33 {
+		t.Errorf("rounding down = %d, want 33", got)
+	}
+	if got := (Totals{Orders: 2, NetCents: 101}).AverageOrderCents(); got != 51 {
+		t.Errorf("rounding half up = %d, want 51", got)
+	}
+	// An event that sold nothing has no average, and reporting one would be
+	// inventing a number. Zero, never a panic.
+	empty := Totals{}
+	if empty.AverageOrderCents() != 0 || empty.AverageTicketCents() != 0 {
+		t.Errorf("an empty report produced an average: %+v", empty)
+	}
+}
+
+// A report that covered the whole platform because an id arrived empty is the
+// one bug here that leaks every organiser's revenue.
+func TestOnlyAScopeNamingExactlyOneSubjectIsValid(t *testing.T) {
+	if !EventScope("evt_1").Valid() || !OrganiserScope("usr_1").Valid() {
+		t.Fatal("a scope naming one subject was refused")
+	}
+	for name, scope := range map[string]Scope{
+		"empty":    {},
+		"both set": {EventID: "evt_1", OrganiserID: "usr_1"},
+	} {
+		if scope.Valid() {
+			t.Errorf("%s scope was accepted", name)
+		}
+	}
+}

@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Production scrape config template.
+#
+# Copy this to the monitoring host as `prometheus.yml`, point the targets
+# directory at whatever the deploy pipeline writes, and reload Prometheus
+# (`curl -X POST http://prom:9090/-/reload`).
+#
+# Separate from the dev prometheus.yml on purpose: a static `api:9213` target
+# is meaningless outside compose, and shipping it to production is how a
+# monitoring host ends up scraping nothing while looking configured.
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  # 15s in production. Dev uses 5s for faster feedback; at fleet scale that
+  # triples the storage cost without proportional benefit.
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    cluster: vozkot-prod
+    # Set per region when more than one Prometheus shard exists, so series from
+    # two shards never collide after a federated query.
+    # region: sa-east-1
+
+# Rules are loaded HERE too, not only in development. A production Prometheus
+# that evaluates no rules is a dashboard, not an alerting system.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # ── API replicas ────────────────────────────────────────────────────────
+  # Replicas register themselves into the targets directory at boot. Each file
+  # is a JSON array of target groups:
+  #
+  #   [
+  #     {
+  #       "targets": ["10.0.0.5:9213"],
+  #       "labels": {"instance": "vozkot-api-01", "version": "1.4.0"}
+  #     }
+  #   ]
+  #
+  # Prometheus picks up file changes within refresh_interval without a restart,
+  # so autoscaling and rolling deploys need no Prometheus configuration at all.
+  # This is the whole reason this file uses file_sd rather than static targets.
+  - job_name: vozkot-api
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/vozkot-api-*.json
+        refresh_interval: 30s
+    metrics_path: /metrics
+    # The metrics listener has no authentication of its own; it is protected by
+    # binding to loopback or to a private interface. If it must cross a network
+    # boundary, put a token in front of it and uncomment:
+    # bearer_token_file: /etc/prometheus/secrets/vozkot-metrics-token
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ── Node exporter (optional) ────────────────────────────────────────────
+  # Host CPU, memory and disk. It listens on :9100, which is why the API's own
+  # metrics sit on :9213 rather than colliding with it.
+  # - job_name: node
+  #   file_sd_configs:
+  #     - files: [/etc/prometheus/targets/node-*.json]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Long-term storage. Uncomment once local retention is not enough or queries
+# have to span clusters.
+# ─────────────────────────────────────────────────────────────────────────────
+# remote_write:
+#   - url: https://mimir.internal.example.com/api/v1/push
+#     basic_auth:
+#       username_file: /etc/prometheus/secrets/mimir-user
+#       password_file: /etc/prometheus/secrets/mimir-password
+#     queue_config:
+#       max_samples_per_send: 5000
+#       max_shards: 30
+#       capacity: 20000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Alert delivery. Rules evaluate and are visible on /alerts without this, but
+# nothing is DELIVERED until an Alertmanager is wired here.
+#
+# The severity labels on every rule are already the routing keys: send critical
+# to whatever wakes somebody, warning to a channel somebody reads.
+# ─────────────────────────────────────────────────────────────────────────────
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#             - alertmanager-1.internal:9093

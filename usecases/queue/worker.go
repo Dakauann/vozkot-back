@@ -33,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	metricsdomain "vozkot/domain/metrics"
 	domain "vozkot/domain/queue"
 )
 
@@ -55,10 +56,22 @@ type Worker struct {
 	// handler that cannot exceed it can never still be running when the sweep
 	// decides its worker is dead.
 	jobTimeout time.Duration
-	now        func() time.Time
+	// metrics counts jobs that were parked. Optional: nil records nothing and
+	// the worker behaves identically.
+	metrics metricsdomain.QueueRecorder
+	now     func() time.Time
 }
 
 type Option func(*Worker)
+
+// WithMetrics reports parked jobs.
+//
+// A parked job is money or stock that needs a person, and until this existed
+// the only trace was a log line. Optional, because a deployment with no
+// monitoring must run exactly as it did before.
+func WithMetrics(recorder metricsdomain.QueueRecorder) Option {
+	return func(w *Worker) { w.metrics = recorder }
+}
 
 func WithBatchSize(size int) Option {
 	return func(w *Worker) {
@@ -320,6 +333,11 @@ func (w *Worker) kill(ctx context.Context, job domain.Job, reason string) {
 	// A parked job is money or stock that needs a person, so it is logged at
 	// the loudest level this system has.
 	log.Printf("queue: PARKED job %s (%s) after %d attempt(s): %s", job.ID, job.Type, job.Attempts, reason)
+	// Counted as well as logged, and counted AFTER the row is written so the
+	// number can never claim a parking that did not commit.
+	if w.metrics != nil {
+		w.metrics.IncJobParked(job.Type)
+	}
 }
 
 // safely turns a panicking handler into a failed job instead of a dead worker.

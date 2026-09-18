@@ -582,7 +582,7 @@ definitions:
       subtotalCents:
         description: |-
           SubtotalCents is the tickets, ServiceFeeCents is the charge on top, and
-          TotalCents is what the buyer pays — always the sum of the two.
+          TotalCents is what the buyer pays, always the sum of the two.
 
           All three are sent rather than just the total, because a checkout screen
           that shows a number larger than the prices the buyer just chose, with no
@@ -648,8 +648,8 @@ definitions:
         type: boolean
       status:
         description: |-
-          Status is the in-flight request's state — pending, approved or rejected —
-          absent when there is no request.
+          Status is the in-flight request's state: pending, approved or rejected.
+          Absent when there is no request.
         example: pending
         type: string
       until:
@@ -696,8 +696,8 @@ definitions:
         description: |-
           SalesMode is how this event sells: `counted` by the number, the way a
           party does, or `seated` by the chair, with a row and a seat number. It is
-          a declaration and not a fact about inventory — the seats themselves
-          answer whether a night has any — but nothing else can be derived from an
+          a declaration and not a fact about inventory, the seats themselves
+          answer whether a night has any, but nothing else can be derived from an
           event that has no tiers yet, and the interface has to know which question
           to ask next. Empty means counted.
         enum:
@@ -956,7 +956,7 @@ definitions:
 
           PriceCents is the FACE value the organiser set. FeeCents is the service
           charge added on top of one ticket, and TotalCents is what the buyer will
-          actually pay for it — the number that has to appear on the event page,
+          actually pay for it, the number that has to appear on the event page,
           because a total that first shows up at the last step of checkout is the
           single largest cause of an abandoned cart.
         type: integer
@@ -989,8 +989,8 @@ definitions:
         description: |-
           SalesMode is how this event sells: `counted` by the number, the way a
           party does, or `seated` by the chair, with a row and a seat number. It is
-          a declaration and not a fact about inventory — the seats themselves
-          answer whether a night has any — but nothing else can be derived from an
+          a declaration and not a fact about inventory, the seats themselves
+          answer whether a night has any, but nothing else can be derived from an
           event that has no tiers yet, and the interface has to know which question
           to ask next. Empty means counted.
         enum:
@@ -1008,6 +1008,82 @@ definitions:
         - cancelled
         example: draft
         type: string
+    type: object
+  payout.BalanceResponse:
+    properties:
+      availableCents:
+        description: |-
+          AvailableCents is payable now. It can be NEGATIVE: a refund is counted
+          the moment it happens while the sale it reverses is not yet due, so a
+          balance below zero means refunds have outrun settlements and is shown
+          rather than clamped.
+        example: 480600
+        type: integer
+      currency:
+        example: BRL
+        type: string
+      pendingCents:
+        description: PendingCents is sales that have not reached their settlement
+          date.
+        example: 1200000
+        type: integer
+      reservedCents:
+        description: |-
+          ReservedCents is the slice withheld past settlement against the long tail
+          of Pix reversals.
+        example: 53400
+        type: integer
+      totalCents:
+        description: TotalCents is the whole claim, due or not.
+        example: 1734000
+        type: integer
+    type: object
+  payout.EntryResponse:
+    properties:
+      amountCents:
+        example: 480600
+        type: integer
+      availableAt:
+        type: string
+      createdAt:
+        type: string
+      eventId:
+        example: evt_88
+        type: string
+      id:
+        example: led_ord_9f2c_1
+        type: string
+      kind:
+        enum:
+        - sale
+        - reserve
+        - refund
+        - chargeback
+        - gateway_fee
+        - payout
+        - adjustment
+        example: sale
+        type: string
+      note:
+        type: string
+      orderId:
+        example: ord_9f2c
+        type: string
+    type: object
+  payout.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  payout.LedgerResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/payout.EntryResponse'
+        type: array
+      total:
+        example: 243
+        type: integer
     type: object
   refund.DecisionBody:
     properties:
@@ -1318,6 +1394,20 @@ definitions:
     type: object
   report.TotalsResponse:
     properties:
+      averageOrderCents:
+        description: |-
+          AverageOrderCents and AverageTicketCents are the ticket médio, asked the
+          two ways an organiser means it: what one buyer spends in a go, and what
+          one admission is worth. They differ whenever anybody buys for a group,
+          and only the second is evidence for repricing a tier.
+
+          Sent rather than left to the client to divide, so the API, the CSV and
+          every screen round the same way.
+        example: 28750
+        type: integer
+      averageTicketCents:
+        example: 10000
+        type: integer
       buyers:
         description: 'Buyers is DISTINCT accounts: how many PEOPLE, not how many purchases.'
         example: 11902
@@ -1328,7 +1418,7 @@ definitions:
           priced. RefundedCents is at face value too.
 
           Neither the gross the buyer paid nor our commission is sent, and not
-          because they are filtered out here — the query never selects them. See
+          because they are filtered out here: the query never selects them. See
           the money note in domain/report.
         example: 357350000
         type: integer
@@ -1380,7 +1470,7 @@ definitions:
           tier its seats sell at.
 
           A band and not a section, because where a seat is and what it costs change
-          on different clocks — the room is fixed for years and the price list
+          on different clocks: the room is fixed for years and the price list
           changes every night. A band defaults to its section's name, so an ordinary
           room is priced exactly as it was before bands existed; setting one lets
           two wings share a price, or the front three rows carry their own without
@@ -1456,7 +1546,7 @@ definitions:
           Bands are the room's price bands, in the order their colour is assigned.
 
           Slot one is the first hue of a fixed categorical palette, slot two the
-          second, and so on — so the ORDER is the colour, and it is computed here
+          second, and so on, so the ORDER is the colour, and it is computed here
           rather than in each client. Two answers to "what colour is Plateia" is a
           room that changes colour when somebody walks between screens.
         items:
@@ -1467,8 +1557,8 @@ definitions:
           Collisions are the sections drawn on top of each other, by id.
 
           Reported on a preview and REFUSED on a save, and computed by the same rule
-          both times. The preview has to be able to draw a collision — that is how
-          an organiser sees the one they are making — so the editor marks these and
+          both times. The preview has to be able to draw a collision: that is how
+          an organiser sees the one they are making, so the editor marks these and
           disables its own save, and the server refuses the request regardless.
         items:
           type: string
@@ -1480,7 +1570,7 @@ definitions:
           Compliance is present on a PREVIEW, computed from the draft being drawn.
 
           It travels with the preview rather than being fetched separately so the
-          number and the room on screen can never describe different things — which
+          number and the room on screen can never describe different things, which
           they did: "against 0 places, the quotas are met" beside a 192-seat
           sector, because the report came from the saved layout.
       data:
@@ -1574,8 +1664,8 @@ definitions:
       version:
         description: |-
           The price bands are deliberately NOT here. By the time a room is on sale
-          a band has become a TIER — the seat carries its ticket id and the tier
-          carries the money — so the buyer's map colours by tier, in the order the
+          a band has become a TIER: the seat carries its ticket id and the tier
+          carries the money, so the buyer's map colours by tier, in the order the
           price list is given, and the legend it already has is the relief the
           palette requires. Sending a band list too would be a second answer.
           Version is the cursor to send back as `since` on the next poll.
@@ -1793,7 +1883,7 @@ definitions:
         description: |-
           SeatCategories puts individual chairs in a different price band, keyed
           "FILA/ASSENTO". It is what prices the front three rows above the rest, and
-          the partial-view chair behind a pillar below it — neither of which is a
+          the partial-view chair behind a pillar below it, neither of which is a
           contiguous block that could be a sector of its own.
         type: object
       seatGap:
@@ -1803,7 +1893,7 @@ definitions:
         additionalProperties:
           type: string
         description: |-
-          SeatKinds marks individual chairs, keyed "FILA/ASSENTO" — "K/12".
+          SeatKinds marks individual chairs, keyed "FILA/ASSENTO", as in "K/12".
 
           This is where the accessibility seats the law requires get set, and the
           compliance report reads what lands here.
@@ -1868,7 +1958,7 @@ definitions:
       category:
         description: |-
           Category is the band this section's seats belong to by default, as it was
-          SET — empty when the section's own name is doing the work. The resolved
+          SET, empty when the section's own name is doing the work. The resolved
           band travels on each seat.
         type: string
       definition:
@@ -2555,8 +2645,8 @@ paths:
   /api/v1/events/{id}/report:
     get:
       description: 'Os números do evento para o organizador: totais, e a divisão por
-        sexo, faixa etária, estado, cidade, lote e dia. Ninguém é identificado aqui
-        — são contagens sobre os dados que o comprador informou no cadastro, congelados
+        sexo, faixa etária, estado, cidade, lote e dia. Ninguém é identificado aqui:
+        são contagens sobre os dados que o comprador informou no cadastro, congelados
         no momento da compra. Todo valor aqui é `netCents`: o que o organizador recebe,
         ou seja, o valor de face que ele definiu. A taxa de serviço da plataforma
         e o total pago pelo comprador não são retornados neste relatório. Restrito
@@ -2738,7 +2828,7 @@ paths:
     get:
       description: 'Escolhe a melhor sequência de assentos vizinhos que couber no
         pedido. É o caminho principal e não um atalho: a maioria não quer estudar
-        um mapa, quer quatro lugares juntos, perto da frente, agora — e é também o
+        um mapa, quer quatro lugares juntos, perto da frente, agora, e é também o
         que dá a quem usa leitor de tela uma forma real de comprar. Devolve vazio
         em vez de separar o grupo em fileiras diferentes.'
       parameters:
@@ -2801,7 +2891,7 @@ paths:
       consumes:
       - application/json
       description: 'Retira assentos da venda: cadeira quebrada, lugar da produção,
-        visão obstruída. Nunca toca um assento reservado ou vendido — bloquear não
+        visão obstruída. Nunca toca um assento reservado ou vendido: bloquear não
         cancela o ingresso de ninguém.'
       parameters:
       - description: ID do evento
@@ -2930,7 +3020,7 @@ paths:
         reduzida e assentos para obesos a planta deve ter pelo Decreto 5.296/2004
         (art. 23, com a redação do Decreto 9.404/2018), e quantos ela tem. É um relatório,
         não um bloqueio: a plataforma não sabe se uma sala específica é legalmente
-        casa de espetáculo, e a responsabilidade é do organizador — que precisa ver
+        casa de espetáculo, e a responsabilidade é do organizador, que precisa ver
         o número.'
       parameters:
       - description: ID da planta
@@ -2964,7 +3054,7 @@ paths:
       - application/json
       description: 'Gera os assentos de um formulário e NÃO grava nada. É o que o
         editor desenha enquanto o organizador digita, e usa o mesmo gerador que a
-        gravação vai usar — uma prévia construída por outro caminho é uma prévia que
+        gravação vai usar: uma prévia construída por outro caminho é uma prévia que
         pode mentir. Funciona também em planta congelada: olhar não é editar.'
       parameters:
       - description: ID da planta
@@ -3474,6 +3564,86 @@ paths:
       summary: Imagem do ingresso
       tags:
       - Entrada
+  /api/v1/organiser/balance:
+    get:
+      description: 'Quanto o organizador já tem para receber, quanto ainda não venceu
+        e quanto está retido. `availableCents` pode ser negativo: um reembolso entra
+        no saldo na hora, enquanto a venda que ele reverte só vence depois do evento:
+        é assim que um repasse nunca paga um ingresso que já voltou para o comprador.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payout.BalanceResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/payout.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Saldo do organizador
+      tags:
+      - Repasses
+  /api/v1/organiser/ledger:
+    get:
+      description: 'Cada movimento do saldo, do mais recente para o mais antigo. Filtra
+        por evento. O extrato é somente-adição: uma correção é um lançamento novo
+        com o sinal contrário, nunca a edição de um que já foi informado.'
+      parameters:
+      - description: Filtra por evento
+        in: query
+        name: eventId
+        type: string
+      - description: Itens por página (máx. 200)
+        in: query
+        name: limit
+        type: integer
+      - description: Deslocamento
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/payout.LedgerResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/payout.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Extrato do organizador
+      tags:
+      - Repasses
+  /api/v1/organiser/report:
+    get:
+      description: 'Os mesmos números do relatório de evento, somados sobre TODOS
+        os eventos do organizador: totais, ticket médio, e a divisão por sexo, faixa
+        etária, estado, cidade, lote e dia. Ninguém é identificado: são contagens
+        sobre o que o comprador informou no cadastro, congelado no momento da compra.
+        O escopo vem da sessão: não existe parâmetro de organizador, portanto não
+        há o que adulterar para ler a carteira de outra pessoa.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/report.SalesEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Relatório geral do organizador
+      tags:
+      - Relatórios
   /api/v1/public/events:
     get:
       description: A vitrine pública. Aceita busca textual, categoria, cidade, intervalo

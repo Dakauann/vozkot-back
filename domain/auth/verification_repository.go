@@ -31,9 +31,21 @@ type ChallengeRepository interface {
 	// `since`, for the hourly ceiling.
 	CountRecent(ctx context.Context, purpose Purpose, destinationIndex []byte, since time.Time) (int, error)
 
-	// DeleteExpired clears out spent and lapsed challenges. They are short
-	// lived by design, and keeping them forever would be retaining a log of
-	// who signed in and when, which is exactly what this table is shaped to
+	// DeleteOlderThan clears out challenges created before the cutoff. They are
+	// short lived by design, and keeping them forever would be retaining a log
+	// of who signed in and when, which is exactly what this table is shaped to
 	// avoid holding.
-	DeleteExpired(ctx context.Context, before time.Time, limit int) (int, error)
+	//
+	// Keyed on CREATED, never on expiry, and that distinction is the whole
+	// point. A row stops being answerable after CodeTTL, which Live() enforces
+	// on the read path, but it keeps doing a second job for ChallengeWindow:
+	// it is what CountRecent counts, and the ceiling of
+	// MaxChallengesPerDestination is only ever as good as the rows still there
+	// to be counted.
+	//
+	// Sweeping on expires_at deleted exactly the ten-to-sixty-minute-old rows
+	// that ceiling is made of, an hour's evidence erased ten minutes in. That
+	// turned "five codes an hour" into five every ten minutes, roughly thirty,
+	// which is the inbox flood the ceiling exists to stop.
+	DeleteOlderThan(ctx context.Context, cutoff time.Time, limit int) (int, error)
 }

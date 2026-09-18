@@ -279,7 +279,7 @@ func (s *Service) BestAvailable(ctx context.Context, input BestAvailableInput) (
 //
 // Front first because that is what people pay for and what "best" means to
 // them. Centre second, and it is scored rather than sorted so that a centre
-// seat two rows back beats an aisle seat at the very front — which is the trade
+// seat two rows back beats an aisle seat at the very front, which is the trade
 // a person actually makes when they choose by hand.
 func scoreRun(run []SeatView) int {
 	if len(run) == 0 {
@@ -292,7 +292,7 @@ func scoreRun(run []SeatView) int {
 
 	// Distance of the run's middle from the row's own middle is not knowable
 	// from the run alone, so the proxy is how tightly the run sits around the
-	// lowest seat orders available — good enough, and it costs no second query.
+	// lowest seat orders available, good enough, and it costs no second query.
 	middle := (run[0].SeatOrder + run[len(run)-1].SeatOrder) / 2
 	if middle < 0 {
 		middle = -middle
