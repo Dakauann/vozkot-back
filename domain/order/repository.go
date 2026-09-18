@@ -38,6 +38,17 @@ type Filter struct {
 	// the provider, forever, is unbounded work for no benefit, once the doors
 	// have closed a late refund is bookkeeping, not inventory.
 	EventNotBefore time.Time
+	// UpdatedBefore keeps a sweep to orders nobody has looked at recently.
+	//
+	// It is what turns reconciliation from a poller into a safety net. Without
+	// it the sweep re-reads EVERY pending order from the provider on every
+	// pass, so one unpaid order costs a provider call a minute for the whole
+	// length of its hold, and a busy onsale spends thousands of calls
+	// discovering that nobody has paid yet. Settlement refreshes UpdatedAt even
+	// when the charge has not moved, so each read pushes the next one out by
+	// this much: the backoff is a property of the query rather than state
+	// anybody has to keep.
+	UpdatedBefore time.Time
 }
 
 // Repository persists orders.

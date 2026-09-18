@@ -51,10 +51,13 @@ type Service struct {
 	// refunds opens the box office's own refund when settlement finds the
 	// tickets gone. Nil is supported and leaves the order in refund_required
 	// for a person, which is what this system did before.
-	refunds    refunder
-	dispatcher *queueUsecase.Dispatcher
-	now        func() time.Time
-	newID      func() string
+	refunds refunder
+	// reconcileAfter is how long an order must have gone untouched before a
+	// recovery sweep re-reads it from the provider.
+	reconcileAfter time.Duration
+	dispatcher     *queueUsecase.Dispatcher
+	now            func() time.Time
+	newID          func() string
 }
 
 func NewService(
@@ -66,15 +69,39 @@ func NewService(
 	notifications *notificationUsecase.Purchases,
 ) *Service {
 	return &Service{
-		unit:          unit,
-		orders:        orders,
-		gateway:       gateway,
-		jobs:          jobs,
-		notifications: notifications,
-		dispatcher:    dispatcher,
-		now:           time.Now,
-		newID:         randomID,
+		unit:           unit,
+		orders:         orders,
+		gateway:        gateway,
+		jobs:           jobs,
+		notifications:  notifications,
+		dispatcher:     dispatcher,
+		now:            time.Now,
+		newID:          randomID,
+		reconcileAfter: DefaultReconcileAfter,
 	}
+}
+
+// DefaultReconcileAfter is how stale a pending order must be before the
+// recovery sweep pays for a provider call about it.
+//
+// THE NUMBER IS A TRADE, and both directions cost something real. Too long and
+// a buyer whose webhook was lost waits that much longer to be told they own
+// their tickets. Too short and the sweep becomes a poller: it re-reads every
+// unpaid order every pass, spending a provider call each time to discover that
+// somebody has not opened their bank app yet. At a minute, one abandoned cart
+// costs thirty calls over a thirty-minute hold; at three, ten.
+//
+// Three minutes is chosen against the real shape of PIX: most payments land in
+// under two, so with webhooks working the sweep usually finds nothing to do at
+// all, which is exactly what a safety net should cost.
+const DefaultReconcileAfter = 3 * time.Minute
+
+// WithReconcileAfter overrides the staleness threshold.
+func (s *Service) WithReconcileAfter(after time.Duration) *Service {
+	if after > 0 {
+		s.reconcileAfter = after
+	}
+	return s
 }
 
 // accruer is the slice of usecases/payout this file uses.
@@ -347,6 +374,98 @@ func (s *Service) EnqueueRefund(
 	return job, nil
 }
 
+// CancelCharge voids the charge of an order whose hold has lapsed. It is the
+// handler behind TypeCancelCharge.
+//
+// WHAT THIS PREVENTS: a hold is thirty minutes and a provider dates a charge to
+// a day, so releasing an order's stock used to leave its PIX code payable for
+// another twenty-odd hours. A buyer who paid in that window sent real money for
+// seats that were already back on sale and usually already sold, and the box
+// office's only remaining move was to take the money and give it straight back,
+// losing the provider's fee and disappointing somebody who thought they had
+// tickets. Cancelling closes the window to the length of the hold.
+//
+// Deliberately gentle about every way it can find nothing to do. This runs for
+// every expired hold on the system, which is the ordinary outcome of an
+// abandoned cart, so "there was nothing to cancel" is the common case and not
+// an error worth a retry or a log line.
+func (s *Service) CancelCharge(ctx context.Context, orderID string) error {
+	item, err := s.orders.GetByID(ctx, orderID)
+	if errors.Is(err, orderdomain.ErrNotFound) {
+		return queue.Permanent(fmt.Errorf("cancel charge for order %s: %w", orderID, err))
+	}
+	if err != nil {
+		return err
+	}
+	if item.PaymentID == "" {
+		// The hold lapsed before the charge was ever created, which is most
+		// abandoned carts: nothing was issued, so nothing is payable.
+		return nil
+	}
+	if s.gateway == nil {
+		return paymentdomain.ErrNotConfigured
+	}
+	// The order has to still be one nobody may pay for.
+	//
+	// Checked at the moment of cancelling rather than trusted from the job,
+	// because the job was written when the hold lapsed and the world moves: a
+	// buyer who paid in the seconds between then and now has a PAID order, and
+	// voiding their charge would take away tickets they legitimately hold. The
+	// race is real, it is why this is a status check and not a flag.
+	if item.Status != orderdomain.StatusExpired && item.Status != orderdomain.StatusCancelled {
+		return nil
+	}
+	if err := s.gateway.CancelCharge(ctx, item.PaymentID); err != nil {
+		if !paymentdomain.Retryable(err) {
+			// A provider that refuses to void is almost always telling us the
+			// charge was already paid, and settlement is the thing that
+			// handles that, through reconciliation, exactly as it did before
+			// this existed. Parked rather than retried, and not an alarm.
+			log.Printf("payment: charge %s for expired order %s could not be voided: %v", item.PaymentID, orderID, err)
+			return queue.Permanent(fmt.Errorf("cancel charge for order %s: %w", orderID, err))
+		}
+		return err
+	}
+	log.Printf("payment: voided charge %s for expired order %s", item.PaymentID, orderID)
+	return nil
+}
+
+// EnqueueCancelCharge schedules the void, inside the caller's transaction.
+//
+// Written with the expiry that released the stock, so a code cannot stay
+// payable for inventory that was given back; either both commit or neither
+// does. Announced after the commit, like every other job here.
+func (s *Service) EnqueueCancelCharge(
+	ctx context.Context,
+	jobs queue.Queue,
+	item *orderdomain.Order,
+) (*queue.Job, error) {
+	if item == nil || item.PaymentID == "" {
+		return nil, nil
+	}
+	payload, err := queue.NewPayload(queue.SyncPaymentPayload{OrderID: item.ID, PaymentID: item.PaymentID})
+	if err != nil {
+		return nil, err
+	}
+	job := &queue.Job{
+		ID:          s.newID(),
+		Type:        queue.TypeCancelCharge,
+		Payload:     payload,
+		RunAt:       s.now(),
+		MaxAttempts: queue.DefaultMaxAttempts,
+		// One void per order, however many sweeps notice the same lapsed hold.
+		DedupeKey: queue.TypeCancelCharge + ":" + item.ID,
+	}
+	added, err := jobs.Enqueue(ctx, job)
+	if err != nil {
+		return nil, err
+	}
+	if !added {
+		return nil, nil
+	}
+	return job, nil
+}
+
 // Refund gives the money back and returns the tickets to sale. It is the
 // handler behind TypeRefundCharge.
 //
@@ -542,7 +661,15 @@ func (s *Service) Reconcile(ctx context.Context, limit int) (int, error) {
 	scheduled := 0
 	for offset := 0; scheduled < limit && offset < maxScanned; offset += pageSize {
 		pending, err := s.orders.List(ctx, orderdomain.Filter{
-			Status:             orderdomain.StatusPendingPayment,
+			Status: orderdomain.StatusPendingPayment,
+			// Only orders nobody has looked at recently. Settlement refreshes
+			// UpdatedAt even when the charge has not moved, so each read
+			// pushes the next one out by this much and the backoff needs no
+			// state of its own. Without it this sweep is a poller, and the
+			// providers price polling: Asaas caps an account at 25,000 calls
+			// per twelve hours and declines to raise it for accounts that
+			// poll.
+			UpdatedBefore:      s.now().Add(-s.reconcileAfter),
 			Limit:              pageSize,
 			Offset:             offset,
 			OldestUpdatedFirst: true,

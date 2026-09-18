@@ -307,13 +307,16 @@ func (w *Worker) run(ctx context.Context, job domain.Job) {
 		w.kill(finalizeCtx, job, err.Error())
 		return
 	}
-	runAt := w.now().Add(domain.Backoff(job.Attempts))
+	// The provider's own Retry-After wins over our curve, and everything is
+	// jittered so a burst refused together does not come back together.
+	delay := domain.RetryDelay(err, job.Attempts)
+	runAt := w.now().Add(delay)
 	if retryErr := w.jobs.Retry(finalizeCtx, job.ID, err.Error(), runAt, w.now()); retryErr != nil {
 		log.Printf("queue: retry job %s: %v", job.ID, retryErr)
 		return
 	}
 	log.Printf("queue: job %s (%s) failed on attempt %d/%d, retrying in %s: %v",
-		job.ID, job.Type, job.Attempts, job.MaxAttempts, domain.Backoff(job.Attempts), err)
+		job.ID, job.Type, job.Attempts, job.MaxAttempts, delay, err)
 }
 
 const finalizationTimeout = 10 * time.Second

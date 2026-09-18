@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"time"
 )
 
@@ -40,6 +41,16 @@ const (
 	// every other provider call, so a refund survives a slow provider and a
 	// restart instead of dying with the request that asked for it.
 	TypeRefundCharge = "charge.refund"
+	// TypeCancelCharge voids the provider charge of an order whose hold lapsed,
+	// so the PIX code stops being payable the moment the seat goes back on
+	// sale.
+	//
+	// It exists because the two clocks do not agree: a hold is thirty minutes
+	// and a provider dates a charge to a DAY, so releasing the stock used to
+	// leave a live, payable code out in the world for another twenty-odd hours.
+	// Every one of those that got paid became money taken for a seat somebody
+	// else had already bought. Cancelling closes the window to the hold itself.
+	TypeCancelCharge = "charge.cancel"
 	// TypeCleanup removes old completed work and expired idempotency keys in
 	// bounded batches. Dead jobs and business records are never removed here.
 	TypeCleanup = "maintenance.cleanup"
@@ -144,6 +155,65 @@ func Backoff(attempts int) time.Duration {
 		delay = ceiling
 	}
 	return delay
+}
+
+// Paced is an error that knows when it may be tried again.
+//
+// A rate limiter answers 429 with a Retry-After, and that number is the only
+// one that matters: it is the provider saying exactly how long it will keep
+// refusing. Guessing shorter gets refused again and, on most providers,
+// extends the penalty; guessing longer leaves a buyer watching a checkout with
+// no PIX code for minutes. Adapters attach it; nothing in the domain knows what
+// an HTTP header is.
+type Paced interface {
+	// RetryAfter is how long to wait, or zero when the provider did not say.
+	RetryAfter() time.Duration
+}
+
+// RetryAfter reads a provider's own pacing out of an error, if it gave one.
+func RetryAfter(err error) (time.Duration, bool) {
+	var paced Paced
+	if errors.As(err, &paced) {
+		if delay := paced.RetryAfter(); delay > 0 {
+			return delay, true
+		}
+	}
+	return 0, false
+}
+
+// RetryDelay is how long to wait before attempt n+1, all things considered.
+//
+// The provider's own instruction wins over the curve, because it is fact
+// rather than estimate. Everything is then jittered, which is the part that
+// matters under load: without it, a hundred jobs refused in the same second
+// come back in the same second, and the herd that tripped the limit trips it
+// again in lockstep. Providers ask for jitter for exactly this reason.
+func RetryDelay(err error, attempts int) time.Duration {
+	if delay, ok := RetryAfter(err); ok {
+		return jitter(delay)
+	}
+	return jitter(Backoff(attempts))
+}
+
+// jitter spreads a delay, and only ever FORWARD.
+//
+// Additive rather than the more common "wait between half and all of it",
+// because both inputs here are floors and not targets: Retry-After is the
+// provider telling us it will refuse until then, and returning early is the
+// one thing that reliably makes a rate limit worse. The spread is capped so a
+// five-minute backoff cannot quietly become eight.
+func jitter(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return delay
+	}
+	spread := delay / 2
+	if spread > 30*time.Second {
+		spread = 30 * time.Second
+	}
+	if spread <= 0 {
+		return delay
+	}
+	return delay + time.Duration(rand.Int64N(int64(spread)+1))
 }
 
 // Queue is the persistence port for jobs.

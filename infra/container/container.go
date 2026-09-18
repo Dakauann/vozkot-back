@@ -355,7 +355,8 @@ func New(cfg config.Config) (*Container, error) {
 		unit, payoutUsecase.AlwaysStandard, ledgerdomain.BankingCalendar, time.Now, prefixedID,
 	)
 	paymentService := paymentUsecase.NewService(unit, orders, gateway, jobs, dispatcher, purchases).
-		WithLedger(payoutService)
+		WithLedger(payoutService).
+		WithReconcileAfter(cfg.Queue.ReconcileAfter)
 
 	// Refunds and reporting hang off the sale rather than being part of it: both
 	// read what checkout wrote, and neither can move stock. The refund service
@@ -368,6 +369,10 @@ func New(cfg config.Config) (*Container, error) {
 	// when it finds the tickets gone, and the refund service is built from the
 	// payment service, so the two are joined here after both exist.
 	paymentService.WithRefunds(refundService)
+	// And the expiring hold takes its payment code with it, which is the same
+	// shape again: checkout declares the port, payment implements it, the
+	// container is the only place that knows both.
+	checkoutService.WithChargeVoider(paymentService)
 	reportService := reportUsecase.NewService(reportRepository.NewReportRepository(db), events)
 
 	// The door. The repository above serves reads and scans; issuing goes
@@ -716,6 +721,14 @@ func (c *Container) startWorkers(
 				log.Printf("queue: auditing %d settled payment(s)", scheduled)
 			}
 			return err
+		})
+
+		worker.Handle(queuedomain.TypeCancelCharge, func(ctx context.Context, job queuedomain.Job) error {
+			payload, err := queueUsecase.Decode[queuedomain.SyncPaymentPayload](job)
+			if err != nil {
+				return err
+			}
+			return payments.CancelCharge(ctx, payload.OrderID)
 		})
 
 		worker.Handle(queuedomain.TypeRefundCharge, func(ctx context.Context, job queuedomain.Job) error {

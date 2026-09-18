@@ -134,3 +134,82 @@ func TestRedisStaysOptionalInDevelopment(t *testing.T) {
 		t.Fatal("cache reports enabled with no REDIS_URL")
 	}
 }
+
+// A production box office pointed at the sandbox is the worst shape this
+// configuration can take, because nothing looks broken: orders are created,
+// buyers are handed PIX codes, and not one of them can be paid. The event
+// sells out and settles nothing.
+//
+// The default itself is right, sandbox is the safe answer for a developer who
+// says nothing, and it was only ever missing its other half.
+func TestProductionRefusesTheSandboxGateway(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("PAYMENT_PROVIDER", "asaas")
+	t.Setenv("ASAAS_API_KEY", "key")
+	t.Setenv("ASAAS_WEBHOOK_TOKEN", "token")
+
+	// Explicitly set to the sandbox.
+	t.Setenv("ASAAS_BASE_URL", "https://api-sandbox.asaas.com/v3")
+	_, err := loadPayments()
+	if err == nil || !strings.Contains(err.Error(), "sandbox") {
+		t.Fatalf("loadPayments() error = %v, want a refusal naming the sandbox", err)
+	}
+	if !strings.Contains(err.Error(), "no bank can pay") {
+		t.Errorf("error %q does not say what happens to buyers", err)
+	}
+
+	// And unset, which is the dangerous one: the default silently WAS the
+	// sandbox, so a deployment that simply forgot the variable shipped it.
+	t.Setenv("ASAAS_BASE_URL", "")
+	if _, err := loadPayments(); err == nil || !strings.Contains(err.Error(), "sandbox") {
+		t.Fatalf("an unset ASAAS_BASE_URL was accepted in production: %v", err)
+	}
+}
+
+func TestProductionAcceptsTheLiveGateway(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("PAYMENT_PROVIDER", "asaas")
+	t.Setenv("ASAAS_API_KEY", "key")
+	t.Setenv("ASAAS_WEBHOOK_TOKEN", "token")
+	t.Setenv("ASAAS_BASE_URL", "https://api.asaas.com/v3")
+
+	payments, err := loadPayments()
+	if err != nil {
+		t.Fatalf("loadPayments() error = %v", err)
+	}
+	if payments.AsaasBaseURL != "https://api.asaas.com/v3" {
+		t.Errorf("base URL = %q", payments.AsaasBaseURL)
+	}
+}
+
+// Development keeps the safe default, or a clone stops being runnable.
+func TestDevelopmentStillDefaultsToTheSandbox(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("PAYMENT_PROVIDER", "asaas")
+	t.Setenv("ASAAS_API_KEY", "key")
+	t.Setenv("ASAAS_WEBHOOK_TOKEN", "token")
+	t.Setenv("ASAAS_BASE_URL", "")
+
+	payments, err := loadPayments()
+	if err != nil {
+		t.Fatalf("loadPayments() error = %v", err)
+	}
+	if payments.AsaasBaseURL != asaasSandboxBaseURL {
+		t.Errorf("base URL = %q, want the sandbox default", payments.AsaasBaseURL)
+	}
+}
+
+// Mercado Pago has no sandbox URL: it tells the environments apart by the
+// credential, so the same mistake wears a different disguise.
+func TestProductionRefusesATestAccessToken(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("PAYMENT_PROVIDER", "mercadopago")
+	t.Setenv("MERCADOPAGO_ACCESS_TOKEN", "TEST-1234567890")
+	t.Setenv("MERCADOPAGO_WEBHOOK_SECRET", "secret")
+	t.Setenv("MERCADOPAGO_NOTIFICATION_URL", "https://api.vozkot.test/webhooks/mercadopago")
+
+	_, err := loadPayments()
+	if err == nil || !strings.Contains(err.Error(), "TEST-") {
+		t.Fatalf("loadPayments() error = %v, want a refusal naming the TEST- credential", err)
+	}
+}

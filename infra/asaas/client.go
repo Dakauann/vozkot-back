@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -43,6 +44,50 @@ type ResponseError struct {
 	StatusCode int
 	Errors     []APIError
 	Body       string
+	// retryAfter is what the provider asked us to wait, from its own headers.
+	// Zero when it said nothing.
+	retryAfter time.Duration
+}
+
+// RetryAfter satisfies queue.Paced, so the job ledger waits exactly as long as
+// Asaas asked rather than guessing with its own curve.
+//
+// Asaas rate limits on two axes, a 12-hour account quota and per-endpoint
+// limits, and answers both with 429 plus RateLimit-Reset, the seconds left in
+// the window. Retrying before that is refused again and spends quota doing it.
+func (e *ResponseError) RetryAfter() time.Duration { return e.retryAfter }
+
+// retryAfterFrom reads whichever pacing header the provider sent.
+//
+// RateLimit-Reset is what Asaas documents, as seconds remaining in the window;
+// Retry-After is the HTTP standard and is read too, because an edge or a proxy
+// in front of the API may be the thing refusing. Both are seconds here. A
+// value that cannot be parsed is treated as absent rather than as zero, so a
+// malformed header leaves the backoff curve in charge instead of retrying
+// immediately.
+func retryAfterFrom(headers http.Header) time.Duration {
+	if headers == nil {
+		return 0
+	}
+	for _, name := range []string{"Retry-After", "RateLimit-Reset"} {
+		raw := strings.TrimSpace(headers.Get(name))
+		if raw == "" {
+			continue
+		}
+		seconds, err := strconv.Atoi(raw)
+		if err != nil || seconds <= 0 {
+			continue
+		}
+		// A provider asking for an hour is either broken or telling us to stop
+		// for the day; either way the queue should park rather than hold a job
+		// open that long, so the hint is capped and the attempt budget runs out
+		// normally.
+		if seconds > 600 {
+			seconds = 600
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	return 0
 }
 
 // APIError is one entry from Asaas's error envelope.
@@ -299,7 +344,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return newResponseError(response.StatusCode, raw)
+		return newResponseError(response.StatusCode, raw, response.Header)
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
@@ -310,8 +355,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	return nil
 }
 
-func newResponseError(status int, raw []byte) error {
-	failure := &ResponseError{StatusCode: status, Body: string(raw)}
+func newResponseError(status int, raw []byte, headers http.Header) error {
+	failure := &ResponseError{StatusCode: status, Body: string(raw), retryAfter: retryAfterFrom(headers)}
 	var envelope struct {
 		Errors []APIError `json:"errors"`
 	}

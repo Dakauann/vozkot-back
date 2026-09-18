@@ -122,8 +122,11 @@ type Service struct {
 	// get: a missing audience report, never a missing sale.
 	buyers   userdomain.Repository
 	settings Settings
-	now      func() time.Time
-	newID    func() string
+	// voider cancels the provider charge of an order whose hold lapsed. Nil
+	// leaves the code payable until the provider's own due date.
+	voider voider
+	now    func() time.Time
+	newID  func() string
 }
 
 func NewService(
@@ -153,6 +156,29 @@ func NewService(
 // number the event page promises and the number the order charges have to be
 // the same number, and the only way to guarantee that is for there to be one.
 func (s *Service) Fee() pricing.Fee { return s.settings.Fee }
+
+// voider is the slice of usecases/payment this file uses.
+//
+// Declared at the consumer, like every other cross-use-case seam here, so
+// checkout keeps knowing nothing about payment providers.
+type voider interface {
+	EnqueueCancelCharge(ctx context.Context, jobs queue.Queue, item *orderdomain.Order) (*queue.Job, error)
+}
+
+// WithChargeVoider makes an expiring hold take its payment code with it.
+//
+// THE WINDOW THIS CLOSES: a hold is thirty minutes and a provider dates a
+// charge to a DAY, so releasing the stock left a live, payable PIX code out in
+// the world for another twenty-odd hours. Whoever paid it sent real money for
+// seats that were already back on sale, and the box office could only take the
+// money and hand it straight back, minus the provider's fee.
+//
+// Optional: without it expiry behaves exactly as it did, and settlement still
+// handles a late payment by re-taking the stock or owing a refund.
+func (s *Service) WithChargeVoider(charges voider) *Service {
+	s.voider = charges
+	return s
+}
 
 // StartInput is one purchase attempt: one event, one or more of its tiers.
 type StartInput struct {
@@ -670,8 +696,12 @@ func (s *Service) ExpireHolds(ctx context.Context, limit int) (int, error) {
 		limit = 100
 	}
 	released := 0
+	var announce []*queue.Job
 
 	err := s.unit.Run(ctx, func(ctx context.Context, repositories uow.Repositories) error {
+		// Reset, so a retried transaction does not announce jobs its
+		// rolled-back attempt wrote.
+		announce = nil
 		expired, err := repositories.Orders().ClaimExpired(ctx, s.now(), limit)
 		if err != nil {
 			return err
@@ -681,12 +711,27 @@ func (s *Service) ExpireHolds(ctx context.Context, limit int) (int, error) {
 			if err := releaseAll(ctx, repositories, &item); err != nil {
 				return err
 			}
+			// The charge goes with the stock, in the same transaction: a code
+			// that outlives the seats it was for is money the box office will
+			// have to give back.
+			if s.voider != nil {
+				job, err := s.voider.EnqueueCancelCharge(ctx, repositories.Jobs(), &item)
+				if err != nil {
+					return err
+				}
+				if job != nil {
+					announce = append(announce, job)
+				}
+			}
 			released++
 		}
 		return nil
 	})
 	if err != nil {
 		return 0, err
+	}
+	for _, job := range announce {
+		s.dispatcher.Dispatch(ctx, job)
 	}
 	return released, nil
 }
@@ -697,7 +742,8 @@ func (s *Service) ExpireHolds(ctx context.Context, limit int) (int, error) {
 // healthy system, because every order schedules one of these at cart time and
 // most of them go on to be confirmed.
 func (s *Service) ExpireHold(ctx context.Context, orderID string) error {
-	return s.unit.Run(ctx, func(ctx context.Context, repositories uow.Repositories) error {
+	var announce *queue.Job
+	err := s.unit.Run(ctx, func(ctx context.Context, repositories uow.Repositories) error {
 		item, err := repositories.Orders().GetByIDForUpdate(ctx, orderID)
 		if errors.Is(err, orderdomain.ErrNotFound) {
 			// Nothing to expire, and nothing a retry could find.
@@ -716,8 +762,24 @@ func (s *Service) ExpireHold(ctx context.Context, orderID string) error {
 		if err := repositories.Orders().Update(ctx, item); err != nil {
 			return err
 		}
-		return releaseAll(ctx, repositories, item)
+		if err := releaseAll(ctx, repositories, item); err != nil {
+			return err
+		}
+		if s.voider == nil {
+			return nil
+		}
+		job, err := s.voider.EnqueueCancelCharge(ctx, repositories.Jobs(), item)
+		if err != nil {
+			return err
+		}
+		announce = job
+		return nil
 	})
+	if err != nil {
+		return err
+	}
+	s.dispatcher.Dispatch(ctx, announce)
+	return nil
 }
 
 // releaseAll returns every line's stock, in the order the items are held.

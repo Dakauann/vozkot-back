@@ -310,12 +310,28 @@ func (p PaymentsConfig) Enabled() bool {
 // exists to keep.
 const asaasSandboxBaseURL = "https://api-sandbox.asaas.com/v3"
 
+// paymentUsecaseDefaultReconcileAfter mirrors usecases/payment.DefaultReconcileAfter.
+//
+// Duplicated rather than imported for the same reason the sandbox URL above is:
+// config sits below the use cases and must not depend on one. The use case
+// applies its own default when this is zero, so the two can only disagree about
+// what an unset variable means, never about what a set one does.
+const paymentUsecaseDefaultReconcileAfter = 3 * time.Minute
+
 // QueueConfig tunes the durable worker.
 type QueueConfig struct {
 	Workers            int
 	PollInterval       time.Duration
 	BatchSize          int
 	ReconcileBatchSize int
+	// ReconcileAfter is how long a pending order must go untouched before the
+	// recovery sweep spends a provider call re-reading it.
+	//
+	// It is the difference between a safety net and a poller. Without it the
+	// sweep re-reads every unpaid order on every pass, which is a provider call
+	// per pending order per minute; Asaas caps an account at 25,000 calls per
+	// twelve hours and declines to raise it for accounts that poll.
+	ReconcileAfter time.Duration
 	// AuditBatchSize is how many settled orders one hourly audit re-reads at the
 	// provider. It catches a refund or chargeback whose notification was lost,
 	// which the pending-payment sweep can never see.
@@ -760,12 +776,42 @@ func loadPayments() (PaymentsConfig, error) {
 		if payments.Enabled() && payments.AsaasWebhookToken == "" {
 			return PaymentsConfig{}, fmt.Errorf("ASAAS_WEBHOOK_TOKEN is required when ASAAS_API_KEY is set")
 		}
+		// The other half of the sandbox default above, which was missing: the
+		// safe fallback is only safe OUTSIDE production.
+		//
+		// A production box office pointed at the sandbox is the worst shape
+		// this configuration can take, because nothing about it looks broken.
+		// Every screen works, every order is created, every buyer is handed a
+		// PIX code, and not one of them can be paid by a real bank. The event
+		// sells out, settles nothing, and the first to notice is a buyer whose
+		// payment "did not go through" hours later. Refusing to start fails it
+		// at a time somebody is watching.
+		//
+		// Scoped to the ACTIVE provider, because asaasBaseURL is defaulted
+		// whether or not Asaas is in use, and a Mercado Pago deployment must
+		// not be blocked by a variable it never reads.
+		if payments.Enabled() && os.Getenv("APP_ENV") == "production" &&
+			strings.Contains(strings.ToLower(payments.AsaasBaseURL), "sandbox") {
+			return PaymentsConfig{}, fmt.Errorf(
+				"ASAAS_BASE_URL points at the sandbox (%s) in production; "+
+					"buyers would receive PIX codes no bank can pay", payments.AsaasBaseURL)
+		}
 	case paymentdomain.ProviderMercadoPago:
 		if payments.Enabled() && payments.WebhookSecret == "" {
 			return PaymentsConfig{}, fmt.Errorf("MERCADOPAGO_WEBHOOK_SECRET is required when MERCADOPAGO_ACCESS_TOKEN is set")
 		}
 		if payments.Enabled() && payments.NotificationURL == "" && os.Getenv("APP_ENV") == "production" {
 			return PaymentsConfig{}, fmt.Errorf("MERCADOPAGO_NOTIFICATION_URL is required in production")
+		}
+		// The same trap wearing a different disguise. Mercado Pago has no
+		// sandbox URL; it tells the environments apart by the credential, and
+		// a TEST- token issues charges nobody can pay exactly as a sandbox
+		// base URL does.
+		if payments.Enabled() && os.Getenv("APP_ENV") == "production" &&
+			strings.HasPrefix(strings.ToUpper(strings.TrimSpace(payments.AccessToken)), "TEST-") {
+			return PaymentsConfig{}, fmt.Errorf(
+				"MERCADOPAGO_ACCESS_TOKEN is a TEST- credential in production; " +
+					"buyers would receive charges no bank can pay")
 		}
 	}
 
@@ -815,6 +861,10 @@ func loadQueue() (QueueConfig, error) {
 	if err != nil {
 		return QueueConfig{}, err
 	}
+	reconcileAfter, err := duration("QUEUE_RECONCILE_AFTER", paymentUsecaseDefaultReconcileAfter)
+	if err != nil {
+		return QueueConfig{}, err
+	}
 	reconcileBatch, err := integer("QUEUE_RECONCILE_BATCH_SIZE", 1000)
 	if err != nil {
 		return QueueConfig{}, err
@@ -849,6 +899,7 @@ func loadQueue() (QueueConfig, error) {
 		PollInterval:       poll,
 		BatchSize:          batch,
 		ReconcileBatchSize: reconcileBatch,
+		ReconcileAfter:     reconcileAfter,
 		AuditBatchSize:     auditBatch,
 		CleanupBatchSize:   cleanupBatch,
 		IdempotencyLease:   idempotencyLease,

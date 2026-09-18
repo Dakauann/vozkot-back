@@ -103,6 +103,27 @@ func (p *stubProvider) handler() http.HandlerFunc {
 			}
 			_ = json.NewEncoder(response).Encode(payment)
 
+		case request.Method == http.MethodPut && strings.HasPrefix(request.URL.Path, "/v1/payments/"):
+			// Cancelling a charge, which Mercado Pago models as a status
+			// update rather than a delete. A PAID charge is refused, exactly as
+			// the real provider refuses it, which is what makes the
+			// "cancellation job arrives after the buyer paid" test meaningful
+			// rather than a test of the stub's good manners.
+			id := strings.TrimPrefix(request.URL.Path, "/v1/payments/")
+			payment, ok := p.payments[id]
+			if !ok {
+				response.WriteHeader(http.StatusNotFound)
+				_, _ = response.Write([]byte(`{"message":"Payment not found","status":404}`))
+				return
+			}
+			if payment["status"] == mercadopago.StatusApproved {
+				response.WriteHeader(http.StatusBadRequest)
+				_, _ = response.Write([]byte(`{"message":"Cannot cancel an approved payment","status":400}`))
+				return
+			}
+			payment["status"] = mercadopago.StatusCancelled
+			_ = json.NewEncoder(response).Encode(payment)
+
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/refunds"):
 			id := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/payments/"), "/refunds")
 			if payment, ok := p.payments[id]; ok {
@@ -115,6 +136,18 @@ func (p *stubProvider) handler() http.HandlerFunc {
 			response.WriteHeader(http.StatusNotFound)
 		}
 	}
+}
+
+// status is what the provider currently believes about a charge.
+func (p *stubProvider) status(id string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	payment, ok := p.payments[id]
+	if !ok {
+		return ""
+	}
+	current, _ := payment["status"].(string)
+	return current
 }
 
 // amount is what the provider was actually asked to charge, in reais.
@@ -917,6 +950,14 @@ func TestReconcileSchedulesEveryPendingOrder(t *testing.T) {
 	t.Cleanup(func() {
 		h.db.Exec("DELETE FROM jobs WHERE payload->>'orderId' IN ?", []string{charged.ID, uncharged.ID})
 	})
+
+	// Due, which is now a precondition rather than a given: the sweep only
+	// re-reads orders nobody has looked at for DefaultReconcileAfter, so a
+	// just-created order is deliberately not its business yet. Before that
+	// filter existed this sweep re-read every pending order every pass, which
+	// is a provider call per pending order per minute.
+	h.db.Exec("UPDATE orders SET updated_at = ? WHERE id IN ?",
+		time.Now().UTC().Add(-time.Hour), []string{charged.ID, uncharged.ID})
 
 	// Other packages may have pending orders of their own at the same moment,
 	// so the count is a floor and the assertion is on this test's two orders.

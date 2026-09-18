@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -118,6 +119,43 @@ type ResponseError struct {
 	ErrorCode  string
 	Causes     []ErrorCause
 	Body       string
+	// retryAfter is what the provider asked us to wait. Zero when it said
+	// nothing.
+	retryAfter time.Duration
+}
+
+// RetryAfter satisfies queue.Paced, so the job ledger waits as long as Mercado
+// Pago asked instead of guessing with its own curve.
+//
+// Mercado Pago publishes no numeric rate limit; it answers 429
+// "usage_quota_exceeded" and tells integrators to read Retry-After and back off
+// with jitter. Since the ceiling is unpublished and elastic, the header is the
+// ONLY reliable information about it, and ignoring it means discovering the
+// limit by repeatedly hitting it.
+func (e *ResponseError) RetryAfter() time.Duration { return e.retryAfter }
+
+// retryAfterFrom reads the pacing header, in seconds.
+//
+// An unparseable value is treated as absent, so a malformed header leaves the
+// backoff curve in charge rather than retrying immediately. The cap keeps a
+// provider asking for an hour from holding a job open that long; the attempt
+// budget should run out and park it for a person instead.
+func retryAfterFrom(headers http.Header) time.Duration {
+	if headers == nil {
+		return 0
+	}
+	raw := strings.TrimSpace(headers.Get("Retry-After"))
+	if raw == "" {
+		return 0
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	if seconds > 600 {
+		seconds = 600
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (e *ResponseError) Error() string {
@@ -291,7 +329,7 @@ func (c *client) do(ctx context.Context, method, path string, body any, idempote
 		return fmt.Errorf("mercadopago: read response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return newResponseError(response.StatusCode, raw)
+		return newResponseError(response.StatusCode, raw, response.Header)
 	}
 	if out == nil || len(bytes.TrimSpace(raw)) == 0 {
 		return nil
@@ -302,8 +340,8 @@ func (c *client) do(ctx context.Context, method, path string, body any, idempote
 	return nil
 }
 
-func newResponseError(status int, raw []byte) *ResponseError {
-	responseErr := &ResponseError{StatusCode: status, Body: string(raw)}
+func newResponseError(status int, raw []byte, headers http.Header) *ResponseError {
+	responseErr := &ResponseError{StatusCode: status, Body: string(raw), retryAfter: retryAfterFrom(headers)}
 	var apiErr APIError
 	if err := json.Unmarshal(raw, &apiErr); err == nil {
 		responseErr.Message = apiErr.Message

@@ -438,6 +438,14 @@ func applyFilter(query *gorm.DB, filter domain.Filter) *gorm.DB {
 			query = query.Where("status IN ?", values)
 		}
 	}
+	if !filter.UpdatedBefore.IsZero() {
+		// Rides idx_orders_pending_reconcile, which is already
+		// (updated_at, id) WHERE status = 'pending_payment': the same index the
+		// sweep orders by, now doing the filtering too, so this is a range scan
+		// over exactly the rows that are due rather than a scan of every
+		// pending order followed by a discard.
+		query = query.Where("updated_at < ?", filter.UpdatedBefore.UTC())
+	}
 	if !filter.EventNotBefore.IsZero() {
 		// Straight to the event the order names. It used to have to go through
 		// the tier, because the order only knew a price; it now knows the
