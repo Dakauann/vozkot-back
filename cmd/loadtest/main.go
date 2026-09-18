@@ -37,6 +37,7 @@ import (
 	mathrand "math/rand"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,6 +55,8 @@ import (
 	queuedomain "vozkot/domain/queue"
 	ticketdomain "vozkot/domain/ticket"
 	"vozkot/infra/config"
+	"vozkot/infra/crypto/pii"
+	"vozkot/infra/crypto/piigorm"
 	"vozkot/infra/database"
 	"vozkot/infra/mercadopago"
 	"vozkot/infra/rabbitmq"
@@ -131,9 +134,93 @@ func main() {
 		log.Fatalf("load configuration: %v", err)
 	}
 
+	// The keyring that seals PII, installed exactly as the API container does
+	// at startup.
+	//
+	// Settlement mints admissions, and an admission code is stored with a blind
+	// index, so without this every payment.sync job fails with "piigorm:
+	// encryption service not configured", retries eight times and parks. The
+	// storm still reports its arbitration numbers, which is why this was easy
+	// to miss: the checkout half looks healthy while the half that turns money
+	// into tickets never completes, and the audit at the end is measuring a
+	// pipeline that stopped at the door.
+	//
+	// Fatal rather than a warning, unlike the API: a load test whose settlement
+	// cannot run is not a slower load test, it is a different one, and reporting
+	// PASS from it would be worse than not running it.
+	piiService, err := pii.LoadFromEnv()
+	if err != nil {
+		log.Fatalf("PII encryption is required to settle: %v", err)
+	}
+	piigorm.SetService(piiService)
+
+	if err := refuseLiveEnvironment(); err != nil {
+		log.Fatalf("REFUSING TO RUN: %v", err)
+	}
+
 	if err := run(cfg, opts); err != nil {
 		log.Fatalf("LOAD TEST FAILED: %v", err)
 	}
+}
+
+/*
+refuseLiveEnvironment stops this command from ever pointing at a real one.
+
+Written after it happened. The harness stands up a stub of the payment provider
+and reasonably believes it is hermetic, but it is not: it writes charge.create
+jobs into the SHARED jobs table, and any worker that can see that table may
+claim them. A development API server was running against the same PostgreSQL,
+its workers won a share of the jobs, and it executed them through the REAL
+payment gateway. 156 live charges later the provider rate-limited the account
+and then blocked it.
+
+Nothing about that is specific to development. `config.Load` reads the ambient
+environment exactly as the API does, so the same command with production
+variables would publish three events into the live catalogue, open a thousand
+real orders, and create real charges on the real account, while deliberately
+raising the rate limits that would otherwise have refused the storm.
+
+So two gates, and both are about the environment rather than about the code:
+
+  - APP_ENV must not be production. cmd/seed already refuses this for its
+    -reset, and there is no reason this command should be less careful than the
+    one that only deletes rows.
+  - The provider must be one this harness can fake. PAYMENT_PROVIDER selects
+    the gateway, and the stub only ever intercepts the harness's OWN workers,
+    so a run against a configured live provider is a run whose isolation
+    depends on which process happens to win a race.
+
+Neither gate can detect the thing that actually caused the damage, which is
+another worker sharing the queue. That needs the jobs table to know which
+environment a job belongs to, and it is the fix worth making next.
+*/
+func refuseLiveEnvironment() error {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") {
+		return errors.New("APP_ENV=production: this command opens real orders and creates real charges")
+	}
+	// This harness only knows how to fake Mercado Pago, and that is a gap in
+	// the harness rather than a preference about providers.
+	//
+	// It matters because the stub only ever intercepts the jobs THIS process
+	// wins. Any other worker on the same database settles them through its own
+	// configured gateway, so a run against a provider the harness cannot fake
+	// is a run whose isolation depends on a race. That is how 156 live charges
+	// were created.
+	//
+	// A rate-limiting Asaas stub now exists in infra/asaas/asaastest, so the
+	// real fix is to pick the stub from this variable instead of refusing.
+	// Until that is wired, refusing is the honest behaviour.
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("PAYMENT_PROVIDER")))
+	if provider != "" && provider != "mercadopago" {
+		return fmt.Errorf(
+			"PAYMENT_PROVIDER=%s, which this harness cannot fake: it stubs Mercado Pago only, "+
+				"so any charge job claimed by another worker would reach the real %s account.\n"+
+				"  Stop every API server and worker sharing this database before running, and be aware\n"+
+				"  that the gateway under test will not be the one production uses. Wiring\n"+
+				"  infra/asaas/asaastest into this harness is what removes both problems",
+			provider, provider)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +594,23 @@ func run(cfg config.Config, opts options) error {
 			_, err := payments.Reconcile(ctx, 500)
 			return err
 		})
+
+		// Notifications are accepted and dropped.
+		//
+		// Settlement enqueues a receipt per paid order, and this harness has no
+		// mail transport, so with no handler registered every one of them parked
+		// on its first attempt. They name the run's own orders, so `ownJobs`
+		// matched them and the final audit failed with "N job(s) parked in the
+		// dead-letter state" on a storm where the money was perfectly correct:
+		// the one invariant that should mean "settlement did not finish" instead
+		// meant "this harness does not send email".
+		//
+		// Accepting them keeps that invariant about payment work, which is what
+		// the harness exists to audit. Sending them is a different test and would
+		// need a mail server nobody wants in a load run.
+		worker.Handle(queuedomain.TypeSendNotification, func(context.Context, queuedomain.Job) error {
+			return nil
+		})
 		workersDone.Add(1)
 		go func() {
 			defer workersDone.Done()
@@ -566,7 +670,7 @@ func run(cfg config.Config, opts options) error {
 	//
 	// Either straight into the use case, or through the real router. The second
 	// is the only one whose throughput belongs in a capacity plan.
-	var storm fleet = &useCaseFleet{service: checkout, buyerID: ownerID}
+	var storm fleet = &useCaseFleet{service: checkout, buyerID: ownerID, run: runID}
 	if opts.overHTTP {
 		httpFleet, err := newHTTPFleet(ctx, db, cfg, opts, runID, checkout, payments)
 		if err != nil {

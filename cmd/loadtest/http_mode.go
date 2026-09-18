@@ -82,15 +82,45 @@ type fleet interface {
 type useCaseFleet struct {
 	service *checkoutUsecase.Service
 	buyerID string
+	// run scopes the synthetic buyers to this run, so the hold limits count
+	// only orders this storm opened.
+	run string
 }
 
-func (f *useCaseFleet) checkout(ctx context.Context, _ int, key, ticketID string, quantity int) (string, outcome, error) {
+/*
+buyerFor gives buyer n an account of its own.
+
+This used to return one id for every buyer, and it quietly invalidated the whole
+harness. Checkout caps what ONE account may hold unpaid at once
+(CHECKOUT_MAX_OPEN_ORDERS, three by default), so a storm where every attempt
+carried the same buyer id hit that cap on the third order and was refused
+forever after. A run with 5000 attempts against 3000 tickets opened EIGHT
+orders and reported a green audit: no oversell, because nothing was ever sold.
+Raising -buyers made it worse rather than better, because more goroutines were
+contending for the same three slots.
+
+The `buyer` argument was there all along and discarded with `_ int`, which is
+the tell: the flag said "concurrent buyers" and meant "concurrent goroutines".
+
+No user row is created for these. orders.buyer_id is an indexed varchar with no
+foreign key, and audienceFor treats an unknown buyer as "not informed" rather
+than as an error, which is the same path a guest checkout takes.
+*/
+func (f *useCaseFleet) buyerFor(buyer int) string {
+	if buyer <= 0 {
+		return f.buyerID
+	}
+	// Under varchar(32): 3 + 12 + 1 + at most 5.
+	return fmt.Sprintf("ld_%s_%d", f.run, buyer)
+}
+
+func (f *useCaseFleet) checkout(ctx context.Context, buyer int, key, ticketID string, quantity int) (string, outcome, error) {
 	item, err := f.service.Start(ctx, checkoutUsecase.StartInput{
 		Items: []orderdomain.DraftItem{{TicketID: ticketID, Quantity: quantity}},
 		// The harness measures the money path end to end, so it reserves and
 		// confirms in one call rather than simulating a buyer typing.
 		Confirm:        true,
-		BuyerID:        f.buyerID,
+		BuyerID:        f.buyerFor(buyer),
 		BuyerName:      "Buyer " + key,
 		BuyerEmail:     "buyer-" + key + "@vozkot.test",
 		BuyerDocument:  "12345678909",

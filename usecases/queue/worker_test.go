@@ -509,7 +509,19 @@ func TestCompletedJobRetentionIsBoundedAndPreservesAuditFailures(t *testing.T) {
 	}
 	recent := enqueue(t, jobs, &domain.Job{Type: jobType, Status: domain.StatusDone})
 	dead := enqueue(t, jobs, &domain.Job{Type: jobType, Status: domain.StatusDead})
-	if err := db.Exec("UPDATE jobs SET updated_at = ? WHERE id IN ?", now.Add(-48*time.Hour), oldIDs).Error; err != nil {
+	// Aged far enough back to be the OLDEST completed rows in the table, not
+	// merely older than the cutoff.
+	//
+	// Retention is deliberately global: it takes the oldest completed jobs
+	// first, whatever their type, and the limit is a batch size rather than a
+	// per-type quota. That is correct for a retention sweep and it makes an
+	// assertion about `deleted` a claim about the whole table. On a long-lived
+	// development database holding thousands of completed jobs from earlier
+	// runs, a two-row batch would delete two of THOSE and none of these, and
+	// the failure reads like a bug in the sweep. Being oldest is what makes
+	// this test about the sweep instead of about the database it ran against.
+	if err := db.Exec("UPDATE jobs SET updated_at = ? WHERE id IN ?",
+		now.AddDate(-50, 0, 0), oldIDs).Error; err != nil {
 		t.Fatalf("age completed jobs: %v", err)
 	}
 
@@ -524,9 +536,14 @@ func TestCompletedJobRetentionIsBoundedAndPreservesAuditFailures(t *testing.T) {
 		t.Fatalf("dead jobs after cleanup = %d, want preserved", got)
 	}
 
-	deleted, err = jobs.DeleteCompletedBefore(context.Background(), now.Add(-24*time.Hour), 10)
-	if err != nil || deleted != 1 {
-		t.Fatalf("second DeleteCompletedBefore() = (%d, %v), want (1, nil)", deleted, err)
+	// A wider batch takes this test's last aged row, and may take other
+	// people's alongside it, so the assertion is about THIS type rather than
+	// about the number the sweep reports.
+	if _, err := jobs.DeleteCompletedBefore(context.Background(), now.Add(-24*time.Hour), 10); err != nil {
+		t.Fatalf("second DeleteCompletedBefore() error = %v", err)
+	}
+	if got := count(t, jobType, domain.StatusDone); got != 1 {
+		t.Fatalf("done jobs after the wider batch = %d, want only the recent one", got)
 	}
 	var survivors int64
 	db.Raw("SELECT COUNT(*) FROM jobs WHERE id IN ?", []string{recent.ID, dead.ID}).Scan(&survivors)
