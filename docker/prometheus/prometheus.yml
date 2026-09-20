@@ -17,7 +17,7 @@ scrape_configs:
   # the container boundary is what keeps it private.
   - job_name: vozkot-api
     static_configs:
-      - targets: ["api:9213"]
+      - targets: ["127.0.0.1:9213"]  # API runs on the HOST, not in compose
 
   # Prometheus itself, so `up == 0` and scrape health mean something.
   - job_name: prometheus

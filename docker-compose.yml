@@ -1,0 +1,234 @@
+# Local development stack for vozkot-back: Redis + RabbitMQ only.
+#
+# PostgreSQL is NOT here -- it runs on the host. The API also runs on the host,
+# so both of these publish onto loopback rather than joining an app network.
+#
+# This is a DEVELOPMENT/CI stack. docs/SCALE.md's launch gate wants managed or
+# HA Redis and a three-node RabbitMQ with quorum queues; a single container of
+# each has no failover and is not that.
+#
+#   docker compose up -d
+#   docker compose ps
+#   docker compose logs -f rabbitmq
+#
+name: vozkot-back
+
+services:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Redis: rate limiters + session-liveness cache. Pure cache, no persistence.
+  # ───────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:8.10.1-alpine
+    restart: unless-stopped
+
+    # --save "" and --appendonly no: this holds rate-limit counters and cached
+    # session liveness. Every key has a TTL and none of it is a source of
+    # truth, so persisting it buys nothing and costs fsyncs on the host disk.
+    #
+    # allkeys-lru rather than the default noeviction: at the memory ceiling,
+    # noeviction starts REFUSING WRITES, which fails the rate limiter closed
+    # and takes down login. Evicting a cold counter is the better failure.
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD missing from .env}
+      --save ""
+      --appendonly no
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+
+    # Loopback ONLY. See the note at the bottom of this file -- this is the
+    # single most important line here.
+    ports:
+      - "127.0.0.1:6381:6379"
+
+    # redis-cli reads REDISCLI_AUTH on its own, which keeps the password out of
+    # the healthcheck's argv (`-a` would also print a warning on every probe).
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD missing from .env}
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    deploy:
+      resources:
+        limits:
+          memory: 384M      # headroom over maxmemory for Redis' own overhead
+          cpus: "1.0"
+
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # RabbitMQ: job transport. The app declares its own durable exchanges and
+  # queues on connect (infra/rabbitmq/broker.go), so there is no topology to
+  # provision here -- the user just needs full rights on the vhost.
+  # ───────────────────────────────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:4.3.6-management-alpine
+    restart: unless-stopped
+
+    # PINNED ON PURPOSE. RabbitMQ's Mnesia directory is named after the node's
+    # hostname, and Compose hands a container a new random hostname every time
+    # it is recreated. Without this, a `docker compose up --force-recreate`
+    # makes RabbitMQ boot as a brand-new empty node and orphan the old data
+    # directory inside the volume -- durable queues silently vanish.
+    hostname: vozkot-rabbit
+
+    # NOT guest/guest -- which fails here for TWO independent reasons, so
+    # .env.example's amqp://guest:guest@... can never work against this stack:
+    #
+    #   1. Setting RABBITMQ_DEFAULT_USER means the guest user is never created.
+    #      `rabbitmqctl list_users` shows only this one.
+    #   2. Even on a stock image, RabbitMQ confines guest to connections that
+    #      are loopback as seen FROM INSIDE the container. The API connects
+    #      through a published port, so its traffic arrives from the bridge
+    #      gateway and would be refused with ACCESS_REFUSED anyway.
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?RABBITMQ_USER missing from .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD missing from .env}
+
+    ports:
+      - "127.0.0.1:5674:5672"     # AMQP
+      - "127.0.0.1:15674:15672"   # management UI -> http://127.0.0.1:15674
+
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s   # Erlang VM boot is genuinely slow; under this flaps
+
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "2.0"
+
+    logging: *logging
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Prometheus + Grafana.
+  #
+  # BOTH USE network_mode: host, which is deliberate and is the only reason
+  # this works. The API runs on the HOST and binds its metrics listener to
+  # 127.0.0.1:9213 -- the most private setting available. A bridged container
+  # cannot reach a host loopback address, so the alternatives would be to
+  # rebind the API to 0.0.0.0:9213 (exposing metrics on every host interface,
+  # and the /metrics endpoint has no authentication of its own) or to pin a
+  # bridge gateway IP (which then makes the API unable to start whenever this
+  # compose stack is down). Host networking avoids both.
+  #
+  # Each one therefore binds itself to 127.0.0.1 explicitly, since with host
+  # networking there is no published-port mapping to do it for them.
+  #
+  # If the API ever moves INTO compose, revert to bridge networking and set
+  # METRICS_LISTEN_ADDR=0.0.0.0:9213; the comments in prometheus.yml and the
+  # Grafana datasource cover that case.
+  # ───────────────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.listen-address=127.0.0.1:9090   # NOT 0.0.0.0
+      - --web.enable-lifecycle                # POST /-/reload without restart
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      # 3001, because CORS_ALLOW_ORIGIN says the frontend already owns 3000.
+      GF_SERVER_HTTP_ADDR: "127.0.0.1"
+      GF_SERVER_HTTP_PORT: "3001"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD missing from .env}
+      # A dashboard showing revenue and refunds is not something to leave open.
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      # The dashboards provider (dashboards.yml) reads this exact path.
+      - ./docker/grafana/provisioning/dashboards/json:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3001/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    logging: *logging
+
+volumes:
+  # Redis deliberately has no volume -- nothing here is worth surviving.
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Why every published port is bound to 127.0.0.1
+#
+# Docker inserts its own rules into the nat PREROUTING chain, which is
+# evaluated BEFORE the INPUT chain that ufw filters on. A plain "6381:6379"
+# therefore listens on 0.0.0.0 and is reachable from the network even when
+# `ufw status` shows the port denied -- ufw is not consulted at all.
+#
+# Unauthenticated Redis and RabbitMQ exposed this way are among the most
+# reliably mass-scanned services on the internet. Binding the host side to
+# 127.0.0.1 is what actually keeps them private; the passwords are the second
+# layer, not the first.
+#
+# Verify after `docker compose up -d`:
+#   ss -ltnp | grep -E '6381|5674'     # must show 127.0.0.1, never 0.0.0.0
+# ─────────────────────────────────────────────────────────────────────────────

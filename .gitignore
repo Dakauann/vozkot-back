@@ -4,4 +4,4 @@ coverage.out
 *.test
 *.exe
 .cache/
-storage/
+/storage/
