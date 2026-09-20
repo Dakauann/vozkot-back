@@ -81,7 +81,7 @@ func TestRenderCarriesTheBrandAndTheFacts(t *testing.T) {
 		"TicketTitle":    "Pista",
 		"StartsAt":       "sábado, 3 de outubro de 2026, 22h00",
 		"Place":          "Arena · São Paulo",
-		"OrderURL":       "https://tickets.example/pedidos/ord_1",
+		"OrderURL":       "https://tickets.example/pt/checkout?order=ord_1",
 	})
 	if err != nil {
 		t.Fatalf("render: %v", err)
@@ -91,7 +91,7 @@ func TestRenderCarriesTheBrandAndTheFacts(t *testing.T) {
 		"Vozko Tickets", "Vozko Tecnologia LTDA", "00.000.000/0001-00",
 		"https://tickets.example/brand/logo.png", "suporte@tickets.example",
 		"A1B2C3D4", "Maria", "R$ 480,00", "Festival Aurora", "Pista",
-		"Arena · São Paulo", "https://tickets.example/pedidos/ord_1",
+		"Arena · São Paulo", "https://tickets.example/pt/checkout?order=ord_1",
 		"13/09/2026 22:04",
 	} {
 		if !strings.Contains(body, want) {

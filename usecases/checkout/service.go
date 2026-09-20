@@ -460,6 +460,11 @@ type ConfirmInput struct {
 // dedupe key sees to the last of those even if this method's own guard were
 // ever removed.
 func (s *Service) Confirm(ctx context.Context, input ConfirmInput) (*orderdomain.Order, error) {
+	// Read BEFORE the transaction opens. It is one indexed read by primary key
+	// and it needs no lock, and holding a write transaction open across it would
+	// put a user-table read inside the window where this order's row is locked.
+	input = s.withProfileDetails(ctx, input)
+
 	var result *orderdomain.Order
 	var chargeJob *queue.Job
 
@@ -555,6 +560,48 @@ func (s *Service) audienceFor(ctx context.Context, buyerID string) audience {
 		City:     profile.City,
 		UF:       profile.UF,
 	}
+}
+
+// withProfileDetails fills in what a returning buyer no longer has to retype.
+//
+// The storefront asks for the identity block ONCE, at the first checkout, and
+// saves it on the account. From then on there is nothing to ask, and the
+// document lives on the profile, sealed. It cannot make the round trip through
+// the browser to come back on this request, because the API masks it by design
+// and sending the digits back would put a CPF in every page that shows an
+// account. So the fill-in happens here, on the side that can read it.
+//
+// WHAT THE REQUEST CARRIES ALWAYS WINS. A buyer correcting a typo, or buying
+// for somebody else, is typing on purpose, and an account detail quietly
+// overwriting what somebody just entered is the version of this that produces
+// a ticket in the wrong name.
+//
+// A profile that cannot be read is not an error here: the charge refuses a
+// missing document loudly and with the right message, and failing the whole
+// confirmation because the users table blinked would lose a reservation the
+// buyer already paid attention to.
+func (s *Service) withProfileDetails(ctx context.Context, input ConfirmInput) ConfirmInput {
+	if s.buyers == nil || strings.TrimSpace(input.BuyerID) == "" {
+		return input
+	}
+	if strings.TrimSpace(input.BuyerName) != "" && strings.TrimSpace(input.BuyerDocument) != "" {
+		return input
+	}
+	account, err := s.buyers.FindByID(ctx, input.BuyerID)
+	if err != nil {
+		if !errors.Is(err, userdomain.ErrNotFound) {
+			log.Printf("checkout: could not read the profile for buyer %s; the order keeps what was sent: %v",
+				input.BuyerID, err)
+		}
+		return input
+	}
+	if strings.TrimSpace(input.BuyerName) == "" {
+		input.BuyerName = account.Profile.LegalName
+	}
+	if strings.TrimSpace(input.BuyerDocument) == "" {
+		input.BuyerDocument = account.Profile.Document
+	}
+	return input
 }
 
 // withinHoldLimits refuses a buyer already holding more unpaid inventory than

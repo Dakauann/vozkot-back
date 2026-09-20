@@ -3,9 +3,8 @@ package media
 import "context"
 
 // FileStorage is the object store behind every asset URL the product hands to a
-// browser. Cloudflare R2 implements it in production; a directory on disk
-// implements it for local development, and nothing above this line can tell the
-// difference.
+// browser. Cloudflare R2 implements it; an in-memory double implements it for
+// tests, and nothing above this line can tell the difference.
 //
 // contentType is REQUIRED to be the asset's real media type, because the stored
 // value becomes the Content-Type the CDN serves. An object stored without one

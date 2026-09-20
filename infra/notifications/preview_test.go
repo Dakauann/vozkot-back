@@ -64,7 +64,7 @@ func previewData() map[domain.Template]map[string]any {
 		"StartsAt": "domingo, 20 de setembro de 2026 às 14:20",
 		"Place":    "Casa Vozkot, Natal - RN", "TicketTitle": "Camarote direito",
 		"Quantity": "2", "UnitPrice": "R$ 396,00",
-		"OrderURL": "https://tickets.example/pedidos/VZK-4821",
+		"OrderURL": "https://tickets.example/pt/checkout?order=VZK-4821",
 	}
 	confirmed := map[string]any{"PaymentMethod": "PIX", "PaidAt": "17/09/2026 15:02"}
 	for key, value := range order {

@@ -255,7 +255,7 @@ func TestAPaidOrderReachesTheBuyer(t *testing.T) {
 		"R$ 480,00", "R$ 240,00", "PIX",
 		"sábado, 3 de outubro de 2026, 22h00",
 		"13/09/2026 22:04",
-		"https://tickets.test/pedidos/" + item.ID,
+		"https://tickets.test/pt/checkout?order=" + item.ID,
 		"Vozko Tecnologia LTDA",
 	} {
 		if !strings.Contains(email.Html, want) {

@@ -142,11 +142,26 @@ func (p *Purchases) orderData(item *orderdomain.Order, tier *ticketdomain.Ticket
 	return data
 }
 
+// orderPath is where the storefront shows one order: the checkout screen,
+// resumed from an id it reads out of the query string.
+//
+// It carries a LOCALE SEGMENT because the storefront prefixes every route with
+// one and mounts no middleware to add a missing prefix, so an address without
+// it does not resolve to a page at all. "pt" rather than the buyer's own
+// language because these templates are written in Portuguese; the day they are
+// translated, this travels with the rest of the choice.
+//
+// The previous value, /pedidos/{id}, was a route the storefront never had.
+// Every confirmation and every pending-payment email ever sent linked a buyer
+// to a 404, which is the worst possible moment for one: it is the message that
+// says their money moved.
+const orderPath = "/pt/checkout?order="
+
 func (p *Purchases) orderURL(orderID string) string {
 	if p.siteURL == "" {
 		return ""
 	}
-	return p.siteURL + "/pedidos/" + orderID
+	return p.siteURL + orderPath + orderID
 }
 
 func recipient(item *orderdomain.Order) domain.Recipient {
