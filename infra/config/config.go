@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/mail"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -354,28 +353,46 @@ type QueueConfig struct {
 // MediaConfig points the object store at Cloudflare R2, using the same variable
 // names Vozko's backend reads so one set of credentials serves both.
 //
-// When the R2 credentials are absent the application falls back to a directory
-// on disk, which is what makes a fresh clone runnable without a Cloudflare
-// account. Production refuses that fallback: see loadMedia.
+// R2 is the only object store there is: an incomplete set of credentials is a
+// configuration error, never a cue to keep the bytes somewhere else. See
+// Validate.
 type MediaConfig struct {
-	AccountID     string
-	AccessKeyID   string
-	SecretKey     string
-	Bucket        string
+	AccountID   string
+	AccessKeyID string
+	SecretKey   string
+	Bucket      string
+	// PublicBaseURL is the hostname the CDN serves objects from
+	// (CLOUDFLARE_R2_ENDPOINT, https://cdn.vozkoia.com), NOT the S3 API
+	// endpoint, which is not publicly readable. That one is derived from
+	// AccountID when the client is built.
 	PublicBaseURL string
 	// KeyPrefix namespaces every object this application writes. It is what
 	// makes sharing one bucket with another product safe: without it, two
 	// applications writing "tickets/..." would be writing over each other.
-	KeyPrefix  string
-	LocalDir   string
-	LocalRoute string
+	KeyPrefix string
 }
 
-// UsesR2 reports whether every credential R2 needs is present. A partial set is
-// treated as absent, because half-configured credentials fail at upload time,
-// which is the worst moment to discover them.
-func (m MediaConfig) UsesR2() bool {
-	return m.AccountID != "" && m.AccessKeyID != "" && m.SecretKey != "" && m.Bucket != ""
+// Validate names the first credential R2 needs and does not have.
+//
+// A partial set is treated as no set at all, because half-configured
+// credentials fail at upload time, which is the worst moment to discover them:
+// the upload has been accepted and the caller is waiting on a URL.
+func (m MediaConfig) Validate() error {
+	for _, required := range []struct {
+		key   string
+		value string
+	}{
+		{"CLOUDFLARE_ACCOUNT_ID", m.AccountID},
+		{"CLOUDFLARE_R2_KEY_ID", m.AccessKeyID},
+		{"CLOUDFLARE_R2_SECRET_KEY", m.SecretKey},
+		{"CLOUDFLARE_R2_BUCKET_NAME", m.Bucket},
+		{"CLOUDFLARE_R2_ENDPOINT", m.PublicBaseURL},
+	} {
+		if required.value == "" {
+			return fmt.Errorf("%s is required: media storage is Cloudflare R2 only", required.key)
+		}
+	}
+	return nil
 }
 
 type DatabaseConfig struct {
@@ -456,7 +473,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	port := value("PORT", "8080")
-	mediaConfig, err := loadMedia(port)
+	mediaConfig, err := loadMedia()
 	if err != nil {
 		return Config{}, err
 	}
@@ -909,35 +926,22 @@ func loadQueue() (QueueConfig, error) {
 	}, nil
 }
 
-func loadMedia(port string) (MediaConfig, error) {
+func loadMedia() (MediaConfig, error) {
 	media := MediaConfig{
-		AccountID:     os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
-		AccessKeyID:   os.Getenv("CLOUDFLARE_R2_KEY_ID"),
-		SecretKey:     os.Getenv("CLOUDFLARE_R2_SECRET_KEY"),
-		Bucket:        os.Getenv("CLOUDFLARE_R2_BUCKET_NAME"),
-		PublicBaseURL: strings.TrimRight(os.Getenv("CLOUDFLARE_R2_ENDPOINT"), "/"),
+		AccountID:     strings.TrimSpace(os.Getenv("CLOUDFLARE_ACCOUNT_ID")),
+		AccessKeyID:   strings.TrimSpace(os.Getenv("CLOUDFLARE_R2_KEY_ID")),
+		SecretKey:     strings.TrimSpace(os.Getenv("CLOUDFLARE_R2_SECRET_KEY")),
+		Bucket:        strings.TrimSpace(os.Getenv("CLOUDFLARE_R2_BUCKET_NAME")),
+		PublicBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("CLOUDFLARE_R2_ENDPOINT")), "/"),
 		KeyPrefix:     strings.Trim(strings.TrimSpace(os.Getenv("CLOUDFLARE_R2_KEY_PREFIX")), "/"),
-		LocalDir:      value("MEDIA_LOCAL_DIR", filepath.Join("storage", "media")),
-		LocalRoute:    "/media/",
 	}
+	// Production fails here, before anything opens a listener. Everywhere else
+	// the same requirement is enforced when the store is built, so a command
+	// that never touches media still runs on a machine without credentials.
 	if os.Getenv("APP_ENV") == "production" {
-		for key, present := range map[string]string{
-			"CLOUDFLARE_ACCOUNT_ID":     media.AccountID,
-			"CLOUDFLARE_R2_KEY_ID":      media.AccessKeyID,
-			"CLOUDFLARE_R2_SECRET_KEY":  media.SecretKey,
-			"CLOUDFLARE_R2_BUCKET_NAME": media.Bucket,
-			"CLOUDFLARE_R2_ENDPOINT":    media.PublicBaseURL,
-		} {
-			if present == "" {
-				return MediaConfig{}, fmt.Errorf("%s is required in production", key)
-			}
+		if err := media.Validate(); err != nil {
+			return MediaConfig{}, err
 		}
-	}
-	if media.PublicBaseURL == "" {
-		// Local development serves the same bytes from the API itself, so the
-		// URLs stored on media rows stay absolute and the frontend needs no
-		// special case for "this one is a dev file".
-		media.PublicBaseURL = strings.TrimRight(value("MEDIA_PUBLIC_BASE_URL", "http://localhost:"+port+"/media"), "/")
 	}
 	return media, nil
 }

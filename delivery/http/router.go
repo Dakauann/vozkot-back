@@ -82,10 +82,7 @@ type Dependencies struct {
 	// Metrics counts and times every request. Nil leaves the API unmeasured,
 	// which is what a deployment with no monitoring gets; it is never a reason
 	// to refuse to serve.
-	Metrics Middleware
-	// MediaFiles is the local development asset server, nil when the object
-	// store is Cloudflare R2 and the CDN serves the bytes.
-	MediaFiles    http.Handler
+	Metrics       Middleware
 	AllowedOrigin string
 	// Health reports dependencies the load balancer should know about.
 	Health func() map[string]any
@@ -235,9 +232,6 @@ func NewRouter(deps Dependencies) http.Handler {
 		deps.Webhooks.Register(router)
 	}
 
-	if deps.MediaFiles != nil {
-		router.Handle("GET /media/", http.StripPrefix("/media/", deps.MediaFiles))
-	}
 	router.Handle("/swagger/", httpSwagger.WrapHandler)
 
 	// Metrics sits INNERMOST, around the mux and nothing else.

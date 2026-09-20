@@ -129,19 +129,14 @@ func New(cfg config.Config) (*Container, error) {
 		return nil, err
 	}
 
-	// The object store is chosen once, here. Everything above infra sees the
-	// FileStorage port and cannot tell Cloudflare R2 from a local directory.
+	// The object store is built once, here. Everything above infra sees the
+	// FileStorage port and never learns which bucket answered. A missing
+	// credential fails startup rather than the first upload.
 	fileStorage, err := storage.New(startupContext, cfg.Media)
 	if err != nil {
 		return nil, err
 	}
-	var mediaFiles http.Handler
-	if local, ok := fileStorage.(*storage.Local); ok {
-		mediaFiles = local.FileHandler()
-		log.Printf("media storage: local directory %q (set the CLOUDFLARE_R2_* variables to use Cloudflare R2)", cfg.Media.LocalDir)
-	} else {
-		log.Printf("media storage: Cloudflare R2 bucket %q", cfg.Media.Bucket)
-	}
+	log.Printf("media storage: Cloudflare R2 bucket %q, key prefix %q", cfg.Media.Bucket, cfg.Media.KeyPrefix)
 
 	container := &Container{database: databaseSQL}
 
@@ -461,7 +456,6 @@ func New(cfg config.Config) (*Container, error) {
 		CheckoutAdmission: checkoutAdmission,
 		AuthLimit:         authLimit,
 		Metrics:           authMiddleware.NewMetrics(metrics),
-		MediaFiles:        mediaFiles,
 		AllowedOrigin:     cfg.CORSAllowedOrigin,
 		Health:            queueHealth(jobs, container),
 	})

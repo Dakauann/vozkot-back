@@ -40,10 +40,9 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	db := testsupport.Database(t)
 
-	files, err := storage.NewLocal(t.TempDir(), "http://localhost:8080/media")
-	if err != nil {
-		t.Fatalf("local storage: %v", err)
-	}
+	// In memory, not on disk: the assertions here are about events and their
+	// artwork rows, and a real bucket is neither reachable nor wanted in a test.
+	files := storage.NewMemory("https://cdn.vozkoia.test")
 	library := mediaUsecase.NewService(mediaRepository.NewMediaRepository(db), files, nil)
 
 	ownerID := testsupport.Unique("usr")
